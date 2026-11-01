@@ -441,6 +441,22 @@ function renderTermStructureChart(tf = '1D') {
 
   const xTitle = (tf === '1D') ? 'Today Intraday Time (US/Eastern)' : ((tf === '5D') ? '5-Day Timeline' : '1-Year Daily Date');
 
+  let rangebreaks = [];
+  if (tf === '1D') {
+    rangebreaks = [
+      { pattern: 'hour', bounds: [16.25, 9.5] }
+    ];
+  } else if (tf === '5D') {
+    rangebreaks = [
+      { bounds: ['sat', 'mon'] },
+      { pattern: 'hour', bounds: [16.25, 9.5] }
+    ];
+  } else if (tf === '1Y') {
+    rangebreaks = [
+      { bounds: ['sat', 'mon'] }
+    ];
+  }
+
   const layout = {
     paper_bgcolor: 'transparent',
     plot_bgcolor: 'transparent',
@@ -449,6 +465,7 @@ function renderTermStructureChart(tf = '1D') {
     xaxis: {
       anchor: 'y2',
       type: 'date',
+      rangebreaks: rangebreaks,
       tickformat: (tf === '1D') ? '%H:%M' : ((tf === '5D') ? '%b %d %H:%M' : '%b %Y'),
       title: { text: xTitle, font: { color: '#94A3B8', size: 10 } },
       gridcolor: '#1e293b',
@@ -559,6 +576,9 @@ function renderCorrelationChart(mode = 'dual') {
       xaxis: {
         anchor: 'y3',
         type: 'date',
+        rangebreaks: [
+          { pattern: 'hour', bounds: [16.25, 9.5] }
+        ],
         tickformat: '%H:%M',
         title: { text: 'Today Intraday Time (US/Eastern)', font: { color: '#94A3B8', size: 10 } },
         gridcolor: '#1e293b',
@@ -636,6 +656,9 @@ function renderCorrelationChart(mode = 'dual') {
       margin: { l: 50, r: 20, t: 25, b: 40 },
       xaxis: {
         type: 'date',
+        rangebreaks: [
+          { pattern: 'hour', bounds: [16.25, 9.5] }
+        ],
         tickformat: '%H:%M',
         title: { text: 'Today Intraday Time (US/Eastern)', font: { color: '#94A3B8', size: 10 } },
         gridcolor: '#1e293b',
