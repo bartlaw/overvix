@@ -442,9 +442,11 @@ def compute_live_payload() -> Dict[str, Any]:
         confluence_desc = f"Normal Contango: Vol term structure normal ({ratio:.4f}). Normal spot-vol ({residual_pts:+.2f} pts)."
 
     curr_time_str = time.strftime('%H:%M:%S')
+    curr_dt_str = time.strftime('%Y-%m-%d %H:%M')
 
     return {
         "timestamp": curr_time_str,
+        "datetime": curr_dt_str,
         "mode": mode_tag,
         "connection": {
             "connected": state.is_connected,
@@ -621,11 +623,24 @@ async def get_bootstrap():
     # Format Spot-Vol history
     x_hist = [round(float(v), 2) for v in state.df_spotvol['spx_pct'].tolist()] if not state.df_spotvol.empty else []
     y_hist = [round(float(v), 2) for v in state.df_spotvol['vix_pt'].tolist()] if not state.df_spotvol.empty else []
-    dates_sv = [str(d) for d in state.df_spotvol.index] if not state.df_spotvol.empty else []
+    dates_sv = [str(d)[:10] for d in state.df_spotvol.index] if not state.df_spotvol.empty else []
+
+    # Helper to convert DatetimeIndex cleanly to US/Eastern ISO strings for Plotly
+    def to_eastern_dt_list(idx):
+        if idx is None or len(idx) == 0:
+            return []
+        try:
+            if hasattr(idx, 'tz') and idx.tz is not None:
+                idx_et = idx.tz_convert('US/Eastern')
+            else:
+                idx_et = idx
+            return [t.strftime('%Y-%m-%d %H:%M') for t in idx_et]
+        except Exception:
+            return [str(t)[:16] for t in idx]
 
     # Format Intraday SPX vs VIX Correlation
     if not state.df_spx_vix_1d.empty:
-        corr_times = [str(t)[-8:-3] if len(str(t)) >= 8 else str(t) for t in state.df_spx_vix_1d.index]
+        corr_times = to_eastern_dt_list(state.df_spx_vix_1d.index)
         corr_spx_pct = [round(float(v), 2) for v in state.df_spx_vix_1d['spx_pct'].tolist()]
         corr_vix_pt = [round(float(v), 2) for v in state.df_spx_vix_1d['vix_pt'].tolist()]
         corr_series = [round(float(v), 3) for v in state.df_spx_vix_1d['rolling_corr'].tolist()]
@@ -634,7 +649,7 @@ async def get_bootstrap():
 
     # Format Intraday 1D Term Structure
     if not state.df_ts_1d.empty:
-        t1d = [str(t)[-8:-3] if len(str(t)) >= 8 else str(t) for t in state.df_ts_1d.index]
+        t1d = to_eastern_dt_list(state.df_ts_1d.index)
         v1d_vix = [round(float(v), 2) for v in state.df_ts_1d['vix'].tolist()]
         v1d_vix3m = [round(float(v), 2) for v in state.df_ts_1d['vix3m'].tolist()]
         v1d_ratio = [round(float(v), 4) for v in state.df_ts_1d['ratio'].tolist()]
@@ -643,7 +658,7 @@ async def get_bootstrap():
 
     # Format 5D Term Structure
     if not state.df_ts_5d.empty:
-        t5d = [str(t)[5:16] for t in state.df_ts_5d.index]
+        t5d = to_eastern_dt_list(state.df_ts_5d.index)
         v5d_vix = [round(float(v), 2) for v in state.df_ts_5d['vix'].tolist()]
         v5d_vix3m = [round(float(v), 2) for v in state.df_ts_5d['vix3m'].tolist()]
         v5d_ratio = [round(float(v), 4) for v in state.df_ts_5d['ratio'].tolist()]

@@ -446,13 +446,10 @@ function renderTermStructureChart(tf = '1D') {
     plot_bgcolor: 'transparent',
     autosize: true,
     margin: { l: 50, r: 20, t: 25, b: 40 },
-    grid: {
-      rows: 2,
-      columns: 1,
-      pattern: 'independent',
-      roworder: 'top to bottom'
-    },
     xaxis: {
+      anchor: 'y2',
+      type: 'date',
+      tickformat: (tf === '1D') ? '%H:%M' : ((tf === '5D') ? '%b %d %H:%M' : '%b %Y'),
       title: { text: xTitle, font: { color: '#94A3B8', size: 10 } },
       gridcolor: '#1e293b',
       tickfont: { color: '#94A3B8', size: 10 },
@@ -460,13 +457,13 @@ function renderTermStructureChart(tf = '1D') {
       nticks: 10
     },
     yaxis: {
-      domain: [0.50, 1.0],
+      domain: [0.48, 1.0],
       title: { text: 'Index Level', font: { color: '#94A3B8', size: 10 } },
       gridcolor: '#1e293b',
       tickfont: { color: '#94A3B8', size: 10 }
     },
     yaxis2: {
-      domain: [0.0, 0.42],
+      domain: [0.0, 0.40],
       title: { text: 'Ratio', font: { color: '#94A3B8', size: 10 } },
       gridcolor: '#1e293b',
       tickfont: { color: '#94A3B8', size: 10 }
@@ -524,12 +521,12 @@ function renderCorrelationChart(mode = 'dual') {
     const traceCorr = {
       x: times,
       y: rollingCorr,
-      name: 'Rolling 30m Correlation (&rho;)',
+      name: 'Rolling 30m Correlation (ρ)',
       mode: 'lines',
       line: { color: '#00E5FF', width: 2 },
       xaxis: 'x',
       yaxis: 'y3',
-      hovertemplate: '<b>Rolling &rho;</b>: %{y:.3f}<extra></extra>'
+      hovertemplate: '<b>Rolling ρ</b>: %{y:.3f}<extra></extra>'
     };
 
     const traceZero = {
@@ -559,13 +556,10 @@ function renderCorrelationChart(mode = 'dual') {
       plot_bgcolor: 'transparent',
       autosize: true,
       margin: { l: 50, r: 50, t: 25, b: 40 },
-      grid: {
-        rows: 2,
-        columns: 1,
-        pattern: 'independent',
-        roworder: 'top to bottom'
-      },
       xaxis: {
+        anchor: 'y3',
+        type: 'date',
+        tickformat: '%H:%M',
         title: { text: 'Today Intraday Time (US/Eastern)', font: { color: '#94A3B8', size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
@@ -573,13 +567,13 @@ function renderCorrelationChart(mode = 'dual') {
         nticks: 10
       },
       yaxis: {
-        domain: [0.52, 1.0],
+        domain: [0.48, 1.0],
         title: { text: 'SPX % Move', font: { color: '#10B981', size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#10B981', size: 10 }
       },
       yaxis2: {
-        domain: [0.52, 1.0],
+        domain: [0.48, 1.0],
         title: { text: 'VIX Point Move', font: { color: '#F59E0B', size: 10 } },
         overlaying: 'y',
         side: 'right',
@@ -587,8 +581,8 @@ function renderCorrelationChart(mode = 'dual') {
         tickfont: { color: '#F59E0B', size: 10 }
       },
       yaxis3: {
-        domain: [0.0, 0.42],
-        title: { text: 'Rolling 30m &rho;', font: { color: '#00E5FF', size: 10 } },
+        domain: [0.0, 0.40],
+        title: { text: 'Rolling 30m \u03c1', font: { color: '#00E5FF', size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
         range: [-1.05, 1.05]
@@ -611,10 +605,10 @@ function renderCorrelationChart(mode = 'dual') {
     const traceCorr = {
       x: times,
       y: rollingCorr,
-      name: 'Rolling 30m Correlation (&rho;)',
+      name: 'Rolling 30m Correlation (ρ)',
       mode: 'lines',
       line: { color: '#00E5FF', width: 2.2 },
-      hovertemplate: '<b>Rolling &rho;</b>: %{y:.3f}<extra></extra>'
+      hovertemplate: '<b>Rolling ρ</b>: %{y:.3f}<extra></extra>'
     };
 
     const traceZero = {
@@ -641,13 +635,16 @@ function renderCorrelationChart(mode = 'dual') {
       autosize: true,
       margin: { l: 50, r: 20, t: 25, b: 40 },
       xaxis: {
+        type: 'date',
+        tickformat: '%H:%M',
         title: { text: 'Today Intraday Time (US/Eastern)', font: { color: '#94A3B8', size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
-        showgrid: true
+        showgrid: true,
+        nticks: 10
       },
       yaxis: {
-        title: { text: 'Rolling 30-Minute Pearson &rho;', font: { color: '#00E5FF', size: 10 } },
+        title: { text: 'Rolling 30-Minute Pearson ρ', font: { color: '#00E5FF', size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
         range: [-1.05, 1.05]
@@ -838,60 +835,78 @@ function updateUI(data) {
   // 5. Update Intraday Term Structure Curve Real-Time (when 1D is active)
   if (currentTimeframe === '1D') {
     const d1 = cachedTs['1D'];
-    const liveTime = ts.intraday ? ts.intraday.latest_time : now.toTimeString().slice(0, 5);
-
-    if (d1.times.length > 0) {
+    if (d1 && d1.times && d1.times.length > 0) {
       const lastT = d1.times[d1.times.length - 1];
-      if (lastT === liveTime) {
-        d1.vix[d1.vix.length - 1] = mkt.vix.current;
-        d1.vix3m[d1.vix3m.length - 1] = mkt.vix3m.current;
-        d1.ratio[d1.ratio.length - 1] = ts.ratio;
+      const liveDt = data.datetime || (new Date().toISOString().slice(0, 10) + ' ' + now.toTimeString().slice(0, 5));
+      const liveDate = liveDt.slice(0, 10);
+      const lastDate = lastT.slice(0, 10);
+
+      // Only update/append if today's market session is active (same calendar date)
+      if (liveDate === lastDate) {
+        if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
+          d1.vix[d1.vix.length - 1] = mkt.vix.current;
+          d1.vix3m[d1.vix3m.length - 1] = mkt.vix3m.current;
+          d1.ratio[d1.ratio.length - 1] = ts.ratio;
+        } else {
+          d1.times.push(liveDt);
+          d1.vix.push(mkt.vix.current);
+          d1.vix3m.push(mkt.vix3m.current);
+          d1.ratio.push(ts.ratio);
+        }
+
+        Plotly.restyle('term-structure-chart', {
+          x: [d1.times, d1.times, d1.times],
+          y: [d1.vix, d1.vix3m, d1.ratio]
+        }, [0, 1, 2]);
+
+        Plotly.restyle('term-structure-chart', {
+          x: [[liveDt]],
+          y: [[ts.ratio]],
+          'marker.color': [ts.is_inverted ? '#EF4444' : '#00E5FF']
+        }, [5]);
       } else {
-        d1.times.push(liveTime);
-        d1.vix.push(mkt.vix.current);
-        d1.vix3m.push(mkt.vix3m.current);
-        d1.ratio.push(ts.ratio);
+        // Weekend or market closed: live marker stays pinned to the latest completed bar
+        Plotly.restyle('term-structure-chart', {
+          x: [[lastT]],
+          y: [[ts.ratio]],
+          'marker.color': [ts.is_inverted ? '#EF4444' : '#00E5FF']
+        }, [5]);
       }
-
-      Plotly.restyle('term-structure-chart', {
-        x: [d1.times, d1.times, d1.times],
-        y: [d1.vix, d1.vix3m, d1.ratio]
-      }, [0, 1, 2]);
-
-      Plotly.restyle('term-structure-chart', {
-        x: [[liveTime]],
-        y: [[ts.ratio]],
-        'marker.color': [ts.is_inverted ? '#EF4444' : '#00E5FF']
-      }, [5]);
     }
   }
 
   // 6. Update Intraday Correlation Chart Real-Time
   const cr = cachedCorr;
-  const liveTime = now.toTimeString().slice(0, 5);
-  if (cr.times.length > 0) {
+  if (cr && cr.times && cr.times.length > 0) {
     const lastT = cr.times[cr.times.length - 1];
-    if (lastT === liveTime) {
-      cr.spx_pct[cr.spx_pct.length - 1] = mkt.spx.pct_change;
-      cr.vix_pt[cr.vix_pt.length - 1] = mkt.vix.pt_change;
-      if (corr) cr.rolling_corr[cr.rolling_corr.length - 1] = corr.rolling_corr;
-    } else {
-      cr.times.push(liveTime);
-      cr.spx_pct.push(mkt.spx.pct_change);
-      cr.vix_pt.push(mkt.vix.pt_change);
-      if (corr) cr.rolling_corr.push(corr.rolling_corr);
-    }
+    const liveDt = data.datetime || (new Date().toISOString().slice(0, 10) + ' ' + now.toTimeString().slice(0, 5));
+    const liveDate = liveDt.slice(0, 10);
+    const lastDate = lastT.slice(0, 10);
 
-    if (currentCorrMode === 'dual') {
-      Plotly.restyle('correlation-chart', {
-        x: [cr.times, cr.times, cr.times],
-        y: [cr.spx_pct, cr.vix_pt, cr.rolling_corr]
-      }, [0, 1, 2]);
-    } else {
-      Plotly.restyle('correlation-chart', {
-        x: [cr.times],
-        y: [cr.rolling_corr]
-      }, [0]);
+    // Only update/append if today's market session is active (same calendar date)
+    if (liveDate === lastDate) {
+      if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
+        cr.spx_pct[cr.spx_pct.length - 1] = mkt.spx.pct_change;
+        cr.vix_pt[cr.vix_pt.length - 1] = mkt.vix.pt_change;
+        if (corr) cr.rolling_corr[cr.rolling_corr.length - 1] = corr.rolling_corr;
+      } else {
+        cr.times.push(liveDt);
+        cr.spx_pct.push(mkt.spx.pct_change);
+        cr.vix_pt.push(mkt.vix.pt_change);
+        if (corr) cr.rolling_corr.push(corr.rolling_corr);
+      }
+
+      if (currentCorrMode === 'dual') {
+        Plotly.restyle('correlation-chart', {
+          x: [cr.times, cr.times, cr.times],
+          y: [cr.spx_pct, cr.vix_pt, cr.rolling_corr]
+        }, [0, 1, 2]);
+      } else {
+        Plotly.restyle('correlation-chart', {
+          x: [cr.times],
+          y: [cr.rolling_corr]
+        }, [0]);
+      }
     }
   }
 }
