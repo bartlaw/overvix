@@ -4,7 +4,7 @@ Overvix & Volatility Term Structure (VIX/VIX3M) Real-Time Web Dashboard
 A high-performance FastAPI web application powered by Interactive Brokers (IBKR):
   - Spot-Vol Regression & Overvix (+2.0 pt) Signal Monitor
   - Intraday & Macro Volatility Term Structure (VIX / VIX3M) & Inversion Monitor
-  - Intraday 1-minute live tick accumulation + 5D weekly + 1Y macro views
+  - Intraday SPX vs. VIX Dynamic Correlation & Decoupling Monitor
   - Real-time streaming WebSocket push to browser
   - Interactive Plotly.js charts & audio alerts
 
@@ -95,9 +95,10 @@ class DashboardState:
 
         # Historical datasets
         self.df_spotvol = pd.DataFrame()
-        self.df_ts_1d = pd.DataFrame()     # Intraday 1-min bars for today
-        self.df_ts_5d = pd.DataFrame()     # Recent 5-day 15-min bars
-        self.df_ts_1y = pd.DataFrame()     # Macro 1-year daily bars
+        self.df_ts_1d = pd.DataFrame()       # Intraday 1-min bars for VIX/VIX3M
+        self.df_ts_5d = pd.DataFrame()       # Recent 5-day 15-min bars for VIX/VIX3M
+        self.df_ts_1y = pd.DataFrame()       # Macro 1-year daily bars for VIX/VIX3M
+        self.df_spx_vix_1d = pd.DataFrame()  # Intraday 1-min bars for SPX & VIX
 
         # Model metrics
         self.r_squared: float = 0.0
@@ -120,6 +121,7 @@ class DashboardState:
         self.intraday_high_ratio: float = 0.0
         self.intraday_low_ratio: float = 0.0
         self.intraday_open_ratio: float = 0.0
+        self.current_rolling_corr: float = -0.75
 
         # Active WebSockets
         self.active_websockets: List[WebSocket] = []
@@ -181,7 +183,6 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
         state.is_connected = False
         return False
 
-    # Enable delayed streaming fallback (Type 3)
     state.ib.reqMarketDataType(3)
 
     # 1. Qualify Contracts
@@ -202,7 +203,7 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
     print(f" VIX: conId={state.vix_contract.conId}, symbol={state.vix_contract.symbol}")
     print(f" VIX3M: conId={state.vix3m_contract.conId}, symbol={state.vix3m_contract.symbol}")
 
-    # 2. Fetch Historical Bars (Spot-Vol, Intraday 1D, Weekly 5D, Macro 1Y)
+    # 2. Fetch Historical Bars (Spot-Vol, Intraday 1D, Weekly 5D, Macro 1Y, Intraday Correlation)
     await refresh_historical_data()
 
     # 3. Subscribe to Real-Time Streaming Tickers
@@ -211,7 +212,6 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
     state.vix_ticker = state.ib.reqMktData(state.vix_contract, '', False, False)
     state.vix3m_ticker = state.ib.reqMktData(state.vix3m_contract, '', False, False)
 
-    # Wait briefly for initial ticks
     for _ in range(10):
         await asyncio.sleep(0.2)
         p1, _ = get_current_price(state.spx_ticker, state.latest_spx_close)
@@ -231,6 +231,7 @@ async def refresh_historical_data():
       - Term Structure 1D: 1-minute intraday bars for today's session
       - Term Structure 5D: 15-minute bars for recent 5 days
       - Term Structure 1Y: 252-day daily bars for macro history
+      - SPX-VIX 1D: 1-minute intraday bars for rolling correlation
     """
     print("[IBKR] Fetching historical baseline & intraday datasets from IBKR...")
     try:
@@ -272,7 +273,11 @@ async def refresh_historical_data():
 
         print(f" Spot-Vol Baseline ({len(state.df_spotvol)} bars): R²={state.r_squared:.4f}, Slope={state.slope:.4f}")
 
-        # B. Intraday 1D Term Structure (1-min bars)
+        # B. Intraday 1D Bars (SPX, VIX, VIX3M 1-min)
+        b1_spx = await state.ib.reqHistoricalDataAsync(
+            state.spx_contract, endDateTime='', durationStr='1 D',
+            barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
+        )
         b1_vix = await state.ib.reqHistoricalDataAsync(
             state.vix_contract, endDateTime='', durationStr='1 D',
             barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
@@ -281,6 +286,8 @@ async def refresh_historical_data():
             state.vix3m_contract, endDateTime='', durationStr='1 D',
             barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
         )
+
+        # Term Structure 1D
         df_v1 = util.df(b1_vix).set_index('date')['close'].rename('vix')
         df_v3 = util.df(b1_vix3m).set_index('date')['close'].rename('vix3m')
         df_1d = pd.concat([df_v1, df_v3], axis=1).dropna()
@@ -291,7 +298,22 @@ async def refresh_historical_data():
             state.intraday_open_ratio = float(state.df_ts_1d['ratio'].iloc[0])
             state.intraday_high_ratio = float(state.df_ts_1d['ratio'].max())
             state.intraday_low_ratio = float(state.df_ts_1d['ratio'].min())
-        print(f" Intraday 1D Term Structure: {len(state.df_ts_1d)} 1-min bars loaded (High: {state.intraday_high_ratio:.4f}, Low: {state.intraday_low_ratio:.4f})")
+        print(f" Intraday 1D Term Structure: {len(state.df_ts_1d)} bars (High: {state.intraday_high_ratio:.4f}, Low: {state.intraday_low_ratio:.4f})")
+
+        # SPX & VIX Intraday Correlation 1D
+        df_s1 = util.df(b1_spx).set_index('date')['close'].rename('spx')
+        df_sv_1d = pd.concat([df_s1, df_v1], axis=1).dropna()
+        if not df_sv_1d.empty:
+            ref_spx = state.prior_spx_close if state.prior_spx_close > 0 else float(df_sv_1d['spx'].iloc[0])
+            ref_vix = state.prior_vix_close if state.prior_vix_close > 0 else float(df_sv_1d['vix'].iloc[0])
+            df_sv_1d['spx_pct'] = (df_sv_1d['spx'] - ref_spx) / ref_spx * 100.0
+            df_sv_1d['vix_pt'] = df_sv_1d['vix'] - ref_vix
+            df_sv_1d['spx_ret'] = df_sv_1d['spx'].pct_change()
+            df_sv_1d['vix_diff'] = df_sv_1d['vix'].diff()
+            df_sv_1d['rolling_corr'] = df_sv_1d['spx_ret'].rolling(30, min_periods=10).corr(df_sv_1d['vix_diff']).fillna(-0.70)
+            state.df_spx_vix_1d = df_sv_1d.copy()
+            state.current_rolling_corr = float(df_sv_1d['rolling_corr'].iloc[-1])
+            print(f" Intraday SPX-VIX Correlation: {len(state.df_spx_vix_1d)} bars (Current ρ={state.current_rolling_corr:.3f})")
 
         # C. Recent 5D Term Structure (15-min bars)
         b5_vix = await state.ib.reqHistoricalDataAsync(
@@ -307,7 +329,6 @@ async def refresh_historical_data():
         df_5d = pd.concat([df_v1_5, df_v3_5], axis=1).dropna()
         df_5d['ratio'] = df_5d['vix'] / df_5d['vix3m']
         state.df_ts_5d = df_5d.copy()
-        print(f" Recent 5D Term Structure: {len(state.df_ts_5d)} 15-min bars loaded")
 
         # D. Macro 1Y Term Structure (Daily bars)
         vix_bars_1y = await state.ib.reqHistoricalDataAsync(
@@ -336,11 +357,11 @@ async def refresh_historical_data():
 def compute_live_payload() -> Dict[str, Any]:
     """
     Compute full real-time snapshot of market prices, Overvix residuals,
-    intraday term structure ratio stats, and master confluence signal.
+    intraday term structure ratio stats, rolling correlation, and master confluence signal.
     """
     spx_curr, spx_src = get_current_price(state.spx_ticker, state.latest_spx_close)
     vix_curr, vix_src = get_current_price(state.vix_ticker, state.latest_vix_close)
-    vix3m_curr, vix3m_src = get_current_price(state.vix3m_ticker, state.latest_vix3m_close)
+    vix3m_curr, vix3m_src = get_current_price(state.vix3m_ticker, state.latest_vix_close)
 
     is_live = ("LIVE" in spx_src or "LIVE" in vix_src or "LIVE" in vix3m_src)
 
@@ -382,6 +403,21 @@ def compute_live_payload() -> Dict[str, Any]:
 
     ratio_change_pts = ratio - state.prior_ratio_close if state.prior_ratio_close > 0 else 0.0
     ratio_change_pct = (ratio_change_pts / state.prior_ratio_close * 100.0) if state.prior_ratio_close > 0 else 0.0
+
+    # Intraday SPX-VIX Correlation Evaluation
+    corr_val = state.current_rolling_corr
+    if corr_val < -0.40:
+        corr_status = "NORMAL INVERSE"
+        corr_desc = "Healthy inverse spot-vol correlation (SPX & VIX moving opposite)."
+        corr_badge = "HEALTHY"
+    elif corr_val < 0.0:
+        corr_status = "WEAKENING"
+        corr_desc = "Spot-vol correlation weakening towards zero."
+        corr_badge = "CAUTION"
+    else:
+        corr_status = "POSITIVE DECOUPLING"
+        corr_desc = "Spot-vol decoupling: SPX and VIX moving in tandem!"
+        corr_badge = "DECOUPLED"
 
     # Master Confluence Signals
     is_dual_alert = bool(is_overvixed and is_inverted)
@@ -457,8 +493,14 @@ def compute_live_payload() -> Dict[str, Any]:
                 "open": round(state.intraday_open_ratio, 4),
                 "change_pts": round(ratio_change_pts, 4),
                 "change_pct": round(ratio_change_pct, 2),
-                "latest_time": curr_time_str[:5]  # HH:MM
+                "latest_time": curr_time_str[:5]
             }
+        },
+        "correlation": {
+            "rolling_corr": round(corr_val, 3),
+            "status": corr_status,
+            "badge": corr_badge,
+            "desc": corr_desc
         },
         "confluence": {
             "tag": confluence_tag,
@@ -570,7 +612,7 @@ async def get_bootstrap():
     """
     Deliver full historical & intraday datasets for instant client charting:
       - 60-day Spot-Vol points
-      - 1D intraday 1-minute bars
+      - 1D intraday 1-minute bars (Term Structure & SPX-VIX Correlation)
       - 5D weekly 15-minute bars
       - 1Y macro daily bars
     """
@@ -581,7 +623,16 @@ async def get_bootstrap():
     y_hist = [round(float(v), 2) for v in state.df_spotvol['vix_pt'].tolist()] if not state.df_spotvol.empty else []
     dates_sv = [str(d) for d in state.df_spotvol.index] if not state.df_spotvol.empty else []
 
-    # Format Intraday 1D (times as HH:MM)
+    # Format Intraday SPX vs VIX Correlation
+    if not state.df_spx_vix_1d.empty:
+        corr_times = [str(t)[-8:-3] if len(str(t)) >= 8 else str(t) for t in state.df_spx_vix_1d.index]
+        corr_spx_pct = [round(float(v), 2) for v in state.df_spx_vix_1d['spx_pct'].tolist()]
+        corr_vix_pt = [round(float(v), 2) for v in state.df_spx_vix_1d['vix_pt'].tolist()]
+        corr_series = [round(float(v), 3) for v in state.df_spx_vix_1d['rolling_corr'].tolist()]
+    else:
+        corr_times, corr_spx_pct, corr_vix_pt, corr_series = [], [], [], []
+
+    # Format Intraday 1D Term Structure
     if not state.df_ts_1d.empty:
         t1d = [str(t)[-8:-3] if len(str(t)) >= 8 else str(t) for t in state.df_ts_1d.index]
         v1d_vix = [round(float(v), 2) for v in state.df_ts_1d['vix'].tolist()]
@@ -590,7 +641,7 @@ async def get_bootstrap():
     else:
         t1d, v1d_vix, v1d_vix3m, v1d_ratio = [], [], [], []
 
-    # Format 5D (times as MM-DD HH:MM)
+    # Format 5D Term Structure
     if not state.df_ts_5d.empty:
         t5d = [str(t)[5:16] for t in state.df_ts_5d.index]
         v5d_vix = [round(float(v), 2) for v in state.df_ts_5d['vix'].tolist()]
@@ -599,7 +650,7 @@ async def get_bootstrap():
     else:
         t5d, v5d_vix, v5d_vix3m, v5d_ratio = [], [], [], []
 
-    # Format 1Y (dates as YYYY-MM-DD)
+    # Format 1Y Term Structure
     if not state.df_ts_1y.empty:
         t1y = [str(d)[:10] for d in state.df_ts_1y.index]
         v1y_vix = [round(float(v), 2) for v in state.df_ts_1y['vix'].tolist()]
@@ -614,7 +665,12 @@ async def get_bootstrap():
             **live["overvix"],
             "x_history": x_hist,
             "y_history": y_hist,
-            "dates": dates_sv
+            "dates": dates_sv,
+            "intraday_trail": {
+                "x": corr_spx_pct,
+                "y": corr_vix_pt,
+                "times": corr_times
+            }
         },
         "term_structure": {
             **live["term_structure"],
@@ -636,6 +692,13 @@ async def get_bootstrap():
                 "vix3m": v1y_vix3m,
                 "ratio": v1y_ratio
             }
+        },
+        "intraday_correlation": {
+            "times": corr_times,
+            "spx_pct": corr_spx_pct,
+            "vix_pt": corr_vix_pt,
+            "rolling_corr": corr_series,
+            "current_corr": round(state.current_rolling_corr, 3)
         }
     }
 

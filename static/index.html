@@ -196,17 +196,20 @@
       
       <!-- LEFT PANEL: SPOT-VOL OVERVIX PLOT -->
       <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col shadow-md">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-800/80 mb-2">
+        <div class="flex flex-wrap items-center justify-between pb-3 border-b border-slate-800/80 mb-2 gap-2">
           <div>
-            <h2 class="text-sm font-bold text-white uppercase tracking-tight flex items-center space-x-2">
-              <span>Spot-Vol Regression &amp; Overvix Zone</span>
-            </h2>
-            <p class="text-xs text-slate-400">SPX % Change vs VIX Point Change with +2.0 pt Threshold</p>
+            <div class="flex items-center space-x-2">
+              <h2 class="text-sm font-bold text-white uppercase tracking-tight">Spot-Vol Regression &amp; Overvix Zone</h2>
+              <span id="trail-live-pill" class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800/60">+ Intraday Trail</span>
+            </div>
+            <p class="text-xs text-slate-400">SPX % vs VIX Point Move with +2.0 pt Threshold &amp; Today's Intraday Path</p>
           </div>
-          <div class="flex items-center space-x-2">
-            <span id="chart-overvix-tag" class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-              Dev: --.-- pts
-            </span>
+
+          <!-- Trail View Mode Selector -->
+          <div class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium">
+            <button id="btn-trail-both" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition">Both</button>
+            <button id="btn-trail-today" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">Today Only</button>
+            <button id="btn-trail-60d" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">60D Only</button>
           </div>
         </div>
 
@@ -251,6 +254,36 @@
         <div id="term-structure-chart" class="chart-container flex-1"></div>
       </div>
 
+    </div>
+
+    <!-- ROW 2: INTRADAY SPX vs. VIX DYNAMIC CORRELATION & DECOUPLING MONITOR -->
+    <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col shadow-md">
+      <div class="flex flex-wrap items-center justify-between pb-3 border-b border-slate-800/80 mb-2 gap-2">
+        <div>
+          <div class="flex items-center space-x-2">
+            <h2 class="text-sm font-bold text-white uppercase tracking-tight">Intraday SPX &amp; VIX Dynamic Correlation &amp; Divergence Monitor</h2>
+            <span id="corr-status-pill" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">Normal Inverse (&rho; &lt; -0.40)</span>
+          </div>
+          <p class="text-xs text-slate-400">Minute-by-Minute Normalized Overlay (Upper) &amp; Rolling 30-Minute Pearson Correlation &rho;(&Delta;SPX, &Delta;VIX) (Lower)</p>
+        </div>
+
+        <div class="flex items-center space-x-3">
+          <!-- Real-Time Rolling Correlation Badge -->
+          <div class="flex items-center space-x-2 bg-slate-950/90 px-3 py-1.5 rounded-lg border border-slate-800 text-xs font-mono">
+            <span class="text-slate-400 text-[11px]">Current 30m &rho;:</span>
+            <strong id="corr-live-val" class="text-cyan-400 font-bold">-.---</strong>
+          </div>
+
+          <!-- Correlation View Mode Switcher -->
+          <div class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium">
+            <button id="btn-corr-dual" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition">Dual Overlay + &rho;</button>
+            <button id="btn-corr-only" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">Correlation Only</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Intraday Correlation Plotly Chart -->
+      <div id="correlation-chart" class="chart-container" style="min-height: 380px;"></div>
     </div>
 
   </main>
