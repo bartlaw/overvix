@@ -1,0 +1,84 @@
+/* Overvix & VIX/VIX3M Dashboard Custom Styles */
+
+:root {
+  --bg-primary: #080c14;
+  --bg-card: #0f172a;
+  --border-color: #1e293b;
+  --cyan-accent: #00e5ff;
+  --amber-accent: #f59e0b;
+  --red-accent: #ef4444;
+  --green-accent: #10b981;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: #f1f5f9;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0f19;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Pulsing beacon glow for active signals */
+@keyframes beacon-red {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+@keyframes beacon-green {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.beacon-alert {
+  animation: beacon-red 1.6s infinite cubic-bezier(0.66, 0, 0, 1);
+}
+
+.beacon-connected {
+  animation: beacon-green 2s infinite;
+}
+
+/* Flash effect for new tick arrivals */
+.tick-flash {
+  transition: background-color 0.4s ease;
+}
+.tick-flash-up {
+  background-color: rgba(16, 185, 129, 0.25) !important;
+}
+.tick-flash-down {
+  background-color: rgba(239, 68, 68, 0.25) !important;
+}
+
+/* Plotly container sizing */
+.chart-container {
+  min-height: 460px;
+  width: 100%;
+}

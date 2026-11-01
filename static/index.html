@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Overvix & Volatility Term Structure — IBKR Live Terminal</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Plotly.js CDN -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="/static/styles.css">
+  
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            darkbg: '#080c14',
+            cardbg: '#0f172a',
+            cardborder: '#1e293b',
+            accentcyan: '#00e5ff',
+            accentamber: '#f59e0b',
+            accentred: '#ef4444',
+            accentgreen: '#10b981'
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-[#080c14] text-slate-100 min-h-screen flex flex-col antialiased selection:bg-cyan-500 selection:text-black">
+
+  <!-- TOP HEADER -->
+  <header class="border-b border-slate-800 bg-[#0c1220]/90 backdrop-blur sticky top-0 z-40 px-4 py-3">
+    <div class="max-w-[1720px] mx-auto flex flex-wrap items-center justify-between gap-3">
+      
+      <!-- Brand & Title -->
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-cyan-500 to-amber-500 flex items-center justify-center shadow-lg shadow-cyan-500/20 font-black text-black text-base">
+          OV
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h1 class="text-base font-bold tracking-tight text-white uppercase">Overvix & Term Structure</h1>
+            <span class="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-semibold">IBKR Live</span>
+          </div>
+          <p class="text-xs text-slate-400">Spot-Vol Regression & VIX / VIX3M Term Structure Monitor</p>
+        </div>
+      </div>
+
+      <!-- Action Controls & Status -->
+      <div class="flex items-center space-x-3">
+        
+        <!-- IBKR Status Pill -->
+        <div id="connection-pill" class="flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-medium bg-emerald-950/70 text-emerald-400 border border-emerald-800/60">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 beacon-connected"></span>
+          <span id="connection-text">Connecting to IBKR...</span>
+        </div>
+
+        <!-- Audio Alert Toggle -->
+        <button id="btn-sound" class="flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+          <span id="sound-icon">🔊</span>
+          <span id="sound-text">Sound ON</span>
+        </button>
+
+        <!-- Settings Button -->
+        <button id="btn-settings" class="flex items-center space-x-1 px-3 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+          <span>⚙️</span>
+          <span>Config</span>
+        </button>
+
+      </div>
+    </div>
+  </header>
+
+  <!-- MASTER CONFLUENCE BANNER -->
+  <div class="px-4 py-2 bg-[#090e1a] border-b border-slate-800/80">
+    <div class="max-w-[1720px] mx-auto">
+      <div id="confluence-banner" class="flex items-center justify-between px-4 py-2.5 rounded-lg bg-slate-900 border border-slate-800 transition duration-300">
+        <div class="flex items-center space-x-3">
+          <span id="confluence-badge" class="px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-slate-800 text-slate-300">
+            INITIALIZING
+          </span>
+          <span id="confluence-desc" class="text-xs text-slate-300 font-medium">
+            Waiting for real-time market stream from Interactive Brokers...
+          </span>
+        </div>
+        <div class="text-[11px] text-slate-400 font-mono" id="last-update-time">
+          Updated: --:--:--
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN DASHBOARD CONTENT -->
+  <main class="flex-1 max-w-[1720px] w-full mx-auto p-4 space-y-4">
+    
+    <!-- KPI METRIC CARDS -->
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      
+      <!-- SPX Card -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">SPX 500</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">Index</span>
+        </div>
+        <div class="mt-2">
+          <div id="kpi-spx-price" class="text-xl font-bold font-mono tracking-tight text-white">---.--</div>
+          <div id="kpi-spx-pct" class="text-xs font-mono font-medium text-slate-400 mt-0.5">--.--%</div>
+        </div>
+      </div>
+
+      <!-- VIX Card -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-semibold tracking-wider text-cyan-400 uppercase">VIX (30-Day)</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-800/50">Spot</span>
+        </div>
+        <div class="mt-2">
+          <div id="kpi-vix-price" class="text-xl font-bold font-mono tracking-tight text-cyan-300">--.--</div>
+          <div id="kpi-vix-pt" class="text-xs font-mono font-medium text-slate-400 mt-0.5">--.-- pts</div>
+        </div>
+      </div>
+
+      <!-- VIX3M Card -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-semibold tracking-wider text-amber-400 uppercase">VIX3M (90-Day)</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50">3M</span>
+        </div>
+        <div class="mt-2">
+          <div id="kpi-vix3m-price" class="text-xl font-bold font-mono tracking-tight text-amber-300">--.--</div>
+          <div id="kpi-vix3m-pt" class="text-xs font-mono font-medium text-slate-400 mt-0.5">--.-- pts</div>
+        </div>
+      </div>
+
+      <!-- VIX / VIX3M Ratio Card -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">VIX / VIX3M</span>
+          <span id="kpi-ratio-badge" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-semibold">---</span>
+        </div>
+        <div class="mt-2">
+          <div id="kpi-ratio-val" class="text-xl font-bold font-mono tracking-tight text-white">-.----</div>
+          <div class="text-[10px] text-slate-400 mt-0.5">Inversion @ &ge; 1.00</div>
+        </div>
+      </div>
+
+      <!-- Expected VIX Move Card -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">Expected &Delta;VIX</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">OLS</span>
+        </div>
+        <div class="mt-2">
+          <div id="kpi-expected-vix" class="text-xl font-bold font-mono tracking-tight text-slate-200">--.--</div>
+          <div class="text-[10px] text-slate-400 mt-0.5">Spot-Vol Model</div>
+        </div>
+      </div>
+
+      <!-- Overvix Residual Card -->
+      <div id="card-overvix-residual" class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">Overvix Residual</span>
+          <span id="kpi-overvix-status" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase">NORMAL</span>
+        </div>
+        <div class="mt-2">
+          <div id="kpi-residual-pts" class="text-xl font-bold font-mono tracking-tight text-cyan-400">--.-- pts</div>
+          <div class="text-[10px] text-slate-400 mt-0.5">Alert Target: &ge; +<span id="disp-thresh-pts">2.0</span> pts</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- MODEL PARAMETERS SUMMARY STRIP -->
+    <div class="bg-slate-900/60 border border-slate-800/80 rounded-lg px-4 py-2 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-y-1">
+      <div class="flex items-center space-x-4">
+        <span>Window: <strong id="param-window" class="text-slate-200 font-mono">60</strong> sessions</span>
+        <span>R²: <strong id="param-r2" class="text-slate-200 font-mono">--</strong></span>
+        <span>Slope: <strong id="param-slope" class="text-slate-200 font-mono">--</strong></span>
+        <span>Vol Slope (1/&beta;): <strong id="param-volslope" class="text-slate-200 font-mono">--</strong></span>
+        <span>Intercept: <strong id="param-intercept" class="text-slate-200 font-mono">--</strong></span>
+      </div>
+      <div class="flex items-center space-x-2 text-[11px] text-slate-400">
+        <span>Source: <strong>Interactive Brokers CBOE Real-Time Feed</strong></span>
+      </div>
+    </div>
+
+    <!-- DUAL VISUALIZATION GRID -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      
+      <!-- LEFT PANEL: SPOT-VOL OVERVIX PLOT -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col shadow-md">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800/80 mb-2">
+          <div>
+            <h2 class="text-sm font-bold text-white uppercase tracking-tight flex items-center space-x-2">
+              <span>Spot-Vol Regression &amp; Overvix Zone</span>
+            </h2>
+            <p class="text-xs text-slate-400">SPX % Change vs VIX Point Change with +2.0 pt Threshold</p>
+          </div>
+          <div class="flex items-center space-x-2">
+            <span id="chart-overvix-tag" class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+              Dev: --.-- pts
+            </span>
+          </div>
+        </div>
+
+        <!-- Overvix Plotly Chart -->
+        <div id="overvix-chart" class="chart-container flex-1"></div>
+      </div>
+
+      <!-- RIGHT PANEL: VIX vs VIX3M TERM STRUCTURE -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col shadow-md">
+        <div class="flex flex-wrap items-center justify-between pb-3 border-b border-slate-800/80 mb-2 gap-2">
+          <div>
+            <div class="flex items-center space-x-2">
+              <h2 class="text-sm font-bold text-white uppercase tracking-tight">Volatility Term Structure (VIX / VIX3M)</h2>
+              <span id="ts-live-pill" class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60">Intraday 1m</span>
+            </div>
+            <p class="text-xs text-slate-400">30-Day vs. 90-Day Volatility Ratio &amp; Inversion Monitor</p>
+          </div>
+          
+          <!-- Timeframe Selector Pills -->
+          <div class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium">
+            <button id="btn-tf-1d" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition">1D (Intraday)</button>
+            <button id="btn-tf-5d" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">5D (Week)</button>
+            <button id="btn-tf-1y" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">1Y (Macro)</button>
+          </div>
+        </div>
+
+        <!-- Intraday Session Stats Strip -->
+        <div class="flex flex-wrap items-center justify-between bg-slate-950/50 rounded-lg px-3 py-1.5 mb-2 text-xs border border-slate-800/60 text-slate-300">
+          <div class="flex items-center space-x-3">
+            <span>Session Range: <strong id="ts-day-low" class="text-emerald-400 font-mono">-.----</strong> &ndash; <strong id="ts-day-high" class="text-red-400 font-mono">-.----</strong></span>
+            <span class="text-slate-600">|</span>
+            <span>Day Net &Delta;: <strong id="ts-day-delta" class="font-mono text-slate-200">-.----</strong> (<strong id="ts-day-deltapct" class="font-mono text-slate-200">--.--%</strong>)</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <span id="chart-ratio-tag" class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700">
+              Ratio: -.----
+            </span>
+          </div>
+        </div>
+
+        <!-- Term Structure Plotly Chart -->
+        <div id="term-structure-chart" class="chart-container flex-1"></div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- CONFIGURATION MODAL -->
+  <div id="modal-settings" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-bold text-white">Dashboard Configuration</h3>
+        <button id="modal-close" class="text-slate-400 hover:text-white">&times;</button>
+      </div>
+
+      <div class="space-y-3 text-sm">
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">Overvix Trigger Threshold (Points above expected)</label>
+          <input type="number" id="input-threshold" step="0.1" min="0.5" max="5.0" value="2.0" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-cyan-500">
+          <p class="text-[11px] text-slate-400 mt-1">Default is +2.0 points (standard Volland Point-Based signal).</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">Rolling Baseline Window (Trading Days)</label>
+          <input type="number" id="input-window" step="5" min="20" max="120" value="60" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-cyan-500">
+          <p class="text-[11px] text-slate-400 mt-1">Standard baseline is 60 trading days (~3 months).</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">Refresh Rate (Seconds)</label>
+          <input type="number" id="input-interval" step="0.5" min="0.5" max="10.0" value="1.0" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-cyan-500">
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
+        <button id="btn-cancel-settings" class="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700">Cancel</button>
+        <button id="btn-save-settings" class="px-4 py-2 rounded-lg text-xs font-semibold bg-cyan-500 text-black hover:bg-cyan-400">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD SCRIPT -->
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>
