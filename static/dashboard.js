@@ -20,7 +20,13 @@ let cachedTs = {
   '1Y': { times: [], vix: [], vix3m: [], ratio: [] }
 };
 let cachedTrail = { x: [], y: [], times: [] };
-let cachedCorr = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], current_corr: -0.75 };
+let cachedCorr = {
+  '1D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  '5D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  '1Y': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  metrics: { '1D': -0.75, '5D': -0.75, '1Y': -0.75 }
+};
+let currentCorrTf = '1D';
 
 // Initialize Sound Synthesizer via Web Audio API
 function initAudio() {
@@ -131,6 +137,46 @@ btnSaveSettings.addEventListener('click', async () => {
   }
 });
 
+// Regime Guide & Playbook Modal
+const btnGuide = document.getElementById('btn-guide');
+const btnCorrGuide = document.getElementById('btn-corr-guide');
+const modalGuide = document.getElementById('modal-guide');
+const guideModalClose = document.getElementById('guide-modal-close');
+const btnCloseGuide = document.getElementById('btn-close-guide');
+
+function openGuideModal() {
+  if (modalGuide) modalGuide.classList.remove('hidden');
+}
+
+function closeGuideModal() {
+  if (modalGuide) modalGuide.classList.add('hidden');
+}
+
+if (btnGuide) btnGuide.addEventListener('click', openGuideModal);
+if (btnCorrGuide) btnCorrGuide.addEventListener('click', openGuideModal);
+if (guideModalClose) guideModalClose.addEventListener('click', closeGuideModal);
+if (btnCloseGuide) btnCloseGuide.addEventListener('click', closeGuideModal);
+
+// Close modals when clicking backdrop
+if (modalGuide) {
+  modalGuide.addEventListener('click', (e) => {
+    if (e.target === modalGuide) closeGuideModal();
+  });
+}
+if (modalSettings) {
+  modalSettings.addEventListener('click', (e) => {
+    if (e.target === modalSettings) modalSettings.classList.add('hidden');
+  });
+}
+
+// Global Escape Key listener
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeGuideModal();
+    if (modalSettings) modalSettings.classList.add('hidden');
+  }
+});
+
 // Timeframe Selector Buttons
 const btnTf1D = document.getElementById('btn-tf-1d');
 const btnTf5D = document.getElementById('btn-tf-5d');
@@ -202,13 +248,23 @@ function switchTrailMode(mode) {
   }
 }
 
-// Correlation Mode Selector
+// Correlation Mode & Timeframe Selector
 const btnCorrDual = document.getElementById('btn-corr-dual');
 const btnCorrOnly = document.getElementById('btn-corr-only');
+const btnCorrTf1D = document.getElementById('btn-corr-tf-1d');
+const btnCorrTf5D = document.getElementById('btn-corr-tf-5d');
+const btnCorrTf1Y = document.getElementById('btn-corr-tf-1y');
+const corrTfPill = document.getElementById('corr-tf-pill');
+const corrSubtitle = document.getElementById('corr-subtitle');
+const corrLiveLabel = document.getElementById('corr-live-label');
 
 function setupCorrButtons() {
   btnCorrDual.addEventListener('click', () => switchCorrMode('dual'));
   btnCorrOnly.addEventListener('click', () => switchCorrMode('corr_only'));
+
+  if (btnCorrTf1D) btnCorrTf1D.addEventListener('click', () => switchCorrTf('1D'));
+  if (btnCorrTf5D) btnCorrTf5D.addEventListener('click', () => switchCorrTf('5D'));
+  if (btnCorrTf1Y) btnCorrTf1Y.addEventListener('click', () => switchCorrTf('1Y'));
 }
 
 function switchCorrMode(mode) {
@@ -220,7 +276,60 @@ function switchCorrMode(mode) {
     btnCorrOnly.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
     btnCorrDual.className = "px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition";
   }
-  renderCorrelationChart(mode);
+  renderCorrelationChart(mode, currentCorrTf);
+}
+
+function switchCorrTf(tf) {
+  currentCorrTf = tf;
+  const allBtns = [btnCorrTf1D, btnCorrTf5D, btnCorrTf1Y];
+  allBtns.forEach(btn => {
+    if (btn) btn.className = "px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition";
+  });
+
+  if (tf === '1D') {
+    if (btnCorrTf1D) btnCorrTf1D.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
+    if (corrTfPill) {
+      corrTfPill.textContent = "Intraday 1M";
+      corrTfPill.className = "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60";
+    }
+    if (corrSubtitle) corrSubtitle.textContent = "Minute-by-Minute Normalized Overlay (Upper) & Rolling 30-Minute Pearson Correlation ρ(ΔSPX, ΔVIX) (Lower)";
+    if (corrLiveLabel) corrLiveLabel.textContent = "Current 30m ρ:";
+  } else if (tf === '5D') {
+    if (btnCorrTf5D) btnCorrTf5D.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
+    if (corrTfPill) {
+      corrTfPill.textContent = "Recent 15M";
+      corrTfPill.className = "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60";
+    }
+    if (corrSubtitle) corrSubtitle.textContent = "5-Day 15-Minute Normalized Overlay (Upper) & Rolling 1-Day Pearson Correlation ρ(ΔSPX, ΔVIX) (Lower)";
+    if (corrLiveLabel) corrLiveLabel.textContent = "Current 1D ρ:";
+  } else if (tf === '1Y') {
+    if (btnCorrTf1Y) btnCorrTf1Y.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
+    if (corrTfPill) {
+      corrTfPill.textContent = "Daily Macro";
+      corrTfPill.className = "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700";
+    }
+    if (corrSubtitle) corrSubtitle.textContent = "1-Year Daily Normalized Overlay (Upper) & Rolling 20-Day Pearson Correlation ρ(ΔSPX, ΔVIX) (Lower)";
+    if (corrLiveLabel) corrLiveLabel.textContent = "Current 20D ρ:";
+  }
+
+  updateCorrMetricDisplay();
+  renderCorrelationChart(currentCorrMode, tf);
+}
+
+function updateCorrMetricDisplay() {
+  const c = cachedCorr;
+  const metrics = c.metrics || {};
+  let val = metrics[currentCorrTf];
+  if (val === undefined || val === null) {
+    const ds = c[currentCorrTf];
+    if (ds && ds.rolling_corr && ds.rolling_corr.length > 0) {
+      val = ds.rolling_corr[ds.rolling_corr.length - 1];
+    }
+  }
+  if (val !== undefined && val !== null) {
+    const el = document.getElementById('corr-live-val');
+    if (el) el.textContent = fmtNum(val, 3);
+  }
 }
 
 // ==============================================================================
@@ -365,6 +474,8 @@ function renderTermStructureChart(tf = '1D') {
   const dStart = times.length > 0 ? times[0] : '';
   const dEnd = times.length > 0 ? times[times.length - 1] : '';
 
+  const timeHoverFmt = (tf === '1Y') ? '%b %d, %Y' : '%b %d, %H:%M';
+
   const traceVIX = {
     x: times,
     y: vix,
@@ -373,7 +484,7 @@ function renderTermStructureChart(tf = '1D') {
     line: { color: '#00E5FF', width: 1.5 },
     xaxis: 'x',
     yaxis: 'y1',
-    hovertemplate: '<b>VIX</b>: %{y:.2f}<extra></extra>'
+    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>VIX (30d): %{y:.2f}<extra></extra>`
   };
 
   const traceVIX3M = {
@@ -384,7 +495,7 @@ function renderTermStructureChart(tf = '1D') {
     line: { color: '#FFA726', width: 1.5 },
     xaxis: 'x',
     yaxis: 'y1',
-    hovertemplate: '<b>VIX3M</b>: %{y:.2f}<extra></extra>'
+    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>VIX3M (90d): %{y:.2f}<extra></extra>`
   };
 
   const traceRatio = {
@@ -395,7 +506,7 @@ function renderTermStructureChart(tf = '1D') {
     line: { color: '#E6D385', width: 2 },
     xaxis: 'x',
     yaxis: 'y2',
-    hovertemplate: '<b>Ratio</b>: %{y:.4f}<extra></extra>'
+    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>Ratio: %{y:.4f}<extra></extra>`
   };
 
   const traceFlattening = {
@@ -500,8 +611,8 @@ function renderTermStructureChart(tf = '1D') {
   });
 }
 
-function renderCorrelationChart(mode = 'dual') {
-  const c = cachedCorr;
+function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
+  const c = cachedCorr[tf] || cachedCorr['1D'] || cachedCorr;
   const times = c.times || [];
   const spxPct = c.spx_pct || [];
   const vixPt = c.vix_pt || [];
@@ -509,6 +620,48 @@ function renderCorrelationChart(mode = 'dual') {
 
   const dStart = times.length > 0 ? times[0] : '';
   const dEnd = times.length > 0 ? times[times.length - 1] : '';
+
+  // Dynamic Pearson upper bound: 0.05 by default (framing 0.0 Decoupling line at top), expanding only if ρ > 0
+  const validCorrs = rollingCorr.filter(v => typeof v === 'number' && !isNaN(v));
+  const maxCorrVal = validCorrs.length > 0 ? Math.max(...validCorrs) : -0.7;
+  const upperY = maxCorrVal > 0 ? Math.min(1.05, Math.ceil((maxCorrVal + 0.05) * 10) / 10) : 0.05;
+
+  let xTitle = 'Today Intraday Time (US/Eastern)';
+  let tickformat = '%H:%M';
+  let rangebreaks = [];
+  let corrTraceName = 'Rolling 30m Correlation (ρ)';
+  let corrHoverLabel = 'Rolling 30m ρ';
+
+  if (tf === '1D') {
+    xTitle = 'Today Intraday Time (US/Eastern)';
+    tickformat = '%H:%M';
+    rangebreaks = [
+      { pattern: 'hour', bounds: [16.25, 9.5] }
+    ];
+    corrTraceName = 'Rolling 30m Correlation (ρ)';
+    corrHoverLabel = 'Rolling 30m ρ';
+  } else if (tf === '5D') {
+    xTitle = '5-Day Timeline (US/Eastern)';
+    tickformat = '%b %d %H:%M';
+    rangebreaks = [
+      { bounds: ['sat', 'mon'] },
+      { pattern: 'hour', bounds: [16.25, 9.5] }
+    ];
+    corrTraceName = 'Rolling 1D Correlation (ρ)';
+    corrHoverLabel = 'Rolling 1D ρ';
+  } else if (tf === '1Y') {
+    xTitle = '1-Year Daily Date';
+    tickformat = '%b %Y';
+    rangebreaks = [
+      { bounds: ['sat', 'mon'] }
+    ];
+    corrTraceName = 'Rolling 20D Correlation (ρ)';
+    corrHoverLabel = 'Rolling 20D ρ';
+  }
+
+  const timeHoverFmt = (tf === '1Y') ? '%b %d, %Y' : '%b %d, %H:%M';
+  let spxHoverLabel = (tf === '1D') ? 'SPX Day Move' : ((tf === '5D') ? 'SPX 5D Move' : 'SPX 1Y Move');
+  let vixHoverLabel = (tf === '1D') ? 'VIX Day Move' : ((tf === '5D') ? 'VIX 5D Move' : 'VIX 1Y Move');
 
   if (mode === 'dual') {
     // Subplot 1: SPX % Move (left axis) vs VIX pt move (right axis)
@@ -520,7 +673,7 @@ function renderCorrelationChart(mode = 'dual') {
       line: { color: '#10B981', width: 1.8 },
       xaxis: 'x',
       yaxis: 'y1',
-      hovertemplate: '<b>SPX Move</b>: %{y:+.2f}%<extra></extra>'
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${spxHoverLabel}: %{y:+.2f}%<extra></extra>`
     };
 
     const traceVIX = {
@@ -531,19 +684,19 @@ function renderCorrelationChart(mode = 'dual') {
       line: { color: '#F59E0B', width: 1.8 },
       xaxis: 'x',
       yaxis: 'y2',
-      hovertemplate: '<b>VIX Move</b>: %{y:+.2f} pts<extra></extra>'
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${vixHoverLabel}: %{y:+.2f} pts<extra></extra>`
     };
 
-    // Subplot 2: Rolling 30-min Pearson Correlation
+    // Subplot 2: Rolling Pearson Correlation
     const traceCorr = {
       x: times,
       y: rollingCorr,
-      name: 'Rolling 30m Correlation (ρ)',
+      name: corrTraceName,
       mode: 'lines',
       line: { color: '#00E5FF', width: 2 },
       xaxis: 'x',
       yaxis: 'y3',
-      hovertemplate: '<b>Rolling ρ</b>: %{y:.3f}<extra></extra>'
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${corrHoverLabel}: %{y:.3f}<extra></extra>`
     };
 
     const traceZero = {
@@ -576,11 +729,9 @@ function renderCorrelationChart(mode = 'dual') {
       xaxis: {
         anchor: 'y3',
         type: 'date',
-        rangebreaks: [
-          { pattern: 'hour', bounds: [16.25, 9.5] }
-        ],
-        tickformat: '%H:%M',
-        title: { text: 'Today Intraday Time (US/Eastern)', font: { color: '#94A3B8', size: 10 } },
+        rangebreaks: rangebreaks,
+        tickformat: tickformat,
+        title: { text: xTitle, font: { color: '#94A3B8', size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
         showgrid: true,
@@ -602,10 +753,10 @@ function renderCorrelationChart(mode = 'dual') {
       },
       yaxis3: {
         domain: [0.0, 0.40],
-        title: { text: 'Rolling 30m \u03c1', font: { color: '#00E5FF', size: 10 } },
+        title: { text: 'Rolling ρ', font: { color: '#00E5FF', size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
-        range: [-1.05, 1.05]
+        range: [-1.05, upperY]
       },
       legend: {
         orientation: 'h',
@@ -625,10 +776,10 @@ function renderCorrelationChart(mode = 'dual') {
     const traceCorr = {
       x: times,
       y: rollingCorr,
-      name: 'Rolling 30m Correlation (ρ)',
+      name: corrTraceName,
       mode: 'lines',
       line: { color: '#00E5FF', width: 2.2 },
-      hovertemplate: '<b>Rolling ρ</b>: %{y:.3f}<extra></extra>'
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${corrHoverLabel}: %{y:.3f}<extra></extra>`
     };
 
     const traceZero = {
@@ -656,21 +807,19 @@ function renderCorrelationChart(mode = 'dual') {
       margin: { l: 50, r: 20, t: 25, b: 40 },
       xaxis: {
         type: 'date',
-        rangebreaks: [
-          { pattern: 'hour', bounds: [16.25, 9.5] }
-        ],
-        tickformat: '%H:%M',
-        title: { text: 'Today Intraday Time (US/Eastern)', font: { color: '#94A3B8', size: 10 } },
+        rangebreaks: rangebreaks,
+        tickformat: tickformat,
+        title: { text: xTitle, font: { color: '#94A3B8', size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
         showgrid: true,
         nticks: 10
       },
       yaxis: {
-        title: { text: 'Rolling 30-Minute Pearson ρ', font: { color: '#00E5FF', size: 10 } },
+        title: { text: 'Rolling Pearson ρ', font: { color: '#00E5FF', size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
-        range: [-1.05, 1.05]
+        range: [-1.05, upperY]
       },
       legend: {
         orientation: 'h',
@@ -827,17 +976,26 @@ function updateUI(data) {
 
   // Correlation Strip
   if (corr) {
-    document.getElementById('corr-live-val').textContent = fmtNum(corr.rolling_corr, 3);
+    if (cachedCorr.metrics) {
+      cachedCorr.metrics['1D'] = corr.rolling_corr;
+      if (corr.corr_5d !== undefined) cachedCorr.metrics['5D'] = corr.corr_5d;
+      if (corr.corr_1y !== undefined) cachedCorr.metrics['1Y'] = corr.corr_1y;
+    }
+    updateCorrMetricDisplay();
+
+    const corrVal = (currentCorrTf === '1D') ? corr.rolling_corr : ((currentCorrTf === '5D') ? (corr.corr_5d || corr.rolling_corr) : (corr.corr_1y || corr.rolling_corr));
     const corrPill = document.getElementById('corr-status-pill');
-    if (corr.rolling_corr < -0.40) {
-      corrPill.textContent = `Normal Inverse (\u03c1 = ${fmtNum(corr.rolling_corr, 3)})`;
-      corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800";
-    } else if (corr.rolling_corr < 0.0) {
-      corrPill.textContent = `Weakening (\u03c1 = ${fmtNum(corr.rolling_corr, 3)})`;
-      corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800";
-    } else {
-      corrPill.textContent = `Positive Decoupling (\u03c1 = ${fmtNum(corr.rolling_corr, 3)})`;
-      corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 animate-pulse";
+    if (corrPill) {
+      if (corrVal < -0.40) {
+        corrPill.textContent = `Normal Inverse (ρ = ${fmtNum(corrVal, 3)})`;
+        corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800";
+      } else if (corrVal < 0.0) {
+        corrPill.textContent = `Weakening (ρ = ${fmtNum(corrVal, 3)})`;
+        corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800";
+      } else {
+        corrPill.textContent = `Positive Decoupling (ρ = ${fmtNum(corrVal, 3)})`;
+        corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 animate-pulse";
+      }
     }
   }
 
@@ -898,37 +1056,39 @@ function updateUI(data) {
     }
   }
 
-  // 6. Update Intraday Correlation Chart Real-Time
-  const cr = cachedCorr;
-  if (cr && cr.times && cr.times.length > 0) {
-    const lastT = cr.times[cr.times.length - 1];
-    const liveDt = data.datetime || (new Date().toISOString().slice(0, 10) + ' ' + now.toTimeString().slice(0, 5));
-    const liveDate = liveDt.slice(0, 10);
-    const lastDate = lastT.slice(0, 10);
+  // 6. Update Intraday Correlation Chart Real-Time (when 1D is active)
+  if (currentCorrTf === '1D') {
+    const cr = cachedCorr['1D'];
+    if (cr && cr.times && cr.times.length > 0) {
+      const lastT = cr.times[cr.times.length - 1];
+      const liveDt = data.datetime || (new Date().toISOString().slice(0, 10) + ' ' + now.toTimeString().slice(0, 5));
+      const liveDate = liveDt.slice(0, 10);
+      const lastDate = lastT.slice(0, 10);
 
-    // Only update/append if today's market session is active (same calendar date)
-    if (liveDate === lastDate) {
-      if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
-        cr.spx_pct[cr.spx_pct.length - 1] = mkt.spx.pct_change;
-        cr.vix_pt[cr.vix_pt.length - 1] = mkt.vix.pt_change;
-        if (corr) cr.rolling_corr[cr.rolling_corr.length - 1] = corr.rolling_corr;
-      } else {
-        cr.times.push(liveDt);
-        cr.spx_pct.push(mkt.spx.pct_change);
-        cr.vix_pt.push(mkt.vix.pt_change);
-        if (corr) cr.rolling_corr.push(corr.rolling_corr);
-      }
+      // Only update/append if today's market session is active (same calendar date)
+      if (liveDate === lastDate) {
+        if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
+          cr.spx_pct[cr.spx_pct.length - 1] = mkt.spx.pct_change;
+          cr.vix_pt[cr.vix_pt.length - 1] = mkt.vix.pt_change;
+          if (corr) cr.rolling_corr[cr.rolling_corr.length - 1] = corr.rolling_corr;
+        } else {
+          cr.times.push(liveDt);
+          cr.spx_pct.push(mkt.spx.pct_change);
+          cr.vix_pt.push(mkt.vix.pt_change);
+          if (corr) cr.rolling_corr.push(corr.rolling_corr);
+        }
 
-      if (currentCorrMode === 'dual') {
-        Plotly.restyle('correlation-chart', {
-          x: [cr.times, cr.times, cr.times],
-          y: [cr.spx_pct, cr.vix_pt, cr.rolling_corr]
-        }, [0, 1, 2]);
-      } else {
-        Plotly.restyle('correlation-chart', {
-          x: [cr.times],
-          y: [cr.rolling_corr]
-        }, [0]);
+        if (currentCorrMode === 'dual') {
+          Plotly.restyle('correlation-chart', {
+            x: [cr.times, cr.times, cr.times],
+            y: [cr.spx_pct, cr.vix_pt, cr.rolling_corr]
+          }, [0, 1, 2]);
+        } else {
+          Plotly.restyle('correlation-chart', {
+            x: [cr.times],
+            y: [cr.rolling_corr]
+          }, [0]);
+        }
       }
     }
   }
@@ -967,12 +1127,22 @@ async function bootstrapData() {
     }
 
     if (data.intraday_correlation) {
-      cachedCorr = data.intraday_correlation;
+      if (data.intraday_correlation['1D']) {
+        cachedCorr['1D'] = data.intraday_correlation['1D'];
+        cachedCorr['5D'] = data.intraday_correlation['5D'] || { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
+        cachedCorr['1Y'] = data.intraday_correlation['1Y'] || { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
+        cachedCorr.metrics = data.intraday_correlation.metrics || {};
+      } else {
+        cachedCorr['1D'] = data.intraday_correlation;
+        cachedCorr['5D'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
+        cachedCorr['1Y'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
+      }
     }
 
     renderOvervixChart(data);
     renderTermStructureChart(currentTimeframe);
-    renderCorrelationChart(currentCorrMode);
+    renderCorrelationChart(currentCorrMode, currentCorrTf);
+    updateCorrMetricDisplay();
     updateUI(data);
 
     connectWebSocket();

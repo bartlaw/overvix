@@ -68,6 +68,12 @@
           <span id="sound-text">Sound ON</span>
         </button>
 
+        <!-- Regime Guide Button -->
+        <button id="btn-guide" class="flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-800/80 transition shadow-sm">
+          <span>📖</span>
+          <span>Regime Guide</span>
+        </button>
+
         <!-- Settings Button -->
         <button id="btn-settings" class="flex items-center space-x-1 px-3 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
           <span>⚙️</span>
@@ -256,22 +262,34 @@
 
     </div>
 
-    <!-- ROW 2: INTRADAY SPX vs. VIX DYNAMIC CORRELATION & DECOUPLING MONITOR -->
+    <!-- ROW 2: SPX vs. VIX DYNAMIC CORRELATION & DECOUPLING MONITOR -->
     <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col shadow-md">
       <div class="flex flex-wrap items-center justify-between pb-3 border-b border-slate-800/80 mb-2 gap-2">
         <div>
           <div class="flex items-center space-x-2">
-            <h2 class="text-sm font-bold text-white uppercase tracking-tight">Intraday SPX &amp; VIX Dynamic Correlation &amp; Divergence Monitor</h2>
+            <h2 class="text-sm font-bold text-white uppercase tracking-tight">SPX &amp; VIX Dynamic Correlation &amp; Divergence Monitor</h2>
+            <span id="corr-tf-pill" class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60">Intraday 1M</span>
             <span id="corr-status-pill" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">Normal Inverse (&rho; &lt; -0.40)</span>
+            <button id="btn-corr-guide" title="View 4-Regime Spot-Vol Playbook" class="text-slate-400 hover:text-cyan-400 text-xs px-2 py-0.5 rounded border border-slate-800 hover:border-cyan-800 bg-slate-950/60 transition flex items-center space-x-1">
+              <span>📖</span>
+              <span class="text-[10px] font-semibold uppercase tracking-wider">Playbook</span>
+            </button>
           </div>
-          <p class="text-xs text-slate-400">Minute-by-Minute Normalized Overlay (Upper) &amp; Rolling 30-Minute Pearson Correlation &rho;(&Delta;SPX, &Delta;VIX) (Lower)</p>
+          <p id="corr-subtitle" class="text-xs text-slate-400">Minute-by-Minute Normalized Overlay (Upper) &amp; Rolling 30-Minute Pearson Correlation &rho;(&Delta;SPX, &Delta;VIX) (Lower)</p>
         </div>
 
         <div class="flex items-center space-x-3">
           <!-- Real-Time Rolling Correlation Badge -->
           <div class="flex items-center space-x-2 bg-slate-950/90 px-3 py-1.5 rounded-lg border border-slate-800 text-xs font-mono">
-            <span class="text-slate-400 text-[11px]">Current 30m &rho;:</span>
+            <span id="corr-live-label" class="text-slate-400 text-[11px]">Current 30m &rho;:</span>
             <strong id="corr-live-val" class="text-cyan-400 font-bold">-.---</strong>
+          </div>
+
+          <!-- Correlation Timeframe Switcher (1D / 5D / 1Y) -->
+          <div class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium">
+            <button id="btn-corr-tf-1d" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition">1D (Intraday)</button>
+            <button id="btn-corr-tf-5d" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">5D (Week)</button>
+            <button id="btn-corr-tf-1y" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">1Y (Macro)</button>
           </div>
 
           <!-- Correlation View Mode Switcher -->
@@ -319,6 +337,138 @@
         <button id="btn-cancel-settings" class="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700">Cancel</button>
         <button id="btn-save-settings" class="px-4 py-2 rounded-lg text-xs font-semibold bg-cyan-500 text-black hover:bg-cyan-400">Save Changes</button>
       </div>
+    </div>
+  </div>
+
+  <!-- REGIME GUIDE & SPOT-VOL PLAYBOOK MODAL -->
+  <div id="modal-guide" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+      
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-base">
+            📖
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white tracking-tight">Spot-Vol &amp; Pearson Correlation Playbook</h3>
+            <p class="text-xs text-slate-400">The 4 Market Regimes: Combining Overvix Residuals with Dynamic Pearson Correlation</p>
+          </div>
+        </div>
+        <button id="guide-modal-close" class="text-slate-400 hover:text-white text-2xl p-1 leading-none transition">&times;</button>
+      </div>
+
+      <!-- Core Formula / Principle Box -->
+      <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between text-xs">
+        <div>
+          <span class="text-cyan-400 font-bold uppercase tracking-wider text-[10px]">Two Independent Dimensions:</span>
+          <p class="text-slate-300 mt-1 leading-relaxed">
+            <strong>Pearson Correlation (&rho;)</strong> measures <em>Directional Synchronicity</em> (Are SPX &amp; VIX moving opposite or decoupling?).<br>
+            <strong>The Overvix Signal</strong> measures <em>Magnitude Excess</em> (Did VIX overreact by &ge; +2.0 pts relative to the size of the SPX move?).
+          </p>
+        </div>
+        <div class="bg-slate-900 px-3.5 py-2.5 rounded-lg border border-slate-800 font-mono text-slate-300 text-[11px] whitespace-nowrap shadow-sm">
+          <span class="text-slate-400">Slope:</span> &beta; = &rho; &times; (&sigma;<sub>VIX</sub> / &sigma;<sub>SPX</sub>)<br>
+          <span class="text-slate-400">Model Fit:</span> R&sup2; = &rho;&sup2;
+        </div>
+      </div>
+
+      <!-- 4-Regime Table -->
+      <div class="overflow-x-auto rounded-xl border border-slate-800">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950 text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
+            <tr>
+              <th class="py-3 px-3.5">Regime</th>
+              <th class="py-3 px-3.5">Pearson Correlation (&rho;)</th>
+              <th class="py-3 px-3.5">Overvix Signal</th>
+              <th class="py-3 px-3.5">Market Reality &amp; Trading Interpretation</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800/60 font-medium">
+            <!-- 1. Classic Capitulation -->
+            <tr class="hover:bg-slate-800/30 transition">
+              <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-red-400">
+                1. Classic Capitulation<br>
+                <span class="text-[11px] text-slate-400 font-normal">(Orderly Panic)</span>
+              </td>
+              <td class="py-3.5 px-3.5">
+                <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold uppercase whitespace-nowrap">Strongly Inverse</span>
+                <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &approx; -0.75 to -0.90</p>
+              </td>
+              <td class="py-3.5 px-3.5 whitespace-nowrap">
+                <span class="px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-700 text-[10px] font-bold uppercase">🚨 OVERVIXED</span>
+                <p class="text-[11px] font-mono text-red-400 mt-1">&ge; +2.0 pts</p>
+              </td>
+              <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
+                <strong class="text-white">Panic Overreaction:</strong> SPX is dumping, and dealers are getting squeezed into buying puts with extreme magnitude. High-probability <span class="text-emerald-400 font-semibold">mean-reversion long setup</span> once selling volume slows.
+              </td>
+            </tr>
+
+            <!-- 2. Bullish Decoupling -->
+            <tr class="hover:bg-slate-800/30 transition">
+              <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-amber-400">
+                2. Bullish Decoupling<br>
+                <span class="text-[11px] text-slate-400 font-normal">(Hedging / Squeeze)</span>
+              </td>
+              <td class="py-3.5 px-3.5">
+                <span class="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-bold uppercase whitespace-nowrap">Decoupled / Positive</span>
+                <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &gt; -0.20 or &rho; &gt; 0</p>
+              </td>
+              <td class="py-3.5 px-3.5 whitespace-nowrap">
+                <span class="px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-700 text-[10px] font-bold uppercase">🚨 OVERVIXED</span>
+                <p class="text-[11px] font-mono text-red-400 mt-1">&ge; +2.0 pts</p>
+              </td>
+              <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
+                <strong class="text-white">Structural Anomaly:</strong> SPX is flat or rising, but VIX is spiking anyway. Institutional traders are aggressively paying up for upside calls or buying tail-risk crash puts ahead of a major binary event (e.g., FOMC, CPI).
+              </td>
+            </tr>
+
+            <!-- 3. Healthy Orderly Market -->
+            <tr class="hover:bg-slate-800/30 transition">
+              <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-emerald-400">
+                3. Healthy Orderly Market
+              </td>
+              <td class="py-3.5 px-3.5">
+                <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold uppercase whitespace-nowrap">Normal Inverse</span>
+                <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &approx; -0.70 to -0.85</p>
+              </td>
+              <td class="py-3.5 px-3.5 whitespace-nowrap">
+                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold uppercase">NORMAL</span>
+                <p class="text-[11px] font-mono text-slate-400 mt-1">-1.0 to +1.0 pts</p>
+              </td>
+              <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
+                <strong class="text-white">Equilibrium:</strong> Normal market maker delta-hedging. VIX moves smoothly along the regression trendline in orderly fashion.
+              </td>
+            </tr>
+
+            <!-- 4. Volatility Crush / Exhaustion -->
+            <tr class="hover:bg-slate-800/30 transition">
+              <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-cyan-400">
+                4. Volatility Crush<br>
+                <span class="text-[11px] text-slate-400 font-normal">/ Exhaustion</span>
+              </td>
+              <td class="py-3.5 px-3.5">
+                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold uppercase whitespace-nowrap">Decoupled / Weak</span>
+                <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &gt; -0.30</p>
+              </td>
+              <td class="py-3.5 px-3.5 whitespace-nowrap">
+                <span class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10px] font-bold uppercase">UNDER-VIXED</span>
+                <p class="text-[11px] font-mono text-cyan-400 mt-1">Negative Residual</p>
+              </td>
+              <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
+                <strong class="text-white">Fear Deflation:</strong> SPX drops, but VIX refuses to rise (or drops). Option sellers dominate; fear is completely depleted. Often marks a market bottom.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Footer & Close Button -->
+      <div class="flex items-center justify-between pt-2 border-t border-slate-800 text-xs text-slate-400">
+        <p>Press <kbd class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">ESC</kbd> or click anywhere outside to close.</p>
+        <button id="btn-close-guide" class="px-4 py-2 rounded-lg text-xs font-semibold bg-cyan-500 text-black hover:bg-cyan-400 transition">Close Playbook</button>
+      </div>
+
     </div>
   </div>
 

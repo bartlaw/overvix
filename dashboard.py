@@ -99,6 +99,8 @@ class DashboardState:
         self.df_ts_5d = pd.DataFrame()       # Recent 5-day 15-min bars for VIX/VIX3M
         self.df_ts_1y = pd.DataFrame()       # Macro 1-year daily bars for VIX/VIX3M
         self.df_spx_vix_1d = pd.DataFrame()  # Intraday 1-min bars for SPX & VIX
+        self.df_spx_vix_5d = pd.DataFrame()  # 5-day 15-min bars for SPX & VIX
+        self.df_spx_vix_1y = pd.DataFrame()  # Macro 1-year daily bars for SPX & VIX
 
         # Model metrics
         self.r_squared: float = 0.0
@@ -122,6 +124,8 @@ class DashboardState:
         self.intraday_low_ratio: float = 0.0
         self.intraday_open_ratio: float = 0.0
         self.current_rolling_corr: float = -0.75
+        self.corr_5d: float = -0.75
+        self.corr_1y: float = -0.75
 
         # Active WebSockets
         self.active_websockets: List[WebSocket] = []
@@ -315,7 +319,11 @@ async def refresh_historical_data():
             state.current_rolling_corr = float(df_sv_1d['rolling_corr'].iloc[-1])
             print(f" Intraday SPX-VIX Correlation: {len(state.df_spx_vix_1d)} bars (Current ρ={state.current_rolling_corr:.3f})")
 
-        # C. Recent 5D Term Structure (15-min bars)
+        # C. Recent 5D Bars (SPX, VIX, VIX3M 15-min bars)
+        b5_spx = await state.ib.reqHistoricalDataAsync(
+            state.spx_contract, endDateTime='', durationStr='5 D',
+            barSizeSetting='15 mins', whatToShow='TRADES', useRTH=True, formatDate=1
+        )
         b5_vix = await state.ib.reqHistoricalDataAsync(
             state.vix_contract, endDateTime='', durationStr='5 D',
             barSizeSetting='15 mins', whatToShow='TRADES', useRTH=True, formatDate=1
@@ -324,13 +332,34 @@ async def refresh_historical_data():
             state.vix3m_contract, endDateTime='', durationStr='5 D',
             barSizeSetting='15 mins', whatToShow='TRADES', useRTH=True, formatDate=1
         )
+        df_s1_5 = util.df(b5_spx).set_index('date')['close'].rename('spx')
         df_v1_5 = util.df(b5_vix).set_index('date')['close'].rename('vix')
         df_v3_5 = util.df(b5_vix3m).set_index('date')['close'].rename('vix3m')
+        
+        # 5D Term Structure
         df_5d = pd.concat([df_v1_5, df_v3_5], axis=1).dropna()
         df_5d['ratio'] = df_5d['vix'] / df_5d['vix3m']
         state.df_ts_5d = df_5d.copy()
 
-        # D. Macro 1Y Term Structure (Daily bars)
+        # 5D SPX & VIX Dynamic Correlation (15-min bars, rolling 27-bar ~1 day window)
+        df_sv_5d = pd.concat([df_s1_5, df_v1_5], axis=1).dropna()
+        if not df_sv_5d.empty:
+            ref_spx_5d = float(df_sv_5d['spx'].iloc[0])
+            ref_vix_5d = float(df_sv_5d['vix'].iloc[0])
+            df_sv_5d['spx_pct'] = (df_sv_5d['spx'] - ref_spx_5d) / ref_spx_5d * 100.0
+            df_sv_5d['vix_pt'] = df_sv_5d['vix'] - ref_vix_5d
+            df_sv_5d['spx_ret'] = df_sv_5d['spx'].pct_change()
+            df_sv_5d['vix_diff'] = df_sv_5d['vix'].diff()
+            df_sv_5d['rolling_corr'] = df_sv_5d['spx_ret'].rolling(27, min_periods=10).corr(df_sv_5d['vix_diff']).fillna(-0.75)
+            state.df_spx_vix_5d = df_sv_5d.copy()
+            state.corr_5d = float(df_sv_5d['rolling_corr'].iloc[-1])
+            print(f" 5D SPX-VIX Correlation: {len(state.df_spx_vix_5d)} bars (Current 1D ρ={state.corr_5d:.3f})")
+
+        # D. Macro 1Y Bars (SPX, VIX, VIX3M Daily bars)
+        spx_bars_1y = await state.ib.reqHistoricalDataAsync(
+            state.spx_contract, endDateTime='', durationStr='252 D',
+            barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
+        )
         vix_bars_1y = await state.ib.reqHistoricalDataAsync(
             state.vix_contract, endDateTime='', durationStr='252 D',
             barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
@@ -339,11 +368,28 @@ async def refresh_historical_data():
             state.vix3m_contract, endDateTime='', durationStr='252 D',
             barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
         )
+        df_s1y = util.df(spx_bars_1y).set_index('date')['close'].rename('spx')
         df_v1y = util.df(vix_bars_1y).set_index('date')['close'].rename('vix')
         df_v3y = util.df(vix3m_bars_1y).set_index('date')['close'].rename('vix3m')
+        
+        # 1Y Term Structure
         df_1y = pd.concat([df_v1y, df_v3y], axis=1).dropna()
         df_1y['ratio'] = df_1y['vix'] / df_1y['vix3m']
         state.df_ts_1y = df_1y.copy()
+
+        # 1Y SPX & VIX Dynamic Correlation (Daily bars, rolling 20-day ~1 month window)
+        df_sv_1y = pd.concat([df_s1y, df_v1y], axis=1).dropna()
+        if not df_sv_1y.empty:
+            ref_spx_1y = float(df_sv_1y['spx'].iloc[0])
+            ref_vix_1y = float(df_sv_1y['vix'].iloc[0])
+            df_sv_1y['spx_pct'] = (df_sv_1y['spx'] - ref_spx_1y) / ref_spx_1y * 100.0
+            df_sv_1y['vix_pt'] = df_sv_1y['vix'] - ref_vix_1y
+            df_sv_1y['spx_ret'] = df_sv_1y['spx'].pct_change()
+            df_sv_1y['vix_diff'] = df_sv_1y['vix'].diff()
+            df_sv_1y['rolling_corr'] = df_sv_1y['spx_ret'].rolling(20, min_periods=10).corr(df_sv_1y['vix_diff']).fillna(-0.75)
+            state.df_spx_vix_1y = df_sv_1y.copy()
+            state.corr_1y = float(df_sv_1y['rolling_corr'].iloc[-1])
+            print(f" 1Y SPX-VIX Correlation: {len(state.df_spx_vix_1y)} bars (Current 20D ρ={state.corr_1y:.3f})")
 
         state.latest_vix3m_close = float(df_1y['vix3m'].iloc[-1])
         state.prior_vix3m_close = float(df_1y['vix3m'].iloc[-2]) if len(df_1y) > 1 else state.latest_vix3m_close
@@ -500,6 +546,8 @@ def compute_live_payload() -> Dict[str, Any]:
         },
         "correlation": {
             "rolling_corr": round(corr_val, 3),
+            "corr_5d": round(state.corr_5d, 3),
+            "corr_1y": round(state.corr_1y, 3),
             "status": corr_status,
             "badge": corr_badge,
             "desc": corr_desc
@@ -638,14 +686,24 @@ async def get_bootstrap():
         except Exception:
             return [str(t)[:16] for t in idx]
 
-    # Format Intraday SPX vs VIX Correlation
-    if not state.df_spx_vix_1d.empty:
-        corr_times = to_eastern_dt_list(state.df_spx_vix_1d.index)
-        corr_spx_pct = [round(float(v), 2) for v in state.df_spx_vix_1d['spx_pct'].tolist()]
-        corr_vix_pt = [round(float(v), 2) for v in state.df_spx_vix_1d['vix_pt'].tolist()]
-        corr_series = [round(float(v), 3) for v in state.df_spx_vix_1d['rolling_corr'].tolist()]
-    else:
-        corr_times, corr_spx_pct, corr_vix_pt, corr_series = [], [], [], []
+    # Format SPX vs VIX Correlation across 1D, 5D, 1Y
+    def format_corr_df(df, is_daily=False):
+        if df.empty:
+            return {"times": [], "spx_pct": [], "vix_pt": [], "rolling_corr": []}
+        if is_daily:
+            times = [str(d)[:10] for d in df.index]
+        else:
+            times = to_eastern_dt_list(df.index)
+        return {
+            "times": times,
+            "spx_pct": [round(float(v), 2) for v in df['spx_pct'].tolist()],
+            "vix_pt": [round(float(v), 2) for v in df['vix_pt'].tolist()],
+            "rolling_corr": [round(float(v), 3) for v in df['rolling_corr'].tolist()]
+        }
+
+    corr_1d = format_corr_df(state.df_spx_vix_1d)
+    corr_5d = format_corr_df(state.df_spx_vix_5d)
+    corr_1y = format_corr_df(state.df_spx_vix_1y, is_daily=True)
 
     # Format Intraday 1D Term Structure
     if not state.df_ts_1d.empty:
@@ -682,9 +740,9 @@ async def get_bootstrap():
             "y_history": y_hist,
             "dates": dates_sv,
             "intraday_trail": {
-                "x": corr_spx_pct,
-                "y": corr_vix_pt,
-                "times": corr_times
+                "x": corr_1d["spx_pct"],
+                "y": corr_1d["vix_pt"],
+                "times": corr_1d["times"]
             }
         },
         "term_structure": {
@@ -709,11 +767,19 @@ async def get_bootstrap():
             }
         },
         "intraday_correlation": {
-            "times": corr_times,
-            "spx_pct": corr_spx_pct,
-            "vix_pt": corr_vix_pt,
-            "rolling_corr": corr_series,
-            "current_corr": round(state.current_rolling_corr, 3)
+            "times": corr_1d["times"],
+            "spx_pct": corr_1d["spx_pct"],
+            "vix_pt": corr_1d["vix_pt"],
+            "rolling_corr": corr_1d["rolling_corr"],
+            "current_corr": round(state.current_rolling_corr, 3),
+            "1D": corr_1d,
+            "5D": corr_5d,
+            "1Y": corr_1y,
+            "metrics": {
+                "1D": round(state.current_rolling_corr, 3),
+                "5D": round(state.corr_5d, 3),
+                "1Y": round(state.corr_1y, 3)
+            }
         }
     }
 
