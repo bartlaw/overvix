@@ -1611,112 +1611,140 @@ function updateUI(data) {
   // 6. Update Intraday Term Structure / Tech Vol Real-Time (when 1D is active)
   if (currentTimeframe === '1D' && data.datetime) {
     const liveDt = data.datetime;
-    const liveDate = liveDt.slice(0, 10);
+    const isLiveRth = (data.is_rth_active === true);
 
-    if (isNdx && techVol) {
-      let dt = cachedTechVol['1D'];
-      if (!dt || !dt.times) {
-        cachedTechVol['1D'] = { times: [], vxn: [], vix: [], spread: [], ratio: [] };
-        dt = cachedTechVol['1D'];
-      }
-      const vxnVal = (ndx && ndx.market && ndx.market.vxn) ? ndx.market.vxn.current : 0;
-      if (dt.times.length > 0) {
-        const lastT = dt.times[dt.times.length - 1];
-        const lastDate = lastT.slice(0, 10);
-        if (liveDate === lastDate) {
-          if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
-            dt.vxn[dt.vxn.length - 1] = vxnVal;
-            dt.vix[dt.vix.length - 1] = mkt.vix.current;
-            dt.spread[dt.spread.length - 1] = techVol.spread;
-            dt.ratio[dt.ratio.length - 1] = techVol.ratio;
+    if (isLiveRth) {
+      const liveDate = liveDt.slice(0, 10);
+      if (isNdx && techVol) {
+        let dt = cachedTechVol['1D'];
+        if (!dt || !dt.times) {
+          cachedTechVol['1D'] = { times: [], vxn: [], vix: [], spread: [], ratio: [] };
+          dt = cachedTechVol['1D'];
+        }
+        const vxnVal = (ndx && ndx.market && ndx.market.vxn) ? ndx.market.vxn.current : 0;
+        if (dt.times.length > 0) {
+          const lastT = dt.times[dt.times.length - 1];
+          const lastDate = lastT.slice(0, 10);
+          if (liveDate === lastDate) {
+            if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
+              dt.vxn[dt.vxn.length - 1] = vxnVal;
+              dt.vix[dt.vix.length - 1] = mkt.vix.current;
+              dt.spread[dt.spread.length - 1] = techVol.spread;
+              dt.ratio[dt.ratio.length - 1] = techVol.ratio;
+            } else {
+              dt.times.push(liveDt);
+              dt.vxn.push(vxnVal);
+              dt.vix.push(mkt.vix.current);
+              dt.spread.push(techVol.spread);
+              dt.ratio.push(techVol.ratio);
+            }
           } else {
-            dt.times.push(liveDt);
-            dt.vxn.push(vxnVal);
-            dt.vix.push(mkt.vix.current);
-            dt.spread.push(techVol.spread);
-            dt.ratio.push(techVol.ratio);
+            // New date session: reset 1D to today
+            dt.times = [liveDt];
+            dt.vxn = [vxnVal];
+            dt.vix = [mkt.vix.current];
+            dt.spread = [techVol.spread];
+            dt.ratio = [techVol.ratio];
           }
         } else {
-          // New date session: reset 1D to today
-          dt.times = [liveDt];
-          dt.vxn = [vxnVal];
-          dt.vix = [mkt.vix.current];
-          dt.spread = [techVol.spread];
-          dt.ratio = [techVol.ratio];
+          dt.times.push(liveDt);
+          dt.vxn.push(vxnVal);
+          dt.vix.push(mkt.vix.current);
+          dt.spread.push(techVol.spread);
+          dt.ratio.push(techVol.ratio);
         }
-      } else {
-        dt.times.push(liveDt);
-        dt.vxn.push(vxnVal);
-        dt.vix.push(mkt.vix.current);
-        dt.spread.push(techVol.spread);
-        dt.ratio.push(techVol.ratio);
-      }
-      Plotly.restyle('term-structure-chart', {
-        x: [dt.times, dt.times, dt.times],
-        y: [dt.vxn, dt.vix, dt.spread]
-      }, [0, 1, 2]);
-      if (dt.times.length > 0) {
         Plotly.restyle('term-structure-chart', {
-          x: [[dt.times[0], liveDt], [dt.times[0], liveDt]]
-        }, [3, 4]);
+          x: [dt.times, dt.times, dt.times],
+          y: [dt.vxn, dt.vix, dt.spread]
+        }, [0, 1, 2]);
+        if (dt.times.length > 0) {
+          Plotly.restyle('term-structure-chart', {
+            x: [[dt.times[0], liveDt], [dt.times[0], liveDt]]
+          }, [3, 4]);
+        }
+        Plotly.restyle('term-structure-chart', {
+          x: [[liveDt]],
+          y: [[techVol.spread]],
+          'marker.color': [(techVol.spread >= 9.0) ? '#EF4444' : (techVol.spread >= 6.5 ? '#F59E0B' : '#10B981')]
+        }, [5]);
+      } else {
+        let d1 = cachedTs['1D'];
+        if (!d1 || !d1.times) {
+          cachedTs['1D'] = { times: [], vix: [], vix3m: [], ratio: [] };
+          d1 = cachedTs['1D'];
+        }
+        if (d1.times.length > 0) {
+          const lastT = d1.times[d1.times.length - 1];
+          const lastDate = lastT.slice(0, 10);
+          if (liveDate === lastDate) {
+            if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
+              d1.vix[d1.vix.length - 1] = mkt.vix.current;
+              d1.vix3m[d1.vix3m.length - 1] = mkt.vix3m.current;
+              d1.ratio[d1.ratio.length - 1] = ts.ratio;
+            } else {
+              d1.times.push(liveDt);
+              d1.vix.push(mkt.vix.current);
+              d1.vix3m.push(mkt.vix3m.current);
+              d1.ratio.push(ts.ratio);
+            }
+          } else {
+            // New date session: reset 1D to today
+            d1.times = [liveDt];
+            d1.vix = [mkt.vix.current];
+            d1.vix3m = [mkt.vix3m.current];
+            d1.ratio = [ts.ratio];
+          }
+        } else {
+          d1.times.push(liveDt);
+          d1.vix.push(mkt.vix.current);
+          d1.vix3m.push(mkt.vix3m.current);
+          d1.ratio.push(ts.ratio);
+        }
+        Plotly.restyle('term-structure-chart', {
+          x: [d1.times, d1.times, d1.times],
+          y: [d1.vix, d1.vix3m, d1.ratio]
+        }, [0, 1, 2]);
+        if (d1.times.length > 0) {
+          Plotly.restyle('term-structure-chart', {
+            x: [[d1.times[0], liveDt], [d1.times[0], liveDt]]
+          }, [3, 4]);
+        }
+        Plotly.restyle('term-structure-chart', {
+          x: [[liveDt]],
+          y: [[ts.ratio]],
+          'marker.color': [ts.is_inverted ? '#EF4444' : '#00E5FF']
+        }, [5]);
       }
-      Plotly.restyle('term-structure-chart', {
-        x: [[liveDt]],
-        y: [[techVol.spread]],
-        'marker.color': [(techVol.spread >= 9.0) ? '#EF4444' : (techVol.spread >= 6.5 ? '#F59E0B' : '#10B981')]
-      }, [5]);
     } else {
-      let d1 = cachedTs['1D'];
-      if (!d1 || !d1.times) {
-        cachedTs['1D'] = { times: [], vix: [], vix3m: [], ratio: [] };
-        d1 = cachedTs['1D'];
-      }
-      if (d1.times.length > 0) {
-        const lastT = d1.times[d1.times.length - 1];
-        const lastDate = lastT.slice(0, 10);
-        if (liveDate === lastDate) {
-          if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
-            d1.vix[d1.vix.length - 1] = mkt.vix.current;
-            d1.vix3m[d1.vix3m.length - 1] = mkt.vix3m.current;
-            d1.ratio[d1.ratio.length - 1] = ts.ratio;
-          } else {
-            d1.times.push(liveDt);
-            d1.vix.push(mkt.vix.current);
-            d1.vix3m.push(mkt.vix3m.current);
-            d1.ratio.push(ts.ratio);
-          }
-        } else {
-          // New date session: reset 1D to today
-          d1.times = [liveDt];
-          d1.vix = [mkt.vix.current];
-          d1.vix3m = [mkt.vix3m.current];
-          d1.ratio = [ts.ratio];
+      // Market closed: pin terminal beacon marker to the last point of the existing intraday line
+      if (isNdx && techVol) {
+        const dt = cachedTechVol['1D'];
+        if (dt && dt.times && dt.times.length > 0) {
+          const lastT = dt.times[dt.times.length - 1];
+          const lastVal = dt.spread[dt.spread.length - 1];
+          Plotly.restyle('term-structure-chart', {
+            x: [[lastT]],
+            y: [[lastVal]],
+            'marker.color': [(lastVal >= 9.0) ? '#EF4444' : (lastVal >= 6.5 ? '#F59E0B' : '#10B981')]
+          }, [5]);
         }
       } else {
-        d1.times.push(liveDt);
-        d1.vix.push(mkt.vix.current);
-        d1.vix3m.push(mkt.vix3m.current);
-        d1.ratio.push(ts.ratio);
+        const d1 = cachedTs['1D'];
+        if (d1 && d1.times && d1.times.length > 0) {
+          const lastT = d1.times[d1.times.length - 1];
+          const lastVal = d1.ratio[d1.ratio.length - 1];
+          Plotly.restyle('term-structure-chart', {
+            x: [[lastT]],
+            y: [[lastVal]],
+            'marker.color': [(lastVal >= 1.0) ? '#EF4444' : '#00E5FF']
+          }, [5]);
+        }
       }
-      Plotly.restyle('term-structure-chart', {
-        x: [d1.times, d1.times, d1.times],
-        y: [d1.vix, d1.vix3m, d1.ratio]
-      }, [0, 1, 2]);
-      if (d1.times.length > 0) {
-        Plotly.restyle('term-structure-chart', {
-          x: [[d1.times[0], liveDt], [d1.times[0], liveDt]]
-        }, [3, 4]);
-      }
-      Plotly.restyle('term-structure-chart', {
-        x: [[liveDt]],
-        y: [[ts.ratio]],
-        'marker.color': [ts.is_inverted ? '#EF4444' : '#00E5FF']
-      }, [5]);
     }
   }
 
-  // 7. Update Intraday Correlation Real-Time (when 1D is active)
-  if (currentCorrTf === '1D' && data.datetime) {
+  // 7. Update Intraday Correlation Real-Time (when 1D is active and market is open)
+  if (currentCorrTf === '1D' && data.datetime && data.is_rth_active) {
     const liveDt = data.datetime;
     const liveDate = liveDt.slice(0, 10);
 

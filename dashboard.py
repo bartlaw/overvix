@@ -713,20 +713,43 @@ def compute_live_payload() -> Dict[str, Any]:
         session_status = "REGULAR_RTH"
     else:
         # Pre-Market, After-Hours, or Weekend/Closed:
-        # Intraday charts display the prior completed session (state.active_session_date).
-        # Pin current_point to the official session close coordinates of the displayed session
+        # Intraday charts display the displayed session (state.active_session_date).
+        # Pin current_point and session levels to the official closing values of the displayed session
         # so the beacon sits precisely at the tip of the trail.
-        curr_x = state.last_sess_x
-        curr_y = state.last_sess_y
-        spx_curr = state.latest_spx_close
-        vix_curr = state.latest_vix_close
-        vix3m_curr = state.latest_vix3m_close
-        vix3m_pt = 0.0
 
-        curr_ndx_x = state.last_sess_ndx_x
-        curr_ndx_y = state.last_sess_ndx_y
-        ndx_curr = state.latest_ndx_close
-        vxn_curr = state.latest_vxn_close
+        # Prior completed session close reference baselines (from baseline regression)
+        spx_base = state.latest_spx_close if state.latest_spx_close > 0 else (float(state.df_spx_vix_1d['spx'].iloc[0]) if not state.df_spx_vix_1d.empty else spx_curr)
+        vix_base = state.latest_vix_close if state.latest_vix_close > 0 else (float(state.df_spx_vix_1d['vix'].iloc[0]) if not state.df_spx_vix_1d.empty else vix_curr)
+        vix3m_base = state.latest_vix3m_close if state.latest_vix3m_close > 0 else (float(state.df_ts_1d['vix3m'].iloc[0]) if not state.df_ts_1d.empty else vix3m_curr)
+        ndx_base = state.latest_ndx_close if state.latest_ndx_close > 0 else (float(state.df_ndx_vxn_1d['ndx'].iloc[0]) if not state.df_ndx_vxn_1d.empty else ndx_curr)
+        vxn_base = state.latest_vxn_close if state.latest_vxn_close > 0 else (float(state.df_ndx_vxn_1d['vxn'].iloc[0]) if not state.df_ndx_vxn_1d.empty else vxn_curr)
+
+        # SPX & VIX closing coordinates and prices for displayed session
+        if not state.df_spx_vix_1d.empty:
+            curr_x = float(state.df_spx_vix_1d['spx_pct'].iloc[-1])
+            curr_y = float(state.df_spx_vix_1d['vix_pt'].iloc[-1])
+            spx_curr = float(state.df_spx_vix_1d['spx'].iloc[-1])
+            vix_curr = float(state.df_spx_vix_1d['vix'].iloc[-1])
+        else:
+            curr_x = ((spx_curr - spx_base) / spx_base * 100.0) if spx_base > 0 else state.last_sess_x
+            curr_y = (vix_curr - vix_base) if vix_base > 0 else state.last_sess_y
+
+        # VIX3M closing price for displayed session
+        if not state.df_ts_1d.empty:
+            vix3m_curr = float(state.df_ts_1d['vix3m'].iloc[-1])
+            vix3m_pt = vix3m_curr - vix3m_base if vix3m_base > 0 else 0.0
+        else:
+            vix3m_pt = vix3m_curr - vix3m_base if vix3m_base > 0 else 0.0
+
+        # NDX & VXN closing coordinates and prices for displayed session
+        if not state.df_ndx_vxn_1d.empty:
+            curr_ndx_x = float(state.df_ndx_vxn_1d['ndx_pct'].iloc[-1])
+            curr_ndx_y = float(state.df_ndx_vxn_1d['vxn_pt'].iloc[-1])
+            ndx_curr = float(state.df_ndx_vxn_1d['ndx'].iloc[-1])
+            vxn_curr = float(state.df_ndx_vxn_1d['vxn'].iloc[-1])
+        else:
+            curr_ndx_x = ((ndx_curr - ndx_base) / ndx_base * 100.0) if ndx_base > 0 else state.last_sess_ndx_x
+            curr_ndx_y = (vxn_curr - vxn_base) if vxn_base > 0 else state.last_sess_ndx_y
 
         if is_weekday and now_et.time() < dtime(9, 30):
             mode_tag = f"PRE-MARKET (SESSION {state.active_session_date} CLOSE)"
@@ -1012,7 +1035,7 @@ async def broadcast_loop():
                     except Exception as e:
                         print(f"[IBKR Reconnect] Still waiting for TWS/Gateway: {e}")
 
-            # Check for RTH open transition (09:30 ET) or periodic intraday refresh every 60s
+            # Check for RTH open transition (09:30 ET), periodic intraday refresh every 60s, or market close final sync
             if state.is_connected and state.ib and state.ib.isConnected():
                 should_refresh = False
                 # If market just opened at 09:30 ET and active session is still the prior day
@@ -1020,6 +1043,9 @@ async def broadcast_loop():
                     should_refresh = True
                 # Periodic refresh every 60s during RTH to pull latest 1-min bars
                 elif is_weekday and (dtime(9, 30) <= now_et.time() < dtime(16, 0)) and (now - last_hist_refresh >= 60.0):
+                    should_refresh = True
+                # Post-close final sync: if RTH ended (>= 16:00 ET) and we haven't synced since 16:00 ET today
+                elif is_weekday and (now_et.time() >= dtime(16, 0)) and (last_hist_refresh < datetime.combine(now_et.date(), dtime(16, 0)).replace(tzinfo=pytz.timezone('US/Eastern')).timestamp()):
                     should_refresh = True
 
                 if should_refresh:
