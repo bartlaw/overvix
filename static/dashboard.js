@@ -11,6 +11,7 @@ let currentThreshold = 2.0;
 let currentTimeframe = '1D'; // '1D', '5D', '1Y'
 let currentTrailMode = 'both'; // 'both', 'today', '60d'
 let currentCorrMode = 'dual'; // 'dual', 'corr_only'
+let currentAssetPair = 'SPX'; // 'SPX' | 'NDX'
 
 // Historical Mode State
 let currentViewMode = 'live'; // 'live' | 'historical'
@@ -18,9 +19,12 @@ let selectedHistoricalDate = null;
 let cachedLiveBootstrap = null;
 let cachedLiveTs = null;
 let cachedLiveCorr = null;
+let cachedLiveTechVol = null;
+let cachedLiveCorrNdx = null;
 let lastLiveUpdatePayload = null;
+let cachedHistoricalData = null;
 
-// Cached Datasets
+// Cached Datasets (SPX & Term Structure)
 let cachedBootstrap = null;
 let cachedTs = {
   '1D': { times: [], vix: [], vix3m: [], ratio: [] },
@@ -29,6 +33,19 @@ let cachedTs = {
 };
 let cachedTrail = { x: [], y: [], times: [] };
 let cachedCorr = {
+  '1D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  '5D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  '1Y': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  metrics: { '1D': -0.75, '5D': -0.75, '1Y': -0.75 }
+};
+
+// Cached Datasets (NDX & Tech Vol Spread)
+let cachedTechVol = {
+  '1D': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
+  '5D': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
+  '1Y': { times: [], spread: [], ratio: [], vxn: [], vix: [] }
+};
+let cachedCorrNdx = {
   '1D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '5D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '1Y': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
@@ -185,6 +202,68 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// Asset Pair Switcher (SPX/VIX vs NDX/VXN)
+const btnAssetSpx = document.getElementById('btn-asset-spx');
+const btnAssetNdx = document.getElementById('btn-asset-ndx');
+
+function setupAssetSwitcher() {
+  if (btnAssetSpx) btnAssetSpx.addEventListener('click', () => switchAssetPair('SPX'));
+  if (btnAssetNdx) btnAssetNdx.addEventListener('click', () => switchAssetPair('NDX'));
+}
+
+function switchAssetPair(pair) {
+  if (currentAssetPair === pair) return;
+  currentAssetPair = pair;
+
+  if (pair === 'SPX') {
+    if (btnAssetSpx) btnAssetSpx.className = "px-2.5 py-1 rounded text-xs font-bold bg-cyan-500 text-black shadow-sm transition flex items-center space-x-1.5";
+    if (btnAssetNdx) btnAssetNdx.className = "px-2.5 py-1 rounded text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1.5";
+
+    const spTitle = document.getElementById('spotvol-title');
+    if (spTitle) spTitle.textContent = "Spot-Vol Regression & Overvix Zone";
+    const spSub = document.getElementById('spotvol-sub');
+    if (spSub) spSub.textContent = "SPX % vs VIX Point Move with +2.0 pt Threshold & Today's Intraday Path";
+
+    const tsTitle = document.getElementById('ts-title');
+    if (tsTitle) tsTitle.textContent = "Volatility Term Structure (VIX / VIX3M)";
+    const tsSub = document.getElementById('ts-sub');
+    if (tsSub) tsSub.textContent = "30-Day vs. 90-Day Volatility Ratio & Inversion Monitor";
+
+    const corrTitle = document.getElementById('corr-title');
+    if (corrTitle) corrTitle.textContent = "SPX & VIX Dynamic Correlation & Divergence Monitor";
+    const corrSub = document.getElementById('corr-subtitle');
+    if (corrSub) corrSub.textContent = "Minute-by-Minute Normalized Overlay (Upper) & Rolling 30-Minute Pearson Correlation ρ(ΔSPX, ΔVIX) (Lower)";
+  } else {
+    if (btnAssetNdx) btnAssetNdx.className = "px-2.5 py-1 rounded text-xs font-bold bg-purple-500 text-white shadow-sm transition flex items-center space-x-1.5";
+    if (btnAssetSpx) btnAssetSpx.className = "px-2.5 py-1 rounded text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1.5";
+
+    const spTitle = document.getElementById('spotvol-title');
+    if (spTitle) spTitle.textContent = "Nasdaq Spot-Vol Regression & Over-VXN Zone";
+    const spSub = document.getElementById('spotvol-sub');
+    if (spSub) spSub.textContent = "NDX % vs VXN Point Move with +2.0 pt Threshold & Intraday Path";
+
+    const tsTitle = document.getElementById('ts-title');
+    if (tsTitle) tsTitle.textContent = "Tech Vol Premium (VXN vs VIX Spread & Ratio)";
+    const tsSub = document.getElementById('ts-sub');
+    if (tsSub) tsSub.textContent = "Tech Vol Spread (VXN - VIX) & Skew Ratio Monitor";
+
+    const corrTitle = document.getElementById('corr-title');
+    if (corrTitle) corrTitle.textContent = "NDX & VXN Dynamic Correlation & Divergence Monitor";
+    const corrSub = document.getElementById('corr-subtitle');
+    if (corrSub) corrSub.textContent = "Minute-by-Minute Normalized Overlay (Upper) & Rolling 30-Minute Pearson Correlation ρ(ΔNDX, ΔVXN) (Lower)";
+  }
+
+  // Re-render charts and UI immediately from cache
+  const activeData = (currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap;
+  if (activeData) {
+    renderOvervixChart(activeData);
+    renderTermStructureChart(currentTimeframe);
+    renderCorrelationChart(currentCorrMode, currentCorrTf);
+    updateCorrMetricDisplay();
+    updateUI(activeData);
+  }
+}
+
 // Timeframe Selector Buttons
 const btnTf1D = document.getElementById('btn-tf-1d');
 const btnTf5D = document.getElementById('btn-tf-5d');
@@ -325,7 +404,8 @@ function switchCorrTf(tf) {
 }
 
 function updateCorrMetricDisplay() {
-  const c = cachedCorr;
+  const isNdx = (currentAssetPair === 'NDX');
+  const c = isNdx ? cachedCorrNdx : cachedCorr;
   const metrics = c.metrics || {};
   let val = metrics[currentCorrTf];
   if (val === undefined || val === null) {
@@ -345,15 +425,20 @@ function updateCorrMetricDisplay() {
 // ==============================================================================
 
 function renderOvervixChart(bootstrap) {
-  const xHist = (bootstrap.overvix && bootstrap.overvix.x_history) ? bootstrap.overvix.x_history : [];
-  const yHist = (bootstrap.overvix && bootstrap.overvix.y_history) ? bootstrap.overvix.y_history : [];
-  const dates = (bootstrap.overvix && bootstrap.overvix.dates) ? bootstrap.overvix.dates : [];
-  const slope = (bootstrap.model && bootstrap.model.slope) || 0;
-  const intercept = (bootstrap.model && bootstrap.model.intercept) || 0;
-  const threshold = (bootstrap.model && bootstrap.model.threshold_pts) || currentThreshold;
+  const isNdx = (currentAssetPair === 'NDX');
+  const targetData = (isNdx && bootstrap.ndx && bootstrap.ndx.overvix) ? bootstrap.ndx : bootstrap;
+  const assetLabel = isNdx ? 'NDX' : 'SPX';
+  const volLabel = isNdx ? 'VXN' : 'VIX';
+
+  const xHist = (targetData.overvix && targetData.overvix.x_history) ? targetData.overvix.x_history : [];
+  const yHist = (targetData.overvix && targetData.overvix.y_history) ? targetData.overvix.y_history : [];
+  const dates = (targetData.overvix && targetData.overvix.dates) ? targetData.overvix.dates : [];
+  const slope = (targetData.model && targetData.model.slope) || 0;
+  const intercept = (targetData.model && targetData.model.intercept) || 0;
+  const threshold = (targetData.model && targetData.model.threshold_pts) || currentThreshold;
 
   // Intraday Trail Data
-  const trail = (bootstrap.overvix && bootstrap.overvix.intraday_trail) ? bootstrap.overvix.intraday_trail : { x: [], y: [], times: [] };
+  const trail = (targetData.overvix && targetData.overvix.intraday_trail) ? targetData.overvix.intraday_trail : { x: [], y: [], times: [] };
   cachedTrail = trail;
 
   // Compute Trendline & Overvix Band
@@ -365,9 +450,21 @@ function renderOvervixChart(bootstrap) {
   const yThreshold = yTrend.map(y => y + threshold);
   const yBandTop = yThreshold.map(y => y + 2.5);
 
-  const currX = (bootstrap.current_point && bootstrap.current_point.x !== undefined) ? bootstrap.current_point.x : 0;
-  const currY = (bootstrap.current_point && bootstrap.current_point.y !== undefined) ? bootstrap.current_point.y : 0;
-  const isOvervixed = bootstrap.overvix ? bootstrap.overvix.is_overvixed : false;
+  let currX = 0;
+  let currY = 0;
+  if (targetData.current_point && targetData.current_point.x !== undefined && targetData.current_point.y !== undefined) {
+    currX = targetData.current_point.x;
+    currY = targetData.current_point.y;
+  } else if (targetData.market && targetData.market.pct_change !== undefined) {
+    currX = targetData.market.pct_change;
+    currY = (targetData.market.vxn && targetData.market.vxn.pt_change !== undefined)
+      ? targetData.market.vxn.pt_change
+      : (targetData.market.vix ? targetData.market.vix.pt_change : 0);
+  } else if (trail.x && trail.x.length > 0 && trail.y && trail.y.length > 0) {
+    currX = trail.x[trail.x.length - 1];
+    currY = trail.y[trail.y.length - 1];
+  }
+  const isOvervixed = targetData.overvix ? targetData.overvix.is_overvixed : false;
 
   const traces = [
     // 0: Historical 60D Spot-Vol Points
@@ -376,14 +473,14 @@ function renderOvervixChart(bootstrap) {
       y: yHist,
       text: dates,
       mode: 'markers',
-      name: 'Historical (60D)',
+      name: `${assetLabel} Historical (60D)`,
       marker: {
-        color: '#E6D385',
+        color: isNdx ? '#C084FC' : '#E6D385',
         size: 7,
         opacity: 0.75,
-        line: { color: '#B39F50', width: 0.5 }
+        line: { color: isNdx ? '#9333EA' : '#B39F50', width: 0.5 }
       },
-      hovertemplate: '<b>%{text}</b><br>SPX Move: %{x:+.2f}%<br>VIX Move: %{y:+.2f} pts<extra></extra>',
+      hovertemplate: `<b>%{text}</b><br>${assetLabel} Move: %{x:+.2f}%<br>${volLabel} Move: %{y:+.2f} pts<extra></extra>`,
       visible: currentTrailMode === 'today' ? false : true
     },
     // 1: Regression Trendline
@@ -392,10 +489,10 @@ function renderOvervixChart(bootstrap) {
       y: yTrend,
       mode: 'lines',
       name: 'Expected Trendline',
-      line: { color: '#C5BF85', width: 2 },
+      line: { color: isNdx ? '#A855F7' : '#C5BF85', width: 2 },
       hoverinfo: 'none'
     },
-    // 2: Overvix Threshold Line
+    // 2: Overvix / Over-VXN Threshold Line
     {
       x: xGrid,
       y: yThreshold,
@@ -411,7 +508,7 @@ function renderOvervixChart(bootstrap) {
       fill: 'toself',
       fillcolor: 'rgba(255, 83, 112, 0.12)',
       line: { color: 'transparent' },
-      name: 'Overvix Zone',
+      name: isNdx ? 'Over-VXN Zone' : 'Overvix Zone',
       hoverinfo: 'none'
     },
     // 4: Intraday Breadcrumb Trail
@@ -420,10 +517,10 @@ function renderOvervixChart(bootstrap) {
       y: trail.y || [],
       text: trail.times || [],
       mode: 'lines+markers',
-      name: bootstrap.is_historical ? `${bootstrap.session_date} Path` : "Today's Intraday Path",
-      line: { color: '#00E5FF', width: 1.8, shape: 'spline' },
-      marker: { color: '#00E5FF', size: 4, opacity: 0.8 },
-      hovertemplate: bootstrap.is_historical ? '<b>%{text}</b><br>SPX: %{x:+.2f}%<br>VIX: %{y:+.2f} pts<extra></extra>' : '<b>%{text} (Today)</b><br>SPX: %{x:+.2f}%<br>VIX: %{y:+.2f} pts<extra></extra>',
+      name: bootstrap.is_historical ? `${bootstrap.session_date} Path` : (bootstrap.session_date ? `Session ${bootstrap.session_date} Path` : "Intraday Path"),
+      line: { color: isNdx ? '#C084FC' : '#00E5FF', width: 1.8, shape: 'spline' },
+      marker: { color: isNdx ? '#C084FC' : '#00E5FF', size: 4, opacity: 0.8 },
+      hovertemplate: `<b>%{text}</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<extra></extra>`,
       visible: currentTrailMode === '60d' ? false : true
     },
     // 5: Session End / Live Current Point
@@ -431,15 +528,21 @@ function renderOvervixChart(bootstrap) {
       x: [currX],
       y: [currY],
       mode: 'markers',
-      name: bootstrap.is_historical ? "Session Close Point" : "Live Point",
+      name: (bootstrap.is_historical || bootstrap.is_rth_active === false) ? "Session Close Point" : "Live Point",
       marker: {
-        color: isOvervixed ? '#FF1744' : '#00E5FF',
+        color: isOvervixed ? '#FF1744' : (isNdx ? '#C084FC' : '#00E5FF'),
         size: 14,
         line: { color: '#FFFFFF', width: 2 }
       },
-      hovertemplate: bootstrap.is_historical ? '<b>Session Close</b><br>SPX: %{x:+.2f}%<br>VIX: %{y:+.2f} pts<extra></extra>' : '<b>Live Current Point</b><br>SPX: %{x:+.2f}%<br>VIX: %{y:+.2f} pts<extra></extra>'
+      hovertemplate: (bootstrap.is_historical || bootstrap.is_rth_active === false)
+        ? `<b>Session Close (${bootstrap.session_date || 'Prior'})</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<extra></extra>`
+        : `<b>Live Current Point</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<extra></extra>`
     }
   ];
+
+  const sessionPeriodLabel = (bootstrap.is_historical && bootstrap.session_date) 
+    ? bootstrap.session_date 
+    : (bootstrap.is_rth_active === false && bootstrap.session_date ? bootstrap.session_date : 'Today');
 
   const layout = {
     paper_bgcolor: 'transparent',
@@ -447,17 +550,152 @@ function renderOvervixChart(bootstrap) {
     autosize: true,
     margin: { l: 50, r: 20, t: 25, b: 45 },
     xaxis: {
-      title: { text: 'SPX % Change (Today)', font: { color: '#94A3B8', size: 11 } },
+      title: { text: `${assetLabel} % Change (${sessionPeriodLabel})`, font: { color: '#94A3B8', size: 11 } },
       gridcolor: '#1e293b',
       zerolinecolor: '#334155',
       zerolinewidth: 1,
       tickfont: { color: '#94A3B8', size: 10 }
     },
     yaxis: {
-      title: { text: 'VIX Point Change (Today)', font: { color: '#94A3B8', size: 11 } },
+      title: { text: `${volLabel} Point Move (${sessionPeriodLabel})`, font: { color: '#94A3B8', size: 11 } },
       gridcolor: '#1e293b',
       zerolinecolor: '#334155',
       zerolinewidth: 1,
+      tickfont: { color: '#94A3B8', size: 10 }
+    },
+    legend: {
+      orientation: 'h',
+      x: 0,
+      y: 1.15,
+      font: { color: '#94A3B8', size: 10 }
+    },
+    showlegend: true
+  };
+
+  Plotly.newPlot('overvix-chart', traces, layout, { responsive: true, displayModeBar: false });
+}
+
+function renderTechVolChart(tf = currentTimeframe) {
+  const data = cachedTechVol[tf] || cachedTechVol['1D'] || {};
+  const times = data.times || [];
+  const vxn = data.vxn || [];
+  const vix = data.vix || [];
+  const spread = data.spread || [];
+  const ratio = data.ratio || [];
+
+  const dStart = times.length > 0 ? times[0] : '';
+  const dEnd = times.length > 0 ? times[times.length - 1] : '';
+  const timeHoverFmt = (tf === '1Y') ? '%b %d, %Y' : '%b %d, %H:%M';
+
+  const traceVXN = {
+    x: times,
+    y: vxn,
+    name: 'VXN (Tech Vol)',
+    mode: 'lines',
+    line: { color: '#C084FC', width: 1.8 },
+    xaxis: 'x',
+    yaxis: 'y1',
+    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>VXN: %{y:.2f}<extra></extra>`
+  };
+
+  const traceVIX = {
+    x: times,
+    y: vix,
+    name: 'VIX (Broad Vol)',
+    mode: 'lines',
+    line: { color: '#00E5FF', width: 1.5 },
+    xaxis: 'x',
+    yaxis: 'y1',
+    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>VIX: %{y:.2f}<extra></extra>`
+  };
+
+  const traceSpread = {
+    x: times,
+    y: spread,
+    name: 'Tech Spread (VXN - VIX)',
+    mode: 'lines',
+    line: { color: '#F59E0B', width: 2 },
+    xaxis: 'x',
+    yaxis: 'y2',
+    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>Spread: %{y:+.2f} pts<extra></extra>`
+  };
+
+  const traceEquilibrium = {
+    x: [dStart, dEnd],
+    y: [3.0, 3.0],
+    mode: 'lines',
+    name: 'Normal Spread (+3.0 pts)',
+    line: { color: '#10B981', width: 1, dash: 'dot' },
+    xaxis: 'x',
+    yaxis: 'y2',
+    hoverinfo: 'none'
+  };
+
+  const tracePanic = {
+    x: [dStart, dEnd],
+    y: [6.0, 6.0],
+    mode: 'lines',
+    name: 'Tech Panic Spread (+6.0 pts)',
+    line: { color: '#EF4444', width: 1.5, dash: 'dash' },
+    xaxis: 'x',
+    yaxis: 'y2',
+    hoverinfo: 'none'
+  };
+
+  const latestSpread = spread.length > 0 ? spread[spread.length - 1] : null;
+  const latestTime = times.length > 0 ? times[times.length - 1] : null;
+
+  const traceLivePoint = {
+    x: latestTime ? [latestTime] : [],
+    y: latestSpread !== null ? [latestSpread] : [],
+    mode: 'markers',
+    name: 'Live Spread',
+    marker: {
+      color: (latestSpread !== null && latestSpread >= 6.0) ? '#EF4444' : '#F59E0B',
+      size: 10,
+      line: { color: '#FFFFFF', width: 1.5 }
+    },
+    xaxis: 'x',
+    yaxis: 'y2',
+    hoverinfo: 'none'
+  };
+
+  const xTitle = (tf === '1D') ? 'Today Intraday Time (US/Eastern)' : ((tf === '5D') ? '5-Day Timeline' : '1-Year Daily Date');
+  let rangebreaks = [];
+  if (tf === '1D') {
+    rangebreaks = [{ pattern: 'hour', bounds: [16.25, 9.5] }];
+  } else if (tf === '5D') {
+    rangebreaks = [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }];
+  } else if (tf === '1Y') {
+    rangebreaks = [{ bounds: ['sat', 'mon'] }];
+  }
+
+  const layout = {
+    paper_bgcolor: 'transparent',
+    plot_bgcolor: 'transparent',
+    autosize: true,
+    margin: { l: 50, r: 20, t: 25, b: 40 },
+    xaxis: {
+      anchor: 'y2',
+      type: 'date',
+      rangebreaks: rangebreaks,
+      tickformat: (tf === '1D') ? '%H:%M' : ((tf === '5D') ? '%b %d %H:%M' : '%b %Y'),
+      title: { text: xTitle, font: { color: '#94A3B8', size: 10 } },
+      gridcolor: '#1e293b',
+      tickfont: { color: '#94A3B8', size: 10 },
+      showgrid: true,
+      nticks: 10
+    },
+    yaxis: {
+      domain: [0.48, 1.0],
+      title: { text: 'Vol Level (VXN & VIX)', font: { color: '#94A3B8', size: 10 } },
+      gridcolor: '#1e293b',
+      tickfont: { color: '#94A3B8', size: 10 }
+    },
+    yaxis2: {
+      domain: [0.0, 0.40],
+      title: { text: 'Tech Spread (pts)', font: { color: '#F59E0B', size: 10 } },
+      gridcolor: '#1e293b',
       tickfont: { color: '#94A3B8', size: 10 }
     },
     legend: {
@@ -469,10 +707,17 @@ function renderOvervixChart(bootstrap) {
     showlegend: true
   };
 
-  Plotly.newPlot('overvix-chart', traces, layout, { responsive: true, displayModeBar: false });
+  Plotly.newPlot('term-structure-chart', [traceVXN, traceVIX, traceSpread, traceEquilibrium, tracePanic, traceLivePoint], layout, {
+    responsive: true,
+    displayModeBar: false
+  });
 }
 
 function renderTermStructureChart(tf = '1D') {
+  if (currentAssetPair === 'NDX') {
+    renderTechVolChart(tf);
+    return;
+  }
   const data = cachedTs[tf] || cachedTs['1D'];
   const times = data.times || [];
   const vix = data.vix || [];
@@ -620,11 +865,15 @@ function renderTermStructureChart(tf = '1D') {
 }
 
 function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
-  const c = cachedCorr[tf] || cachedCorr['1D'] || cachedCorr;
+  const isNdx = (currentAssetPair === 'NDX');
+  const c = isNdx ? (cachedCorrNdx[tf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[tf] || cachedCorr['1D'] || cachedCorr);
   const times = c.times || [];
-  const spxPct = c.spx_pct || [];
-  const vixPt = c.vix_pt || [];
+  const assetPct = c.spx_pct || c.ndx_pct || [];
+  const volPt = c.vix_pt || c.vxn_pt || [];
   const rollingCorr = c.rolling_corr || [];
+
+  const assetLabel = isNdx ? 'NDX' : 'SPX';
+  const volLabel = isNdx ? 'VXN' : 'VIX';
 
   const dStart = times.length > 0 ? times[0] : '';
   const dEnd = times.length > 0 ? times[times.length - 1] : '';
@@ -637,8 +886,8 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
   let xTitle = 'Today Intraday Time (US/Eastern)';
   let tickformat = '%H:%M';
   let rangebreaks = [];
-  let corrTraceName = 'Rolling 30m Correlation (ρ)';
-  let corrHoverLabel = 'Rolling 30m ρ';
+  let corrTraceName = `Rolling 30m Correlation (ρ)`;
+  let corrHoverLabel = `Rolling 30m ρ`;
 
   if (tf === '1D') {
     xTitle = 'Today Intraday Time (US/Eastern)';
@@ -646,8 +895,8 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
     rangebreaks = [
       { pattern: 'hour', bounds: [16.25, 9.5] }
     ];
-    corrTraceName = 'Rolling 30m Correlation (ρ)';
-    corrHoverLabel = 'Rolling 30m ρ';
+    corrTraceName = `Rolling 30m Correlation (ρ)`;
+    corrHoverLabel = `Rolling 30m ρ`;
   } else if (tf === '5D') {
     xTitle = '5-Day Timeline (US/Eastern)';
     tickformat = '%b %d %H:%M';
@@ -655,44 +904,48 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       { bounds: ['sat', 'mon'] },
       { pattern: 'hour', bounds: [16.25, 9.5] }
     ];
-    corrTraceName = 'Rolling 1D Correlation (ρ)';
-    corrHoverLabel = 'Rolling 1D ρ';
+    corrTraceName = `Rolling 1D Correlation (ρ)`;
+    corrHoverLabel = `Rolling 1D ρ`;
   } else if (tf === '1Y') {
     xTitle = '1-Year Daily Date';
     tickformat = '%b %Y';
     rangebreaks = [
       { bounds: ['sat', 'mon'] }
     ];
-    corrTraceName = 'Rolling 20D Correlation (ρ)';
-    corrHoverLabel = 'Rolling 20D ρ';
+    corrTraceName = `Rolling 20D Correlation (ρ)`;
+    corrHoverLabel = `Rolling 20D ρ`;
   }
 
   const timeHoverFmt = (tf === '1Y') ? '%b %d, %Y' : '%b %d, %H:%M';
-  let spxHoverLabel = (tf === '1D') ? 'SPX Day Move' : ((tf === '5D') ? 'SPX 5D Move' : 'SPX 1Y Move');
-  let vixHoverLabel = (tf === '1D') ? 'VIX Day Move' : ((tf === '5D') ? 'VIX 5D Move' : 'VIX 1Y Move');
+  let assetHoverLabel = (tf === '1D') ? `${assetLabel} Day Move` : ((tf === '5D') ? `${assetLabel} 5D Move` : `${assetLabel} 1Y Move`);
+  let volHoverLabel = (tf === '1D') ? `${volLabel} Day Move` : ((tf === '5D') ? `${volLabel} 5D Move` : `${volLabel} 1Y Move`);
+
+  const assetColor = isNdx ? '#C084FC' : '#10B981';
+  const volColor = '#F59E0B';
+  const corrColor = isNdx ? '#A855F7' : '#00E5FF';
 
   if (mode === 'dual') {
-    // Subplot 1: SPX % Move (left axis) vs VIX pt move (right axis)
-    const traceSPX = {
+    // Subplot 1: Asset % Move (left axis) vs Vol pt move (right axis)
+    const traceAsset = {
       x: times,
-      y: spxPct,
-      name: 'SPX % Move',
+      y: assetPct,
+      name: `${assetLabel} % Move`,
       mode: 'lines',
-      line: { color: '#10B981', width: 1.8 },
+      line: { color: assetColor, width: 1.8 },
       xaxis: 'x',
       yaxis: 'y1',
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${spxHoverLabel}: %{y:+.2f}%<extra></extra>`
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{y:+.2f}%<extra></extra>`
     };
 
-    const traceVIX = {
+    const traceVol = {
       x: times,
-      y: vixPt,
-      name: 'VIX Point Move',
+      y: volPt,
+      name: `${volLabel} Point Move`,
       mode: 'lines',
-      line: { color: '#F59E0B', width: 1.8 },
+      line: { color: volColor, width: 1.8 },
       xaxis: 'x',
       yaxis: 'y2',
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${vixHoverLabel}: %{y:+.2f} pts<extra></extra>`
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<extra></extra>`
     };
 
     // Subplot 2: Rolling Pearson Correlation
@@ -701,7 +954,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       y: rollingCorr,
       name: corrTraceName,
       mode: 'lines',
-      line: { color: '#00E5FF', width: 2 },
+      line: { color: corrColor, width: 2 },
       xaxis: 'x',
       yaxis: 'y3',
       hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${corrHoverLabel}: %{y:.3f}<extra></extra>`
@@ -747,21 +1000,21 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       },
       yaxis: {
         domain: [0.48, 1.0],
-        title: { text: 'SPX % Move', font: { color: '#10B981', size: 10 } },
+        title: { text: `${assetLabel} % Move`, font: { color: assetColor, size: 10 } },
         gridcolor: '#1e293b',
-        tickfont: { color: '#10B981', size: 10 }
+        tickfont: { color: assetColor, size: 10 }
       },
       yaxis2: {
         domain: [0.48, 1.0],
-        title: { text: 'VIX Point Move', font: { color: '#F59E0B', size: 10 } },
+        title: { text: `${volLabel} Point Move`, font: { color: volColor, size: 10 } },
         overlaying: 'y',
         side: 'right',
         gridcolor: 'transparent',
-        tickfont: { color: '#F59E0B', size: 10 }
+        tickfont: { color: volColor, size: 10 }
       },
       yaxis3: {
         domain: [0.0, 0.40],
-        title: { text: 'Rolling ρ', font: { color: '#00E5FF', size: 10 } },
+        title: { text: 'Rolling ρ', font: { color: corrColor, size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
         range: [-1.05, upperY]
@@ -775,7 +1028,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       showlegend: true
     };
 
-    Plotly.newPlot('correlation-chart', [traceSPX, traceVIX, traceCorr, traceZero, traceNormal], layout, {
+    Plotly.newPlot('correlation-chart', [traceAsset, traceVol, traceCorr, traceZero, traceNormal], layout, {
       responsive: true,
       displayModeBar: false
     });
@@ -786,7 +1039,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       y: rollingCorr,
       name: corrTraceName,
       mode: 'lines',
-      line: { color: '#00E5FF', width: 2.2 },
+      line: { color: corrColor, width: 2.2 },
       hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${corrHoverLabel}: %{y:.3f}<extra></extra>`
     };
 
@@ -824,7 +1077,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
         nticks: 10
       },
       yaxis: {
-        title: { text: 'Rolling Pearson ρ', font: { color: '#00E5FF', size: 10 } },
+        title: { text: `Rolling Pearson ρ(${assetLabel}, ${volLabel})`, font: { color: corrColor, size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
         range: [-1.05, upperY]
@@ -871,6 +1124,9 @@ function updateUI(data) {
   const mod = data.model;
   const conf = data.confluence;
   const corr = data.correlation;
+  const ndx = data.ndx;
+  const techVol = data.tech_vol;
+  const isNdx = (currentAssetPair === 'NDX');
 
   // 1. Connection Pill
   const connPill = document.getElementById('connection-pill');
@@ -883,78 +1139,256 @@ function updateUI(data) {
     connText.textContent = "IBKR Disconnected";
   }
 
-  // 2. Confluence Banner
+  // 2. Always-On Tech Vol Premium Strip
+  if (techVol) {
+    const stripSpread = document.getElementById('strip-tech-spread');
+    const stripRatio = document.getElementById('strip-tech-ratio');
+    if (stripSpread) {
+      stripSpread.textContent = `${fmtPts(techVol.spread)} pts`;
+      stripSpread.className = (techVol.spread >= 6.0) ? "text-red-400 font-bold animate-pulse" : (techVol.spread >= 4.0 ? "text-amber-400 font-bold" : "text-emerald-400 font-bold");
+    }
+    if (stripRatio) {
+      stripRatio.textContent = `(${fmtNum(techVol.ratio, 3)}x)`;
+    }
+  }
+
+  // 3. Confluence Banner & Audio Alerts
   const confBanner = document.getElementById('confluence-banner');
   const confBadge = document.getElementById('confluence-badge');
   const confDesc = document.getElementById('confluence-desc');
 
-  if (conf.is_dual_alert) {
-    confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-red-950/90 border border-red-700 beacon-alert transition duration-300";
-    confBadge.className = "px-2.5 py-1 rounded text-xs font-black uppercase tracking-wider bg-red-600 text-white animate-pulse";
-    confBadge.textContent = "🚨 CAPITULATION ALERT";
-    confDesc.textContent = `Overvix Triggered (${fmtPts(ov.residual_pts)} pts) + Inverted Term Structure (${fmtNum(ts.ratio, 4)}) — Favorable Swing Long / Mean Reversion`;
-  } else if (conf.is_overvix_alert) {
-    confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-amber-950/80 border border-amber-700 transition duration-300";
-    confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-600 text-black";
-    confBadge.textContent = "⚠️ OVERVIX TRIGGER";
-    confDesc.textContent = `Spot-Vol Overreaction: VIX is ${fmtPts(ov.residual_pts)} pts above regression trendline.`;
-  } else if (conf.is_inversion_alert) {
-    confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-amber-950/80 border border-amber-700 transition duration-300";
-    confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-600 text-black";
-    confBadge.textContent = "⚠️ BACKWARDATION";
-    confDesc.textContent = `Term Structure Inversion: VIX / VIX3M Ratio (${fmtNum(ts.ratio, 4)}) >= 1.00. Front-month acute hedging.`;
-  } else if (ts.is_flattening) {
-    confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-slate-900 border border-slate-800 transition duration-300";
-    confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-950 text-amber-300 border border-amber-800";
-    confBadge.textContent = "⚠️ CURVE FLATTENING";
-    confDesc.textContent = `Volatility term structure flattening towards 1.00 (${fmtNum(ts.ratio, 4)}).`;
+  if (isNdx && ndx) {
+    const ndxOv = ndx.overvix || { is_overvixed: false, residual_pts: 0 };
+    const isTechSpreadPanic = (techVol && techVol.spread >= 6.0);
+    const isDualNdx = (ndxOv.is_overvixed && ts.is_inverted);
+
+    if (isDualNdx) {
+      confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-red-950/90 border border-red-700 beacon-alert transition duration-300";
+      confBadge.className = "px-2.5 py-1 rounded text-xs font-black uppercase tracking-wider bg-red-600 text-white animate-pulse";
+      confBadge.textContent = "🚨 TECH CAPITULATION ALERT";
+      confDesc.textContent = `Over-VXN Triggered (${fmtPts(ndxOv.residual_pts)} pts) + Inverted Term Structure (${fmtNum(ts.ratio, 4)}) — Extreme Tech Panic / Favorable Reversal`;
+    } else if (ndxOv.is_overvixed) {
+      confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-purple-950/80 border border-purple-700 transition duration-300";
+      confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-purple-600 text-white";
+      confBadge.textContent = "⚠️ OVER-VXN TRIGGER";
+      confDesc.textContent = `Tech Spot-Vol Shock: VXN is ${fmtPts(ndxOv.residual_pts)} pts above NDX regression trendline.`;
+    } else if (isTechSpreadPanic) {
+      confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-amber-950/80 border border-amber-700 transition duration-300";
+      confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-600 text-black";
+      confBadge.textContent = "⚠️ TECH PANIC SPREAD";
+      confDesc.textContent = `Elevated Tech Vol Premium: VXN - VIX spread is ${fmtPts(techVol.spread)} pts (≥ +6.0 pts panic threshold).`;
+    } else if (ts.is_inverted) {
+      confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-amber-950/80 border border-amber-700 transition duration-300";
+      confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-600 text-black";
+      confBadge.textContent = "⚠️ BACKWARDATION";
+      confDesc.textContent = `Macro Vol Term Structure Inverted: VIX / VIX3M (${fmtNum(ts.ratio, 4)}) ≥ 1.00.`;
+    } else {
+      confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-slate-900 border border-slate-800 transition duration-300";
+      confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-purple-950 text-purple-300 border border-purple-800";
+      confBadge.textContent = "🟢 NORMAL TECH REGIME";
+      confDesc.textContent = `Normal tech spot-vol pricing (${fmtPts(ndxOv.residual_pts)} pts). Tech vol spread: ${fmtPts(techVol ? techVol.spread : 0)} pts.`;
+    }
+
+    if (isDualNdx && (!lastOvervixSignal || !lastInversionSignal)) {
+      playAlertSound('dual');
+    } else if (ndxOv.is_overvixed && !lastOvervixSignal) {
+      playAlertSound('overvix');
+    }
+    lastOvervixSignal = ndxOv.is_overvixed;
+    lastInversionSignal = ts.is_inverted;
+
   } else {
-    confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-slate-900 border border-slate-800 transition duration-300";
-    confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-emerald-950 text-emerald-400 border border-emerald-800";
-    confBadge.textContent = "🟢 NORMAL REGIME";
-    confDesc.textContent = `Volatility term structure in contango (${fmtNum(ts.ratio, 4)}). Normal spot-vol pricing (${fmtPts(ov.residual_pts)} pts).`;
+    // SPX Mode Confluence & Audio
+    if (conf.is_dual_alert) {
+      confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-red-950/90 border border-red-700 beacon-alert transition duration-300";
+      confBadge.className = "px-2.5 py-1 rounded text-xs font-black uppercase tracking-wider bg-red-600 text-white animate-pulse";
+      confBadge.textContent = "🚨 CAPITULATION ALERT";
+      confDesc.textContent = `Overvix Triggered (${fmtPts(ov.residual_pts)} pts) + Inverted Term Structure (${fmtNum(ts.ratio, 4)}) — Favorable Swing Long / Mean Reversion`;
+    } else if (conf.is_overvix_alert) {
+      confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-amber-950/80 border border-amber-700 transition duration-300";
+      confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-600 text-black";
+      confBadge.textContent = "⚠️ OVERVIX TRIGGER";
+      confDesc.textContent = `Spot-Vol Overreaction: VIX is ${fmtPts(ov.residual_pts)} pts above regression trendline.`;
+    } else if (conf.is_inversion_alert) {
+      confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-amber-950/80 border border-amber-700 transition duration-300";
+      confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-600 text-black";
+      confBadge.textContent = "⚠️ BACKWARDATION";
+      confDesc.textContent = `Term Structure Inversion: VIX / VIX3M Ratio (${fmtNum(ts.ratio, 4)}) >= 1.00. Front-month acute hedging.`;
+    } else if (ts.is_flattening) {
+      confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-slate-900 border border-slate-800 transition duration-300";
+      confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-950 text-amber-300 border border-amber-800";
+      confBadge.textContent = "⚠️ CURVE FLATTENING";
+      confDesc.textContent = `Volatility term structure flattening towards 1.00 (${fmtNum(ts.ratio, 4)}).`;
+    } else {
+      confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-slate-900 border border-slate-800 transition duration-300";
+      confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-emerald-950 text-emerald-400 border border-emerald-800";
+      confBadge.textContent = "🟢 NORMAL REGIME";
+      confDesc.textContent = `Volatility term structure in contango (${fmtNum(ts.ratio, 4)}). Normal spot-vol pricing (${fmtPts(ov.residual_pts)} pts).`;
+    }
+
+    if (conf.is_dual_alert && (!lastOvervixSignal || !lastInversionSignal)) {
+      playAlertSound('dual');
+    } else if (ov.is_overvixed && !lastOvervixSignal) {
+      playAlertSound('overvix');
+    }
+    lastOvervixSignal = ov.is_overvixed;
+    lastInversionSignal = ts.is_inverted;
   }
 
-  // Audio Alerts on State Changes
-  if (conf.is_dual_alert && (!lastOvervixSignal || !lastInversionSignal)) {
-    playAlertSound('dual');
-  } else if (ov.is_overvixed && !lastOvervixSignal) {
-    playAlertSound('overvix');
-  }
-  lastOvervixSignal = ov.is_overvixed;
-  lastInversionSignal = ts.is_inverted;
-
-  // 3. KPI Cards
-  document.getElementById('kpi-spx-price').textContent = fmtNum(mkt.spx.current);
+  // 4. KPI Cards
+  const cardOvervix = document.getElementById('card-overvix-residual');
+  const overvixStatusBadge = document.getElementById('kpi-overvix-status');
+  const residualEl = document.getElementById('kpi-residual-pts');
   const spxPctEl = document.getElementById('kpi-spx-pct');
-  spxPctEl.textContent = fmtPct(mkt.spx.pct_change);
-  spxPctEl.className = `text-xs font-mono font-medium mt-0.5 ${mkt.spx.pct_change >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
-
-  document.getElementById('kpi-vix-price').textContent = fmtNum(mkt.vix.current);
   const vixPtEl = document.getElementById('kpi-vix-pt');
-  vixPtEl.textContent = `${fmtPts(mkt.vix.pt_change)} pts`;
-  vixPtEl.className = `text-xs font-mono font-medium mt-0.5 ${mkt.vix.pt_change >= 0 ? 'text-red-400' : 'text-emerald-400'}`;
-
-  document.getElementById('kpi-vix3m-price').textContent = fmtNum(mkt.vix3m.current);
-  const vix3mPtEl = document.getElementById('kpi-vix3m-pt');
-  vix3mPtEl.textContent = `${fmtPts(mkt.vix3m.pt_change)} pts`;
-
-  // Ratio Card
-  document.getElementById('kpi-ratio-val').textContent = fmtNum(ts.ratio, 4);
   const ratioBadge = document.getElementById('kpi-ratio-badge');
-  if (ts.ratio >= 1.0) {
-    ratioBadge.textContent = 'BACKWARDATION';
-    ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-900/80 text-red-200 uppercase font-semibold border border-red-700';
-  } else if (ts.ratio >= 0.90) {
-    ratioBadge.textContent = 'FLATTENING';
-    ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-900/80 text-amber-200 uppercase font-semibold border border-amber-700';
+
+  if (isNdx && ndx) {
+    const ndxMkt = ndx.market || { current: 0, pct_change: 0, vxn: { current: 0, pt_change: 0 } };
+    const ndxOv = ndx.overvix || { expected_vol_pt: 0, residual_pts: 0, is_overvixed: false };
+    const ndxMod = ndx.model || mod;
+
+    document.getElementById('lbl-kpi-asset').textContent = "NASDAQ 100";
+    document.getElementById('kpi-spx-price').textContent = fmtNum(ndxMkt.current);
+    spxPctEl.textContent = fmtPct(ndxMkt.pct_change);
+    spxPctEl.className = `text-xs font-mono font-medium mt-0.5 ${ndxMkt.pct_change >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
+
+    document.getElementById('lbl-kpi-vol').textContent = "VXN (30-Day)";
+    document.getElementById('kpi-vix-price').textContent = fmtNum(ndxMkt.vxn ? ndxMkt.vxn.current : 0);
+    const vxnPt = ndxMkt.vxn ? ndxMkt.vxn.pt_change : 0;
+    vixPtEl.textContent = `${fmtPts(vxnPt)} pts`;
+    vixPtEl.className = `text-xs font-mono font-medium mt-0.5 ${vxnPt >= 0 ? 'text-red-400' : 'text-emerald-400'}`;
+
+    document.getElementById('lbl-kpi-sec-vol').textContent = "Tech Spread (VXN-VIX)";
+    document.getElementById('tag-kpi-sec-vol').textContent = "Spread";
+    const spreadVal = techVol ? techVol.spread : 0;
+    const spreadChg = techVol && techVol.change_pts !== undefined ? techVol.change_pts : 0;
+    document.getElementById('kpi-vix3m-price').textContent = `${fmtPts(spreadVal)} pts`;
+    const vix3mPtEl = document.getElementById('kpi-vix3m-pt');
+    vix3mPtEl.textContent = `${fmtPts(spreadChg)} pts`;
+    vix3mPtEl.className = `text-xs font-mono font-medium mt-0.5 ${spreadVal >= 6.0 ? 'text-red-400' : (spreadVal >= 4.0 ? 'text-amber-400' : 'text-emerald-400')}`;
+
+    document.getElementById('lbl-kpi-ratio').textContent = "VXN / VIX";
+    const techRatioVal = techVol ? techVol.ratio : 1.0;
+    document.getElementById('kpi-ratio-val').textContent = fmtNum(techRatioVal, 4);
+    document.getElementById('lbl-kpi-ratio-sub').textContent = "Equilibrium ~ 1.15x";
+    if (spreadVal >= 6.0) {
+      ratioBadge.textContent = 'TECH PANIC';
+      ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-900/80 text-red-200 uppercase font-semibold border border-red-700';
+    } else if (spreadVal >= 4.0) {
+      ratioBadge.textContent = 'ELEVATED';
+      ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-900/80 text-amber-200 uppercase font-semibold border border-amber-700';
+    } else {
+      ratioBadge.textContent = 'NORMAL SPREAD';
+      ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 uppercase font-semibold border border-emerald-800';
+    }
+
+    document.getElementById('lbl-kpi-expected').textContent = "Expected ΔVXN";
+    document.getElementById('kpi-expected-vix').textContent = `${fmtPts(ndxOv.expected_vol_pt)} pts`;
+    document.getElementById('lbl-kpi-exp-sub').textContent = "Tech Beta Model";
+
+    document.getElementById('lbl-kpi-residual').textContent = "Over-VXN Residual";
+    residualEl.textContent = `${fmtPts(ndxOv.residual_pts)} pts`;
+    if (ndxOv.is_overvixed) {
+      residualEl.className = 'text-xl font-bold font-mono tracking-tight text-red-500 animate-pulse';
+      overvixStatusBadge.textContent = '🚨 OVER-VXN';
+      overvixStatusBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-950 text-red-300 border border-red-700 font-bold uppercase';
+      cardOvervix.className = 'bg-red-950/30 border border-red-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
+    } else {
+      residualEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-400';
+      overvixStatusBadge.textContent = 'NORMAL';
+      overvixStatusBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase';
+      cardOvervix.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
+    }
+
+    // Model Parameters Strip (NDX)
+    document.getElementById('param-window').textContent = ndxMod.window_days;
+    document.getElementById('param-r2').textContent = fmtNum(ndxMod.r_squared, 4);
+    document.getElementById('param-slope').textContent = fmtNum(ndxMod.slope, 4);
+    document.getElementById('param-volslope').textContent = fmtNum(ndxMod.vol_slope, 4);
+    document.getElementById('param-intercept').textContent = fmtNum(ndxMod.intercept, 4);
+
   } else {
-    ratioBadge.textContent = 'CONTANGO';
-    ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 uppercase font-semibold border border-emerald-800';
+    // SPX Mode
+    document.getElementById('lbl-kpi-asset').textContent = "SPX 500";
+    document.getElementById('kpi-spx-price').textContent = fmtNum(mkt.spx.current);
+    spxPctEl.textContent = fmtPct(mkt.spx.pct_change);
+    spxPctEl.className = `text-xs font-mono font-medium mt-0.5 ${mkt.spx.pct_change >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
+
+    document.getElementById('lbl-kpi-vol').textContent = "VIX (30-Day)";
+    document.getElementById('kpi-vix-price').textContent = fmtNum(mkt.vix.current);
+    vixPtEl.textContent = `${fmtPts(mkt.vix.pt_change)} pts`;
+    vixPtEl.className = `text-xs font-mono font-medium mt-0.5 ${mkt.vix.pt_change >= 0 ? 'text-red-400' : 'text-emerald-400'}`;
+
+    document.getElementById('lbl-kpi-sec-vol').textContent = "VIX3M (90-Day)";
+    document.getElementById('tag-kpi-sec-vol').textContent = "3M";
+    document.getElementById('kpi-vix3m-price').textContent = fmtNum(mkt.vix3m.current);
+    const vix3mPtEl = document.getElementById('kpi-vix3m-pt');
+    vix3mPtEl.textContent = `${fmtPts(mkt.vix3m.pt_change)} pts`;
+    vix3mPtEl.className = 'text-xs font-mono font-medium text-slate-400 mt-0.5';
+
+    document.getElementById('lbl-kpi-ratio').textContent = "VIX / VIX3M";
+    document.getElementById('kpi-ratio-val').textContent = fmtNum(ts.ratio, 4);
+    document.getElementById('lbl-kpi-ratio-sub').textContent = "Inversion @ ≥ 1.00";
+    if (ts.ratio >= 1.0) {
+      ratioBadge.textContent = 'BACKWARDATION';
+      ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-900/80 text-red-200 uppercase font-semibold border border-red-700';
+    } else if (ts.ratio >= 0.90) {
+      ratioBadge.textContent = 'FLATTENING';
+      ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-900/80 text-amber-200 uppercase font-semibold border border-amber-700';
+    } else {
+      ratioBadge.textContent = 'CONTANGO';
+      ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 uppercase font-semibold border border-emerald-800';
+    }
+
+    document.getElementById('lbl-kpi-expected').textContent = "Expected ΔVIX";
+    document.getElementById('kpi-expected-vix').textContent = `${fmtPts(ov.expected_vix_pt)} pts`;
+    document.getElementById('lbl-kpi-exp-sub').textContent = "Spot-Vol Model";
+
+    document.getElementById('lbl-kpi-residual').textContent = "Overvix Residual";
+    residualEl.textContent = `${fmtPts(ov.residual_pts)} pts`;
+    if (ov.is_overvixed) {
+      residualEl.className = 'text-xl font-bold font-mono tracking-tight text-red-500 animate-pulse';
+      overvixStatusBadge.textContent = '🚨 OVERVIXED';
+      overvixStatusBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-950 text-red-300 border border-red-700 font-bold uppercase';
+      cardOvervix.className = 'bg-red-950/30 border border-red-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
+    } else {
+      residualEl.className = 'text-xl font-bold font-mono tracking-tight text-cyan-400';
+      overvixStatusBadge.textContent = 'NORMAL';
+      overvixStatusBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase';
+      cardOvervix.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
+    }
+
+    // Model Parameters Strip (SPX)
+    document.getElementById('param-window').textContent = mod.window_days;
+    document.getElementById('param-r2').textContent = fmtNum(mod.r_squared, 4);
+    document.getElementById('param-slope').textContent = fmtNum(mod.slope, 4);
+    document.getElementById('param-volslope').textContent = fmtNum(mod.vol_slope, 4);
+    document.getElementById('param-intercept').textContent = fmtNum(mod.intercept, 4);
   }
 
-  // Intraday Session Stats
-  if (ts.intraday) {
+  // Intraday Session Stats for middle chart (Term Structure or Tech Vol)
+  if (isNdx) {
+    const dTech = cachedTechVol['1D'];
+    const spreads = (dTech && dTech.spread && dTech.spread.length > 0) ? dTech.spread : [];
+    const minSpread = spreads.length > 0 ? Math.min(...spreads) : ((techVol && techVol.intraday) ? techVol.intraday.low : 0);
+    const maxSpread = spreads.length > 0 ? Math.max(...spreads) : ((techVol && techVol.intraday) ? techVol.intraday.high : 0);
+    
+    document.getElementById('ts-day-low').textContent = fmtPts(minSpread);
+    document.getElementById('ts-day-high').textContent = fmtPts(maxSpread);
+    const deltaEl = document.getElementById('ts-day-delta');
+    const deltaPctEl = document.getElementById('ts-day-deltapct');
+    const spreadChg = (techVol && techVol.change_pts !== undefined) ? techVol.change_pts : (spreads.length > 1 ? spreads[spreads.length - 1] - spreads[0] : 0);
+    deltaEl.textContent = `${fmtPts(spreadChg)} pts`;
+    deltaPctEl.textContent = (spreads.length > 0 && spreads[0] !== 0) ? fmtPct((spreadChg / Math.abs(spreads[0])) * 100) : '';
+    if (spreadChg >= 0) {
+      deltaEl.className = "font-mono text-red-400";
+      deltaPctEl.className = "font-mono text-red-400";
+    } else {
+      deltaEl.className = "font-mono text-emerald-400";
+      deltaPctEl.className = "font-mono text-emerald-400";
+    }
+  } else if (ts && ts.intraday) {
     document.getElementById('ts-day-low').textContent = fmtNum(ts.intraday.low, 4);
     document.getElementById('ts-day-high').textContent = fmtNum(ts.intraday.high, 4);
     const deltaEl = document.getElementById('ts-day-delta');
@@ -970,43 +1404,22 @@ function updateUI(data) {
     }
   }
 
-  // Expected VIX & Residual
-  document.getElementById('kpi-expected-vix').textContent = `${fmtPts(ov.expected_vix_pt)} pts`;
-  
-  const residualEl = document.getElementById('kpi-residual-pts');
-  residualEl.textContent = `${fmtPts(ov.residual_pts)} pts`;
-  
-  const cardOvervix = document.getElementById('card-overvix-residual');
-  const overvixStatusBadge = document.getElementById('kpi-overvix-status');
-  if (ov.is_overvixed) {
-    residualEl.className = 'text-xl font-bold font-mono tracking-tight text-red-500 animate-pulse';
-    overvixStatusBadge.textContent = '🚨 OVERVIXED';
-    overvixStatusBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-950 text-red-300 border border-red-700 font-bold uppercase';
-    cardOvervix.className = 'bg-red-950/30 border border-red-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
-  } else {
-    residualEl.className = 'text-xl font-bold font-mono tracking-tight text-cyan-400';
-    overvixStatusBadge.textContent = 'NORMAL';
-    overvixStatusBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase';
-    cardOvervix.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
-  }
-
-  // Model Parameters Strip
-  document.getElementById('param-window').textContent = mod.window_days;
-  document.getElementById('param-r2').textContent = fmtNum(mod.r_squared, 4);
-  document.getElementById('param-slope').textContent = fmtNum(mod.slope, 4);
-  document.getElementById('param-volslope').textContent = fmtNum(mod.vol_slope, 4);
-  document.getElementById('param-intercept').textContent = fmtNum(mod.intercept, 4);
-
   // Correlation Strip
-  if (corr) {
-    if (cachedCorr.metrics) {
-      cachedCorr.metrics['1D'] = corr.rolling_corr;
-      if (corr.corr_5d !== undefined) cachedCorr.metrics['5D'] = corr.corr_5d;
-      if (corr.corr_1y !== undefined) cachedCorr.metrics['1Y'] = corr.corr_1y;
-    }
-    updateCorrMetricDisplay();
+  if (corr && cachedCorr.metrics) {
+    cachedCorr.metrics['1D'] = corr.rolling_corr;
+    if (corr.corr_5d !== undefined) cachedCorr.metrics['5D'] = corr.corr_5d;
+    if (corr.corr_1y !== undefined) cachedCorr.metrics['1Y'] = corr.corr_1y;
+  }
+  if (ndx && ndx.correlation && cachedCorrNdx.metrics) {
+    cachedCorrNdx.metrics['1D'] = ndx.correlation.rolling_corr;
+    if (ndx.correlation.corr_5d !== undefined) cachedCorrNdx.metrics['5D'] = ndx.correlation.corr_5d;
+    if (ndx.correlation.corr_1y !== undefined) cachedCorrNdx.metrics['1Y'] = ndx.correlation.corr_1y;
+  }
+  updateCorrMetricDisplay();
 
-    const corrVal = (currentCorrTf === '1D') ? corr.rolling_corr : ((currentCorrTf === '5D') ? (corr.corr_5d || corr.rolling_corr) : (corr.corr_1y || corr.rolling_corr));
+  const activeCorrObj = (isNdx && ndx && ndx.correlation) ? ndx.correlation : corr;
+  if (activeCorrObj) {
+    const corrVal = (currentCorrTf === '1D') ? activeCorrObj.rolling_corr : ((currentCorrTf === '5D') ? (activeCorrObj.corr_5d || activeCorrObj.rolling_corr) : (activeCorrObj.corr_1y || activeCorrObj.rolling_corr));
     const corrPill = document.getElementById('corr-status-pill');
     if (corrPill) {
       if (corrVal < -0.40) {
@@ -1024,98 +1437,189 @@ function updateUI(data) {
 
   // Time & Tags
   const now = new Date();
-  document.getElementById('last-update-time').textContent = data.is_historical ? `Session: ${data.session_date}` : `Updated: ${now.toLocaleTimeString()}`;
-  document.getElementById('chart-ratio-tag').textContent = `Ratio: ${fmtNum(ts.ratio, 4)}`;
+  if (data.is_historical) {
+    document.getElementById('last-update-time').textContent = `Session: ${data.session_date}`;
+  } else if (data.premarket && data.premarket.is_premarket) {
+    const gthVix = (data.premarket.gth_vix !== undefined) ? ` | GTH VIX: ${data.premarket.gth_vix}` : '';
+    document.getElementById('last-update-time').textContent = `Pre-Market (RTH 09:30 ET)${gthVix}`;
+  } else if (data.is_rth_active === false) {
+    document.getElementById('last-update-time').textContent = `Market Closed (${data.session_date || 'Prior Close'})`;
+  } else {
+    document.getElementById('last-update-time').textContent = `Updated: ${now.toLocaleTimeString()}`;
+  }
+
+  // Header Mode Badge
+  const headerModeBadge = document.getElementById('header-mode-badge');
+  if (headerModeBadge && currentViewMode === 'live') {
+    if (data.is_rth_active) {
+      headerModeBadge.textContent = "IBKR Live";
+      headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-semibold";
+    } else if (data.premarket && data.premarket.is_premarket) {
+      headerModeBadge.textContent = `PRE-MARKET (${data.session_date || 'Prior'})`;
+      headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60 font-semibold";
+    } else {
+      headerModeBadge.textContent = `CLOSED (${data.session_date || 'Prior'})`;
+      headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700/60 font-semibold";
+    }
+  }
+
+  document.getElementById('chart-ratio-tag').textContent = isNdx && techVol ? `Spread: ${fmtPts(techVol.spread)} pts` : `Ratio: ${fmtNum(ts.ratio, 4)}`;
 
   // If this is a historical replay dataset, charts were already fully plotted by render functions
   if (data.is_historical) {
     return;
   }
 
-  // 4. Update Overvix Plotly Chart Real-Time
-  const currX = data.current_point.x;
-  const currY = data.current_point.y;
-  Plotly.restyle('overvix-chart', {
-    x: [[currX]],
-    y: [[currY]],
-    'marker.color': [ov.is_overvixed ? '#FF1744' : '#00E5FF']
-  }, [5]);
+  // Real-Time Plotly Chart Updates
+  // 5. Update Overvix / Over-VXN Plotly Chart Real-Time
+  const activePt = (isNdx && ndx && ndx.current_point) ? ndx.current_point : data.current_point;
+  const isTargetOvervixed = (isNdx && ndx && ndx.overvix) ? ndx.overvix.is_overvixed : ov.is_overvixed;
+  if (activePt) {
+    const isLiveRth = (data.is_rth_active === true);
+    const pointLabel = isLiveRth ? "Live Point" : "Session Close Point";
+    Plotly.restyle('overvix-chart', {
+      x: [[activePt.x]],
+      y: [[activePt.y]],
+      name: [pointLabel],
+      'marker.color': [isTargetOvervixed ? '#FF1744' : (isNdx ? '#C084FC' : '#00E5FF')]
+    }, [5]);
+  }
 
-  // 5. Update Intraday Term Structure Curve Real-Time (when 1D is active)
+  // 6. Update Intraday Term Structure / Tech Vol Real-Time (when 1D is active)
   if (currentTimeframe === '1D') {
-    const d1 = cachedTs['1D'];
-    if (d1 && d1.times && d1.times.length > 0) {
-      const lastT = d1.times[d1.times.length - 1];
-      const liveDt = data.datetime || (new Date().toISOString().slice(0, 10) + ' ' + now.toTimeString().slice(0, 5));
-      const liveDate = liveDt.slice(0, 10);
-      const lastDate = lastT.slice(0, 10);
+    const liveDt = data.datetime || (new Date().toISOString().slice(0, 10) + ' ' + now.toTimeString().slice(0, 5));
+    const liveDate = liveDt.slice(0, 10);
 
-      // Only update/append if today's market session is active (same calendar date)
-      if (liveDate === lastDate) {
-        if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
-          d1.vix[d1.vix.length - 1] = mkt.vix.current;
-          d1.vix3m[d1.vix3m.length - 1] = mkt.vix3m.current;
-          d1.ratio[d1.ratio.length - 1] = ts.ratio;
-        } else {
-          d1.times.push(liveDt);
-          d1.vix.push(mkt.vix.current);
-          d1.vix3m.push(mkt.vix3m.current);
-          d1.ratio.push(ts.ratio);
+    if (isNdx && techVol) {
+      const dt = cachedTechVol['1D'];
+      if (dt && dt.times && dt.times.length > 0) {
+        const lastT = dt.times[dt.times.length - 1];
+        const lastDate = lastT.slice(0, 10);
+        if (liveDate === lastDate) {
+          const vxnVal = (ndx && ndx.market && ndx.market.vxn) ? ndx.market.vxn.current : 0;
+          if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
+            dt.vxn[dt.vxn.length - 1] = vxnVal;
+            dt.vix[dt.vix.length - 1] = mkt.vix.current;
+            dt.spread[dt.spread.length - 1] = techVol.spread;
+            dt.ratio[dt.ratio.length - 1] = techVol.ratio;
+          } else {
+            dt.times.push(liveDt);
+            dt.vxn.push(vxnVal);
+            dt.vix.push(mkt.vix.current);
+            dt.spread.push(techVol.spread);
+            dt.ratio.push(techVol.ratio);
+          }
+          Plotly.restyle('term-structure-chart', {
+            x: [dt.times, dt.times, dt.times],
+            y: [dt.vxn, dt.vix, dt.spread]
+          }, [0, 1, 2]);
+          Plotly.restyle('term-structure-chart', {
+            x: [[liveDt]],
+            y: [[techVol.spread]],
+            'marker.color': [(techVol.spread >= 6.0) ? '#EF4444' : '#F59E0B']
+          }, [5]);
         }
-
-        Plotly.restyle('term-structure-chart', {
-          x: [d1.times, d1.times, d1.times],
-          y: [d1.vix, d1.vix3m, d1.ratio]
-        }, [0, 1, 2]);
-
-        Plotly.restyle('term-structure-chart', {
-          x: [[liveDt]],
-          y: [[ts.ratio]],
-          'marker.color': [ts.is_inverted ? '#EF4444' : '#00E5FF']
-        }, [5]);
-      } else {
-        // Weekend or market closed: live marker stays pinned to the latest completed bar
-        Plotly.restyle('term-structure-chart', {
-          x: [[lastT]],
-          y: [[ts.ratio]],
-          'marker.color': [ts.is_inverted ? '#EF4444' : '#00E5FF']
-        }, [5]);
+      }
+    } else {
+      const d1 = cachedTs['1D'];
+      if (d1 && d1.times && d1.times.length > 0) {
+        const lastT = d1.times[d1.times.length - 1];
+        const lastDate = lastT.slice(0, 10);
+        if (liveDate === lastDate) {
+          if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
+            d1.vix[d1.vix.length - 1] = mkt.vix.current;
+            d1.vix3m[d1.vix3m.length - 1] = mkt.vix3m.current;
+            d1.ratio[d1.ratio.length - 1] = ts.ratio;
+          } else {
+            d1.times.push(liveDt);
+            d1.vix.push(mkt.vix.current);
+            d1.vix3m.push(mkt.vix3m.current);
+            d1.ratio.push(ts.ratio);
+          }
+          Plotly.restyle('term-structure-chart', {
+            x: [d1.times, d1.times, d1.times],
+            y: [d1.vix, d1.vix3m, d1.ratio]
+          }, [0, 1, 2]);
+          Plotly.restyle('term-structure-chart', {
+            x: [[liveDt]],
+            y: [[ts.ratio]],
+            'marker.color': [ts.is_inverted ? '#EF4444' : '#00E5FF']
+          }, [5]);
+        }
       }
     }
   }
 
-  // 6. Update Intraday Correlation Chart Real-Time (when 1D is active)
+  // 7. Update Intraday Correlation Real-Time (when 1D is active)
   if (currentCorrTf === '1D') {
-    const cr = cachedCorr['1D'];
-    if (cr && cr.times && cr.times.length > 0) {
-      const lastT = cr.times[cr.times.length - 1];
-      const liveDt = data.datetime || (new Date().toISOString().slice(0, 10) + ' ' + now.toTimeString().slice(0, 5));
-      const liveDate = liveDt.slice(0, 10);
-      const lastDate = lastT.slice(0, 10);
+    const liveDt = data.datetime || (new Date().toISOString().slice(0, 10) + ' ' + now.toTimeString().slice(0, 5));
+    const liveDate = liveDt.slice(0, 10);
 
-      // Only update/append if today's market session is active (same calendar date)
-      if (liveDate === lastDate) {
-        if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
-          cr.spx_pct[cr.spx_pct.length - 1] = mkt.spx.pct_change;
-          cr.vix_pt[cr.vix_pt.length - 1] = mkt.vix.pt_change;
-          if (corr) cr.rolling_corr[cr.rolling_corr.length - 1] = corr.rolling_corr;
-        } else {
-          cr.times.push(liveDt);
-          cr.spx_pct.push(mkt.spx.pct_change);
-          cr.vix_pt.push(mkt.vix.pt_change);
-          if (corr) cr.rolling_corr.push(corr.rolling_corr);
+    if (isNdx && ndx) {
+      const cr = cachedCorrNdx['1D'];
+      if (cr && cr.times && cr.times.length > 0) {
+        const lastT = cr.times[cr.times.length - 1];
+        const lastDate = lastT.slice(0, 10);
+        if (liveDate === lastDate) {
+          const ndxPct = ndx.market ? ndx.market.pct_change : 0;
+          const vxnPt = (ndx.market && ndx.market.vxn) ? ndx.market.vxn.pt_change : 0;
+          const corrVal = ndx.correlation ? ndx.correlation.rolling_corr : -0.75;
+
+          const pctArr = cr.ndx_pct || cr.spx_pct;
+          const ptArr = cr.vxn_pt || cr.vix_pt;
+
+          if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
+            pctArr[pctArr.length - 1] = ndxPct;
+            ptArr[ptArr.length - 1] = vxnPt;
+            cr.rolling_corr[cr.rolling_corr.length - 1] = corrVal;
+          } else {
+            cr.times.push(liveDt);
+            pctArr.push(ndxPct);
+            ptArr.push(vxnPt);
+            cr.rolling_corr.push(corrVal);
+          }
+
+          if (currentCorrMode === 'dual') {
+            Plotly.restyle('correlation-chart', {
+              x: [cr.times, cr.times, cr.times],
+              y: [pctArr, ptArr, cr.rolling_corr]
+            }, [0, 1, 2]);
+          } else {
+            Plotly.restyle('correlation-chart', {
+              x: [cr.times],
+              y: [cr.rolling_corr]
+            }, [0]);
+          }
         }
+      }
+    } else {
+      const cr = cachedCorr['1D'];
+      if (cr && cr.times && cr.times.length > 0) {
+        const lastT = cr.times[cr.times.length - 1];
+        const lastDate = lastT.slice(0, 10);
+        if (liveDate === lastDate) {
+          if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
+            cr.spx_pct[cr.spx_pct.length - 1] = mkt.spx.pct_change;
+            cr.vix_pt[cr.vix_pt.length - 1] = mkt.vix.pt_change;
+            if (corr) cr.rolling_corr[cr.rolling_corr.length - 1] = corr.rolling_corr;
+          } else {
+            cr.times.push(liveDt);
+            cr.spx_pct.push(mkt.spx.pct_change);
+            cr.vix_pt.push(mkt.vix.pt_change);
+            if (corr) cr.rolling_corr.push(corr.rolling_corr);
+          }
 
-        if (currentCorrMode === 'dual') {
-          Plotly.restyle('correlation-chart', {
-            x: [cr.times, cr.times, cr.times],
-            y: [cr.spx_pct, cr.vix_pt, cr.rolling_corr]
-          }, [0, 1, 2]);
-        } else {
-          Plotly.restyle('correlation-chart', {
-            x: [cr.times],
-            y: [cr.rolling_corr]
-          }, [0]);
+          if (currentCorrMode === 'dual') {
+            Plotly.restyle('correlation-chart', {
+              x: [cr.times, cr.times, cr.times],
+              y: [cr.spx_pct, cr.vix_pt, cr.rolling_corr]
+            }, [0, 1, 2]);
+          } else {
+            Plotly.restyle('correlation-chart', {
+              x: [cr.times],
+              y: [cr.rolling_corr]
+            }, [0]);
+          }
         }
       }
     }
@@ -1138,7 +1642,7 @@ async function bootstrapData() {
     document.getElementById('input-threshold').value = currentThreshold;
     document.getElementById('input-window').value = data.model.window_days;
 
-    // Cache datasets
+    // Cache SPX Term Structure datasets
     if (data.term_structure.intraday_1d) {
       cachedTs['1D'] = data.term_structure.intraday_1d;
     }
@@ -1154,6 +1658,7 @@ async function bootstrapData() {
       };
     }
 
+    // Cache SPX Dynamic Correlation datasets
     if (data.intraday_correlation) {
       if (data.intraday_correlation['1D']) {
         cachedCorr['1D'] = data.intraday_correlation['1D'];
@@ -1164,6 +1669,23 @@ async function bootstrapData() {
         cachedCorr['1D'] = data.intraday_correlation;
         cachedCorr['5D'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
         cachedCorr['1Y'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
+      }
+    }
+
+    // Cache Tech Vol Premium datasets (Spread & Ratio across 1D, 5D, 1Y)
+    if (data.tech_vol) {
+      if (data.tech_vol.intraday_1d) cachedTechVol['1D'] = data.tech_vol.intraday_1d;
+      if (data.tech_vol.intraday_5d) cachedTechVol['5D'] = data.tech_vol.intraday_5d;
+      if (data.tech_vol.history_1y) cachedTechVol['1Y'] = data.tech_vol.history_1y;
+    }
+
+    // Cache NDX / VXN Dynamic Correlation datasets
+    if (data.ndx && data.ndx.correlation) {
+      if (data.ndx.correlation['1D']) {
+        cachedCorrNdx['1D'] = data.ndx.correlation['1D'];
+        cachedCorrNdx['5D'] = data.ndx.correlation['5D'] || { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
+        cachedCorrNdx['1Y'] = data.ndx.correlation['1Y'] || { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
+        cachedCorrNdx.metrics = data.ndx.correlation.metrics || {};
       }
     }
 
@@ -1353,6 +1875,8 @@ async function loadHistoricalSession(dateStr) {
     cachedLiveBootstrap = JSON.parse(JSON.stringify(cachedBootstrap));
     cachedLiveTs = JSON.parse(JSON.stringify(cachedTs));
     cachedLiveCorr = JSON.parse(JSON.stringify(cachedCorr));
+    cachedLiveTechVol = JSON.parse(JSON.stringify(cachedTechVol));
+    cachedLiveCorrNdx = JSON.parse(JSON.stringify(cachedCorrNdx));
   }
 
   banner.classList.remove('hidden');
@@ -1374,6 +1898,8 @@ async function loadHistoricalSession(dateStr) {
     const data = await res.json();
     currentViewMode = 'historical';
     selectedHistoricalDate = dateStr;
+    cachedHistoricalData = data;
+    cachedBootstrap = data;
 
     // Update banner & controls
     bannerText.textContent = `Viewing Historical Session: ${dateStr} (${data.session_bars} 1-min bars)`;
@@ -1394,7 +1920,14 @@ async function loadHistoricalSession(dateStr) {
     }
     if (data.intraday_correlation && data.intraday_correlation['1D']) {
       cachedCorr['1D'] = data.intraday_correlation['1D'];
-      cachedCorr.metrics['1D'] = data.intraday_correlation.metrics['1D'];
+      cachedCorr.metrics['1D'] = data.intraday_correlation.metrics ? data.intraday_correlation.metrics['1D'] : -0.75;
+    }
+    if (data.tech_vol && data.tech_vol.intraday_1d) {
+      cachedTechVol['1D'] = data.tech_vol.intraday_1d;
+    }
+    if (data.ndx && data.ndx.intraday_correlation && data.ndx.intraday_correlation['1D']) {
+      cachedCorrNdx['1D'] = data.ndx.intraday_correlation['1D'];
+      cachedCorrNdx.metrics['1D'] = data.ndx.correlation ? data.ndx.correlation.rolling_corr : -0.75;
     }
 
     // Force timeframe to 1D to inspect that day's intraday bars
@@ -1429,6 +1962,7 @@ function returnToLiveMode() {
 
   currentViewMode = 'live';
   selectedHistoricalDate = null;
+  cachedHistoricalData = null;
 
   const banner = document.getElementById('historical-archive-banner');
   const btnLive = document.getElementById('btn-mode-live');
@@ -1442,8 +1976,16 @@ function returnToLiveMode() {
   btnReturnLive.classList.add('hidden');
 
   if (headerModeBadge) {
-    headerModeBadge.textContent = "IBKR Live";
-    headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-semibold";
+    if (cachedBootstrap && cachedBootstrap.is_rth_active) {
+      headerModeBadge.textContent = "IBKR Live";
+      headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-semibold";
+    } else if (cachedBootstrap && cachedBootstrap.premarket && cachedBootstrap.premarket.is_premarket) {
+      headerModeBadge.textContent = `PRE-MARKET (${cachedBootstrap.session_date || 'Prior'})`;
+      headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60 font-semibold";
+    } else {
+      headerModeBadge.textContent = `CLOSED (${cachedBootstrap ? cachedBootstrap.session_date : 'Prior'})`;
+      headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700/60 font-semibold";
+    }
   }
 
   if (inputDate) inputDate.value = '';
@@ -1463,6 +2005,8 @@ function returnToLiveMode() {
     cachedBootstrap = cachedLiveBootstrap;
     cachedTs = cachedLiveTs;
     cachedCorr = cachedLiveCorr;
+    if (cachedLiveTechVol) cachedTechVol = cachedLiveTechVol;
+    if (cachedLiveCorrNdx) cachedCorrNdx = cachedLiveCorrNdx;
 
     renderOvervixChart(cachedBootstrap);
     renderTermStructureChart(currentTimeframe);
@@ -1480,6 +2024,7 @@ window.addEventListener('DOMContentLoaded', () => {
   setupTimeframeButtons();
   setupTrailButtons();
   setupCorrButtons();
+  setupAssetSwitcher();
   initHistoricalControls();
   bootstrapData();
 });
