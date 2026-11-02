@@ -185,6 +185,7 @@ class DashboardState:
         self.tech_spread_open: float = 0.0
         self.tech_ratio_low: float = 0.0
         self.tech_ratio_high: float = 0.0
+        self.hist_version: int = 0
 
         # Active WebSockets
         self.active_websockets: List[WebSocket] = []
@@ -295,6 +296,18 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
     return True
 
 
+def safe_to_series(bars, col_name: str) -> pd.Series:
+    if not bars:
+        return pd.Series(dtype=float, name=col_name)
+    try:
+        df = util.df(bars)
+        if df is None or df.empty or 'date' not in df.columns or 'close' not in df.columns:
+            return pd.Series(dtype=float, name=col_name)
+        return df.set_index('date')['close'].rename(col_name)
+    except Exception:
+        return pd.Series(dtype=float, name=col_name)
+
+
 async def refresh_historical_data():
     """
     Fetch historical daily and intraday bars directly from IBKR for SPX, VIX, VIX3M, NDX, VXN:
@@ -325,14 +338,21 @@ async def refresh_historical_data():
             barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
         )
 
+        now_et = datetime.now(pytz.timezone('US/Eastern'))
+        today_et = now_et.strftime('%Y-%m-%d')
+
         # SPX / VIX Spot-Vol Baseline
-        df_spx = util.df(spx_bars).set_index('date')['close'].rename('spx_close')
-        df_vix = util.df(vix_bars).set_index('date')['close'].rename('vix_close')
+        df_spx = safe_to_series(spx_bars, 'spx_close')
+        df_vix = safe_to_series(vix_bars, 'vix_close')
         df_sv = pd.concat([df_spx, df_vix], axis=1).dropna()
         df_sv['spx_pct'] = df_sv['spx_close'].pct_change() * 100.0
         df_sv['vix_pt'] = df_sv['vix_close'].diff()
         df_sv = df_sv.dropna()
-        state.df_spotvol = df_sv.iloc[-state.window_days:].copy()
+
+        # Exclude today's forming/incomplete daily bar so baseline regression is strictly completed sessions
+        is_today_in_sv = (str(df_sv.index[-1])[:10] == today_et) if not df_sv.empty else False
+        df_sv_comp = df_sv.iloc[:-1] if is_today_in_sv and len(df_sv) > 1 else df_sv
+        state.df_spotvol = df_sv_comp.iloc[-state.window_days:].copy()
 
         x = state.df_spotvol['spx_pct'].values
         y = state.df_spotvol['vix_pt'].values
@@ -342,21 +362,25 @@ async def refresh_historical_data():
         state.r_squared = float(r_value ** 2)
         state.vol_slope = float(1.0 / slope) if slope != 0 else 0.0
 
-        state.latest_spx_close = float(df_sv['spx_close'].iloc[-1])
-        state.latest_vix_close = float(df_sv['vix_close'].iloc[-1])
-        state.prior_spx_close = float(df_sv['spx_close'].iloc[-2]) if len(df_sv) > 1 else state.latest_spx_close
-        state.prior_vix_close = float(df_sv['vix_close'].iloc[-2]) if len(df_sv) > 1 else state.latest_vix_close
+        # Reference close prices for today's session moves (always the latest completed session close)
+        state.latest_spx_close = float(df_sv_comp['spx_close'].iloc[-1])
+        state.latest_vix_close = float(df_sv_comp['vix_close'].iloc[-1])
+        state.prior_spx_close = float(df_sv_comp['spx_close'].iloc[-2]) if len(df_sv_comp) > 1 else state.latest_spx_close
+        state.prior_vix_close = float(df_sv_comp['vix_close'].iloc[-2]) if len(df_sv_comp) > 1 else state.latest_vix_close
         state.last_sess_x = float(state.df_spotvol['spx_pct'].iloc[-1])
         state.last_sess_y = float(state.df_spotvol['vix_pt'].iloc[-1])
 
         # NDX / VXN Spot-Vol Baseline
-        df_ndx = util.df(ndx_bars).set_index('date')['close'].rename('ndx_close')
-        df_vxn = util.df(vxn_bars).set_index('date')['close'].rename('vxn_close')
+        df_ndx = safe_to_series(ndx_bars, 'ndx_close')
+        df_vxn = safe_to_series(vxn_bars, 'vxn_close')
         df_sv_ndx = pd.concat([df_ndx, df_vxn], axis=1).dropna()
         df_sv_ndx['ndx_pct'] = df_sv_ndx['ndx_close'].pct_change() * 100.0
         df_sv_ndx['vxn_pt'] = df_sv_ndx['vxn_close'].diff()
         df_sv_ndx = df_sv_ndx.dropna()
-        state.df_spotvol_ndx = df_sv_ndx.iloc[-state.window_days:].copy()
+
+        is_today_in_ndx = (str(df_sv_ndx.index[-1])[:10] == today_et) if not df_sv_ndx.empty else False
+        df_sv_ndx_comp = df_sv_ndx.iloc[:-1] if is_today_in_ndx and len(df_sv_ndx) > 1 else df_sv_ndx
+        state.df_spotvol_ndx = df_sv_ndx_comp.iloc[-state.window_days:].copy()
 
         x_ndx = state.df_spotvol_ndx['ndx_pct'].values
         y_ndx = state.df_spotvol_ndx['vxn_pt'].values
@@ -366,10 +390,10 @@ async def refresh_historical_data():
         state.ndx_r_squared = float(ndx_r_val ** 2)
         state.ndx_vol_slope = float(1.0 / ndx_slope) if ndx_slope != 0 else 0.0
 
-        state.latest_ndx_close = float(df_sv_ndx['ndx_close'].iloc[-1])
-        state.latest_vxn_close = float(df_sv_ndx['vxn_close'].iloc[-1])
-        state.prior_ndx_close = float(df_sv_ndx['ndx_close'].iloc[-2]) if len(df_sv_ndx) > 1 else state.latest_ndx_close
-        state.prior_vxn_close = float(df_sv_ndx['vxn_close'].iloc[-2]) if len(df_sv_ndx) > 1 else state.latest_vxn_close
+        state.latest_ndx_close = float(df_sv_ndx_comp['ndx_close'].iloc[-1])
+        state.latest_vxn_close = float(df_sv_ndx_comp['vxn_close'].iloc[-1])
+        state.prior_ndx_close = float(df_sv_ndx_comp['ndx_close'].iloc[-2]) if len(df_sv_ndx_comp) > 1 else state.latest_ndx_close
+        state.prior_vxn_close = float(df_sv_ndx_comp['vxn_close'].iloc[-2]) if len(df_sv_ndx_comp) > 1 else state.latest_vxn_close
         state.prior_tech_spread_close = state.latest_vxn_close - state.latest_vix_close
         state.prior_tech_ratio_close = (state.latest_vxn_close / state.latest_vix_close) if state.latest_vix_close > 0 else 1.0
         state.last_sess_ndx_x = float(state.df_spotvol_ndx['ndx_pct'].iloc[-1])
@@ -406,19 +430,26 @@ async def refresh_historical_data():
         # Before 09:30 ET, SPX/NDX are on the prior completed session (e.g. 2026-10-30),
         # while VIX has pre-market bars for today (2026-11-02).
         # Re-align VIX to the active RTH session date so all 5 assets align on the exact same session.
-        df_s1_raw = util.df(b1_spx)
-        df_n1_raw = util.df(b1_ndx)
+        now_et = datetime.now(pytz.timezone('US/Eastern'))
+        today_et = now_et.strftime('%Y-%m-%d')
+        is_rth_now = (now_et.weekday() < 5) and (dtime(9, 30) <= now_et.time() < dtime(16, 15))
+
+        df_s1_raw = util.df(b1_spx) if b1_spx else None
+        df_n1_raw = util.df(b1_ndx) if b1_ndx else None
         active_sess_date = None
-        if not df_s1_raw.empty:
+        if df_s1_raw is not None and not df_s1_raw.empty and 'date' in df_s1_raw.columns:
             active_sess_date = str(df_s1_raw['date'].iloc[-1])[:10]
-        elif not df_n1_raw.empty:
+        elif df_n1_raw is not None and not df_n1_raw.empty and 'date' in df_n1_raw.columns:
             active_sess_date = str(df_n1_raw['date'].iloc[-1])[:10]
+
+        if is_rth_now and (not active_sess_date or active_sess_date < today_et):
+            active_sess_date = today_et
 
         state.active_session_date = active_sess_date
 
-        if active_sess_date:
-            df_v1_raw = util.df(b1_vix)
-            if not df_v1_raw.empty:
+        if active_sess_date and not is_rth_now:
+            df_v1_raw = util.df(b1_vix) if b1_vix else None
+            if df_v1_raw is not None and not df_v1_raw.empty and 'date' in df_v1_raw.columns:
                 vix_date = str(df_v1_raw['date'].iloc[-1])[:10]
                 if vix_date != active_sess_date:
                     print(f"[Session Alignment] SPX/NDX are on session {active_sess_date}, but VIX returned pre-market GTH bars on {vix_date}. Aligning VIX to {active_sess_date} session close...")
@@ -429,23 +460,24 @@ async def refresh_historical_data():
                     )
 
         # Term Structure 1D
-        df_v1 = util.df(b1_vix).set_index('date')['close'].rename('vix')
-        df_v3 = util.df(b1_vix3m).set_index('date')['close'].rename('vix3m')
+        df_v1 = safe_to_series(b1_vix, 'vix')
+        df_v3 = safe_to_series(b1_vix3m, 'vix3m')
         df_1d = pd.concat([df_v1, df_v3], axis=1).dropna()
-        df_1d['ratio'] = df_1d['vix'] / df_1d['vix3m']
-        state.df_ts_1d = df_1d.copy()
-
-        if not state.df_ts_1d.empty:
+        if not df_1d.empty:
+            df_1d['ratio'] = df_1d['vix'] / df_1d['vix3m']
+            state.df_ts_1d = df_1d.copy()
             state.intraday_open_ratio = float(state.df_ts_1d['ratio'].iloc[0])
             state.intraday_high_ratio = float(state.df_ts_1d['ratio'].max())
             state.intraday_low_ratio = float(state.df_ts_1d['ratio'].min())
+        else:
+            state.df_ts_1d = pd.DataFrame(columns=['vix', 'vix3m', 'ratio'])
 
         # SPX & VIX Intraday Correlation 1D
-        df_s1 = util.df(b1_spx).set_index('date')['close'].rename('spx')
+        df_s1 = safe_to_series(b1_spx, 'spx')
         df_sv_1d = pd.concat([df_s1, df_v1], axis=1).dropna()
         if not df_sv_1d.empty:
-            ref_spx = state.prior_spx_close if state.prior_spx_close > 0 else float(df_sv_1d['spx'].iloc[0])
-            ref_vix = state.prior_vix_close if state.prior_vix_close > 0 else float(df_sv_1d['vix'].iloc[0])
+            ref_spx = state.latest_spx_close if state.latest_spx_close > 0 else float(df_sv_1d['spx'].iloc[0])
+            ref_vix = state.latest_vix_close if state.latest_vix_close > 0 else float(df_sv_1d['vix'].iloc[0])
             df_sv_1d['spx_pct'] = (df_sv_1d['spx'] - ref_spx) / ref_spx * 100.0
             df_sv_1d['vix_pt'] = df_sv_1d['vix'] - ref_vix
             df_sv_1d['spx_ret'] = df_sv_1d['spx'].pct_change()
@@ -453,14 +485,16 @@ async def refresh_historical_data():
             df_sv_1d['rolling_corr'] = df_sv_1d['spx_ret'].rolling(30, min_periods=10).corr(df_sv_1d['vix_diff']).fillna(-0.70)
             state.df_spx_vix_1d = df_sv_1d.copy()
             state.current_rolling_corr = float(df_sv_1d['rolling_corr'].iloc[-1])
+        else:
+            state.df_spx_vix_1d = pd.DataFrame()
 
         # NDX & VXN Intraday Correlation 1D
-        df_n1 = util.df(b1_ndx).set_index('date')['close'].rename('ndx')
-        df_vx1 = util.df(b1_vxn).set_index('date')['close'].rename('vxn')
+        df_n1 = safe_to_series(b1_ndx, 'ndx')
+        df_vx1 = safe_to_series(b1_vxn, 'vxn')
         df_nv_1d = pd.concat([df_n1, df_vx1], axis=1).dropna()
         if not df_nv_1d.empty:
-            ref_ndx = state.prior_ndx_close if state.prior_ndx_close > 0 else float(df_nv_1d['ndx'].iloc[0])
-            ref_vxn = state.prior_vxn_close if state.prior_vxn_close > 0 else float(df_nv_1d['vxn'].iloc[0])
+            ref_ndx = state.latest_ndx_close if state.latest_ndx_close > 0 else float(df_nv_1d['ndx'].iloc[0])
+            ref_vxn = state.latest_vxn_close if state.latest_vxn_close > 0 else float(df_nv_1d['vxn'].iloc[0])
             df_nv_1d['ndx_pct'] = (df_nv_1d['ndx'] - ref_ndx) / ref_ndx * 100.0
             df_nv_1d['vxn_pt'] = df_nv_1d['vxn'] - ref_vxn
             df_nv_1d['ndx_ret'] = df_nv_1d['ndx'].pct_change()
@@ -468,6 +502,8 @@ async def refresh_historical_data():
             df_nv_1d['rolling_corr'] = df_nv_1d['ndx_ret'].rolling(30, min_periods=10).corr(df_nv_1d['vxn_diff']).fillna(-0.70)
             state.df_ndx_vxn_1d = df_nv_1d.copy()
             state.current_rolling_corr_ndx = float(df_nv_1d['rolling_corr'].iloc[-1])
+        else:
+            state.df_ndx_vxn_1d = pd.DataFrame()
 
         # Tech Vol Spread & Ratio 1D (VXN - VIX & VXN / VIX)
         df_tech_1d = pd.concat([df_vx1, df_v1], axis=1).dropna()
@@ -480,6 +516,13 @@ async def refresh_historical_data():
             state.tech_spread_open = float(df_tech_1d['spread'].iloc[0])
             state.tech_ratio_low = float(df_tech_1d['ratio'].min())
             state.tech_ratio_high = float(df_tech_1d['ratio'].max())
+        else:
+            state.df_tech_vol_1d = pd.DataFrame()
+            state.tech_spread_low = 0.0
+            state.tech_spread_high = 0.0
+            state.tech_spread_open = 0.0
+            state.tech_ratio_low = 1.0
+            state.tech_ratio_high = 1.0
 
         # C. Recent 5D Bars (15-min)
         b5_spx = await state.ib.reqHistoricalDataAsync(
@@ -502,11 +545,11 @@ async def refresh_historical_data():
             state.vxn_contract, endDateTime='', durationStr='5 D',
             barSizeSetting='15 mins', whatToShow='TRADES', useRTH=True, formatDate=1
         )
-        df_s1_5 = util.df(b5_spx).set_index('date')['close'].rename('spx')
-        df_v1_5 = util.df(b5_vix).set_index('date')['close'].rename('vix')
-        df_v3_5 = util.df(b5_vix3m).set_index('date')['close'].rename('vix3m')
-        df_n1_5 = util.df(b5_ndx).set_index('date')['close'].rename('ndx')
-        df_vx1_5 = util.df(b5_vxn).set_index('date')['close'].rename('vxn')
+        df_s1_5 = safe_to_series(b5_spx, 'spx')
+        df_v1_5 = safe_to_series(b5_vix, 'vix')
+        df_v3_5 = safe_to_series(b5_vix3m, 'vix3m')
+        df_n1_5 = safe_to_series(b5_ndx, 'ndx')
+        df_vx1_5 = safe_to_series(b5_vxn, 'vxn')
 
         # 5D Term Structure
         df_5d = pd.concat([df_v1_5, df_v3_5], axis=1).dropna()
@@ -567,11 +610,11 @@ async def refresh_historical_data():
             state.vxn_contract, endDateTime='', durationStr='252 D',
             barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
         )
-        df_s1y = util.df(spx_bars_1y).set_index('date')['close'].rename('spx')
-        df_v1y = util.df(vix_bars_1y).set_index('date')['close'].rename('vix')
-        df_v3y = util.df(vix3m_bars_1y).set_index('date')['close'].rename('vix3m')
-        df_n1y = util.df(ndx_bars_1y).set_index('date')['close'].rename('ndx')
-        df_vx1y = util.df(vxn_bars_1y).set_index('date')['close'].rename('vxn')
+        df_s1y = safe_to_series(spx_bars_1y, 'spx')
+        df_v1y = safe_to_series(vix_bars_1y, 'vix')
+        df_v3y = safe_to_series(vix3m_bars_1y, 'vix3m')
+        df_n1y = safe_to_series(ndx_bars_1y, 'ndx')
+        df_vx1y = safe_to_series(vxn_bars_1y, 'vxn')
 
         # Combined daily dataset for historical baseline slicing
         state.df_daily = pd.concat([df_s1y, df_v1y, df_v3y, df_n1y, df_vx1y], axis=1).dropna()
@@ -614,10 +657,15 @@ async def refresh_historical_data():
             df_tech_1y['ratio'] = df_tech_1y['vxn'] / df_tech_1y['vix']
             state.df_tech_vol_1y = df_tech_1y.copy()
 
-        state.latest_vix3m_close = float(df_1y['vix3m'].iloc[-1])
-        state.prior_vix3m_close = float(df_1y['vix3m'].iloc[-2]) if len(df_1y) > 1 else state.latest_vix3m_close
-        state.prior_ratio_close = float(df_1y['ratio'].iloc[-2]) if len(df_1y) > 1 else float(df_1y['ratio'].iloc[-1])
-        print(f" Macro 1Y Datasets: {len(state.df_daily)} daily bars across SPX, VIX, VIX3M, NDX, VXN.\n")
+        is_today_in_1y = (str(df_1y.index[-1])[:10] == today_et) if not df_1y.empty else False
+        df_1y_comp = df_1y.iloc[:-1] if is_today_in_1y and len(df_1y) > 1 else df_1y
+
+        if not df_1y_comp.empty:
+            state.latest_vix3m_close = float(df_1y_comp['vix3m'].iloc[-1])
+            state.prior_vix3m_close = float(df_1y_comp['vix3m'].iloc[-2]) if len(df_1y_comp) > 1 else state.latest_vix3m_close
+            state.prior_ratio_close = float(df_1y_comp['ratio'].iloc[-1])
+        state.hist_version += 1
+        print(f" Macro 1Y Datasets: {len(state.df_daily)} daily bars across SPX, VIX, VIX3M, NDX, VXN (Sync Version: {state.hist_version}).\n")
 
     except Exception as ex:
         print(f"[IBKR Error] Historical data refresh failed: {ex}")
@@ -631,7 +679,7 @@ def compute_live_payload() -> Dict[str, Any]:
     """
     spx_curr, spx_src = get_current_price(state.spx_ticker, state.latest_spx_close)
     vix_curr, vix_src = get_current_price(state.vix_ticker, state.latest_vix_close)
-    vix3m_curr, vix3m_src = get_current_price(state.vix3m_ticker, state.latest_vix_close)
+    vix3m_curr, vix3m_src = get_current_price(state.vix3m_ticker, state.latest_vix3m_close)
     ndx_curr, ndx_src = get_current_price(state.ndx_ticker, state.latest_ndx_close)
     vxn_curr, vxn_src = get_current_price(state.vxn_ticker, state.latest_vxn_close)
 
@@ -773,12 +821,18 @@ def compute_live_payload() -> Dict[str, Any]:
     elif is_overvxned:
         ndx_confluence_tag = "OVER-VXN ALERT"
         ndx_confluence_desc = f"Tech Vol Shock: VXN is {residual_ndx_pts:+.2f} pts above NDX regression trendline."
+    elif tech_spread >= 9.0 or tech_ratio >= 1.50:
+        ndx_confluence_tag = "TECH PANIC SPREAD"
+        ndx_confluence_desc = f"Acute Tech Vol Shock: VXN - VIX spread is +{tech_spread:.2f} pts ({tech_ratio:.3f}x ≥ 95th percentile panic threshold)."
+    elif tech_spread >= 6.5 or tech_ratio >= 1.35:
+        ndx_confluence_tag = "ELEVATED TECH SPREAD"
+        ndx_confluence_desc = f"Elevated Tech Vol Premium: VXN - VIX spread is +{tech_spread:.2f} pts ({tech_ratio:.3f}x vs ~1.28x equilibrium)."
     else:
         ndx_confluence_tag = "NORMAL TECH REGIME"
-        ndx_confluence_desc = f"Normal tech spot-vol pricing ({residual_ndx_pts:+.2f} pts)."
+        ndx_confluence_desc = f"Normal tech spot-vol pricing ({residual_ndx_pts:+.2f} pts). Tech vol spread: +{tech_spread:.2f} pts."
 
-    curr_time_str = time.strftime('%H:%M:%S')
-    curr_dt_str = time.strftime('%Y-%m-%d %H:%M')
+    curr_time_str = now_et.strftime('%H:%M:%S')
+    curr_dt_str = now_et.strftime('%Y-%m-%d %H:%M')
 
     src_suffix = "" if is_live_rth else (" (PRE-MARKET)" if session_status == "PRE_MARKET" else " (CLOSED)")
 
@@ -786,6 +840,7 @@ def compute_live_payload() -> Dict[str, Any]:
         "timestamp": curr_time_str,
         "datetime": curr_dt_str,
         "session_date": state.active_session_date,
+        "hist_version": state.hist_version,
         "mode": mode_tag,
         "is_rth_active": is_live_rth,
         "session_status": session_status,

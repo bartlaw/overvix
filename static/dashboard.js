@@ -25,6 +25,10 @@ let cachedLiveTechVol = null;
 let cachedLiveCorrNdx = null;
 let lastLiveUpdatePayload = null;
 let cachedHistoricalData = null;
+let cachedActiveSessionDate = null;
+let cachedIsRthActive = null;
+let cachedHistVersion = 0;
+let activeSocket = null;
 
 // Cached Datasets (SPX & Term Structure)
 let cachedBootstrap = null;
@@ -552,8 +556,8 @@ function renderOvervixChart(bootstrap) {
       text: trail.times || [],
       mode: 'lines+markers',
       name: bootstrap.is_historical ? `${bootstrap.session_date} Path` : (bootstrap.session_date ? `Session ${bootstrap.session_date} Path` : "Intraday Path"),
-      line: { color: isNdx ? '#C084FC' : '#00E5FF', width: 1.8, shape: 'spline' },
-      marker: { color: isNdx ? '#C084FC' : '#00E5FF', size: 4, opacity: 0.8 },
+      line: { color: '#00E5FF', width: 1.8, shape: 'spline' },
+      marker: { color: '#00E5FF', size: 4, opacity: 0.8 },
       hovertemplate: `<b>%{text}</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<extra></extra>`,
       visible: currentTrailMode === '60d' ? false : true
     },
@@ -564,7 +568,7 @@ function renderOvervixChart(bootstrap) {
       mode: 'markers',
       name: (bootstrap.is_historical || bootstrap.is_rth_active === false) ? "Session Close Point" : "Live Point",
       marker: {
-        color: isOvervixed ? '#FF1744' : (isNdx ? '#C084FC' : '#00E5FF'),
+        color: isOvervixed ? '#FF1744' : '#00E5FF',
         size: 14,
         line: { color: '#FFFFFF', width: 2 }
       },
@@ -657,9 +661,9 @@ function renderTechVolChart(tf = currentTimeframe) {
 
   const traceEquilibrium = {
     x: hasValidDates ? [dStart, dEnd] : [],
-    y: hasValidDates ? [3.0, 3.0] : [],
+    y: hasValidDates ? [5.0, 5.0] : [],
     mode: 'lines',
-    name: 'Normal Spread (+3.0 pts)',
+    name: 'Equilibrium Spread (+5.0 pts)',
     line: { color: '#10B981', width: 1, dash: 'dot' },
     xaxis: 'x',
     yaxis: 'y2',
@@ -668,9 +672,9 @@ function renderTechVolChart(tf = currentTimeframe) {
 
   const tracePanic = {
     x: hasValidDates ? [dStart, dEnd] : [],
-    y: hasValidDates ? [6.0, 6.0] : [],
+    y: hasValidDates ? [9.0, 9.0] : [],
     mode: 'lines',
-    name: 'Tech Panic Spread (+6.0 pts)',
+    name: 'Tech Panic Spread (≥ +9.0 pts)',
     line: { color: '#EF4444', width: 1.5, dash: 'dash' },
     xaxis: 'x',
     yaxis: 'y2',
@@ -686,7 +690,7 @@ function renderTechVolChart(tf = currentTimeframe) {
     mode: 'markers',
     name: 'Live Spread',
     marker: {
-      color: (latestSpread !== null && latestSpread >= 6.0) ? '#EF4444' : '#F59E0B',
+      color: (latestSpread !== null && latestSpread >= 9.0) ? '#EF4444' : (latestSpread >= 6.5 ? '#F59E0B' : '#10B981'),
       size: 10,
       line: { color: '#FFFFFF', width: 1.5 }
     },
@@ -1142,6 +1146,30 @@ function updateUI(data) {
   // If this is a live tick from WebSocket, track it
   if (!data.is_historical) {
     lastLiveUpdatePayload = data;
+
+    // Detect session rollover, RTH open transition, or periodic historical bar update
+    if (currentViewMode === 'live') {
+      const incomingDate = data.session_date;
+      const incomingRth = data.is_rth_active;
+      const incomingHistVer = data.hist_version;
+
+      const sessionRolled = cachedActiveSessionDate && incomingDate && (incomingDate !== cachedActiveSessionDate);
+      const rthOpened = (cachedIsRthActive === false && incomingRth === true);
+      const histUpdated = (cachedHistVersion !== undefined && incomingHistVer !== undefined && incomingHistVer > cachedHistVersion);
+
+      if (sessionRolled || rthOpened || histUpdated) {
+        console.log(`[Auto-Sync] Triggering dashboard refresh: sessionRolled=${sessionRolled}, rthOpened=${rthOpened}, histUpdated=${histUpdated}`);
+        cachedActiveSessionDate = incomingDate;
+        cachedIsRthActive = incomingRth;
+        if (incomingHistVer !== undefined) cachedHistVersion = incomingHistVer;
+        bootstrapData();
+        return;
+      }
+      if (incomingDate) cachedActiveSessionDate = incomingDate;
+      if (incomingRth !== undefined) cachedIsRthActive = incomingRth;
+      if (incomingHistVer !== undefined) cachedHistVersion = incomingHistVer;
+    }
+
     // When viewing a historical session archive, maintain connection pill status but preserve historical data on charts
     if (currentViewMode === 'historical') {
       const connPill = document.getElementById('connection-pill');
@@ -1181,7 +1209,7 @@ function updateUI(data) {
     const stripRatio = document.getElementById('strip-tech-ratio');
     if (stripSpread) {
       stripSpread.textContent = `${fmtPts(techVol.spread)} pts`;
-      stripSpread.className = (techVol.spread >= 6.0) ? "text-red-400 font-bold animate-pulse" : (techVol.spread >= 4.0 ? "text-amber-400 font-bold" : "text-emerald-400 font-bold");
+      stripSpread.className = (techVol.spread >= 9.0) ? "text-red-400 font-bold animate-pulse" : (techVol.spread >= 6.5 ? "text-amber-400 font-bold" : "text-emerald-400 font-bold");
     }
     if (stripRatio) {
       stripRatio.textContent = `(${fmtNum(techVol.ratio, 3)}x)`;
@@ -1195,7 +1223,8 @@ function updateUI(data) {
 
   if (isNdx && ndx) {
     const ndxOv = ndx.overvix || { is_overvixed: false, residual_pts: 0 };
-    const isTechSpreadPanic = (techVol && techVol.spread >= 6.0);
+    const isTechSpreadPanic = (techVol && (techVol.spread >= 9.0 || techVol.ratio >= 1.50));
+    const isTechSpreadElevated = (techVol && (techVol.spread >= 6.5 || techVol.ratio >= 1.35));
     const isDualNdx = (ndxOv.is_overvixed && ts.is_inverted);
 
     if (isDualNdx) {
@@ -1209,10 +1238,15 @@ function updateUI(data) {
       confBadge.textContent = "⚠️ OVER-VXN TRIGGER";
       confDesc.textContent = `Tech Spot-Vol Shock: VXN is ${fmtPts(ndxOv.residual_pts)} pts above NDX regression trendline.`;
     } else if (isTechSpreadPanic) {
+      confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-red-950/80 border border-red-700 beacon-alert transition duration-300";
+      confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-red-600 text-white animate-pulse";
+      confBadge.textContent = "🚨 TECH PANIC SPREAD";
+      confDesc.textContent = `Acute Tech Vol Shock: VXN - VIX spread is ${fmtPts(techVol.spread)} pts (${fmtNum(techVol.ratio, 3)}x ≥ 95th percentile panic threshold).`;
+    } else if (isTechSpreadElevated) {
       confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-amber-950/80 border border-amber-700 transition duration-300";
       confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-600 text-black";
-      confBadge.textContent = "⚠️ TECH PANIC SPREAD";
-      confDesc.textContent = `Elevated Tech Vol Premium: VXN - VIX spread is ${fmtPts(techVol.spread)} pts (≥ +6.0 pts panic threshold).`;
+      confBadge.textContent = "⚠️ ELEVATED TECH VOL";
+      confDesc.textContent = `Elevated Tech Vol Premium: VXN - VIX spread is ${fmtPts(techVol.spread)} pts (${fmtNum(techVol.ratio, 3)}x vs ~1.28x equilibrium).`;
     } else if (ts.is_inverted) {
       confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-amber-950/80 border border-amber-700 transition duration-300";
       confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-600 text-black";
@@ -1222,10 +1256,10 @@ function updateUI(data) {
       confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-slate-900 border border-slate-800 transition duration-300";
       confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-purple-950 text-purple-300 border border-purple-800";
       confBadge.textContent = "🟢 NORMAL TECH REGIME";
-      confDesc.textContent = `Normal tech spot-vol pricing (${fmtPts(ndxOv.residual_pts)} pts). Tech vol spread: ${fmtPts(techVol ? techVol.spread : 0)} pts.`;
+      confDesc.textContent = `Normal tech spot-vol pricing (${fmtPts(ndxOv.residual_pts)} pts). Tech vol spread: ${fmtPts(techVol ? techVol.spread : 0)} pts (${fmtNum(techVol ? techVol.ratio : 1.0, 3)}x).`;
     }
 
-    if (isDualNdx && (!lastOvervixSignal || !lastInversionSignal)) {
+    if ((isDualNdx || isTechSpreadPanic) && (!lastOvervixSignal || !lastInversionSignal)) {
       playAlertSound('dual');
     } else if (ndxOv.is_overvixed && !lastOvervixSignal) {
       playAlertSound('overvix');
@@ -1302,16 +1336,16 @@ function updateUI(data) {
     document.getElementById('kpi-vix3m-price').textContent = `${fmtPts(spreadVal)} pts`;
     const vix3mPtEl = document.getElementById('kpi-vix3m-pt');
     vix3mPtEl.textContent = `${fmtPts(spreadChg)} pts`;
-    vix3mPtEl.className = `text-xs font-mono font-medium mt-0.5 ${spreadVal >= 6.0 ? 'text-red-400' : (spreadVal >= 4.0 ? 'text-amber-400' : 'text-emerald-400')}`;
+    vix3mPtEl.className = `text-xs font-mono font-medium mt-0.5 ${spreadVal >= 9.0 ? 'text-red-400 font-bold' : (spreadVal >= 6.5 ? 'text-amber-400 font-bold' : 'text-emerald-400')}`;
 
     document.getElementById('lbl-kpi-ratio').textContent = "VXN / VIX";
     const techRatioVal = techVol ? techVol.ratio : 1.0;
     document.getElementById('kpi-ratio-val').textContent = fmtNum(techRatioVal, 4);
-    document.getElementById('lbl-kpi-ratio-sub').textContent = "Equilibrium ~ 1.15x";
-    if (spreadVal >= 6.0) {
+    document.getElementById('lbl-kpi-ratio-sub').textContent = "Equilibrium ~ 1.25x – 1.30x";
+    if (spreadVal >= 9.0 || techRatioVal >= 1.50) {
       ratioBadge.textContent = 'TECH PANIC';
-      ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-900/80 text-red-200 uppercase font-semibold border border-red-700';
-    } else if (spreadVal >= 4.0) {
+      ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-900/80 text-red-200 uppercase font-semibold border border-red-700 animate-pulse';
+    } else if (spreadVal >= 6.5 || techRatioVal >= 1.35) {
       ratioBadge.textContent = 'ELEVATED';
       ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-900/80 text-amber-200 uppercase font-semibold border border-amber-700';
     } else {
@@ -1489,7 +1523,7 @@ function updateUI(data) {
   } else if (data.is_rth_active === false) {
     document.getElementById('last-update-time').textContent = `Market Closed (${data.session_date || 'Prior Close'})`;
   } else {
-    document.getElementById('last-update-time').textContent = `Updated: ${now.toLocaleTimeString()}`;
+    document.getElementById('last-update-time').textContent = `Updated: ${data.timestamp ? data.timestamp + ' ET' : now.toLocaleTimeString()}`;
   }
 
   // Header Mode Badge
@@ -1525,22 +1559,49 @@ function updateUI(data) {
       x: [[activePt.x]],
       y: [[activePt.y]],
       name: [pointLabel],
-      'marker.color': [isTargetOvervixed ? '#FF1744' : (isNdx ? '#C084FC' : '#00E5FF')]
+      'marker.color': [isTargetOvervixed ? '#FF1744' : '#00E5FF']
     }, [5]);
+
+    // Dynamically append live point to intraday trail during RTH
+    if (isLiveRth && cachedTrail && data.datetime) {
+      if (!cachedTrail.x) cachedTrail.x = [];
+      if (!cachedTrail.y) cachedTrail.y = [];
+      if (!cachedTrail.times) cachedTrail.times = [];
+
+      const liveDt = data.datetime;
+      const n = cachedTrail.times.length;
+      if (n > 0 && (cachedTrail.times[n - 1] === liveDt || cachedTrail.times[n - 1].slice(11, 16) === liveDt.slice(11, 16))) {
+        cachedTrail.x[n - 1] = activePt.x;
+        cachedTrail.y[n - 1] = activePt.y;
+      } else {
+        cachedTrail.x.push(activePt.x);
+        cachedTrail.y.push(activePt.y);
+        cachedTrail.times.push(liveDt);
+      }
+      Plotly.restyle('overvix-chart', {
+        x: [cachedTrail.x],
+        y: [cachedTrail.y],
+        text: [cachedTrail.times]
+      }, [4]);
+    }
   }
 
   // 6. Update Intraday Term Structure / Tech Vol Real-Time (when 1D is active)
-  if (currentTimeframe === '1D') {
-    const liveDt = data.datetime || (new Date().toISOString().slice(0, 10) + ' ' + now.toTimeString().slice(0, 5));
+  if (currentTimeframe === '1D' && data.datetime) {
+    const liveDt = data.datetime;
     const liveDate = liveDt.slice(0, 10);
 
     if (isNdx && techVol) {
-      const dt = cachedTechVol['1D'];
-      if (dt && dt.times && dt.times.length > 0) {
+      let dt = cachedTechVol['1D'];
+      if (!dt || !dt.times) {
+        cachedTechVol['1D'] = { times: [], vxn: [], vix: [], spread: [], ratio: [] };
+        dt = cachedTechVol['1D'];
+      }
+      const vxnVal = (ndx && ndx.market && ndx.market.vxn) ? ndx.market.vxn.current : 0;
+      if (dt.times.length > 0) {
         const lastT = dt.times[dt.times.length - 1];
         const lastDate = lastT.slice(0, 10);
         if (liveDate === lastDate) {
-          const vxnVal = (ndx && ndx.market && ndx.market.vxn) ? ndx.market.vxn.current : 0;
           if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
             dt.vxn[dt.vxn.length - 1] = vxnVal;
             dt.vix[dt.vix.length - 1] = mkt.vix.current;
@@ -1553,20 +1614,42 @@ function updateUI(data) {
             dt.spread.push(techVol.spread);
             dt.ratio.push(techVol.ratio);
           }
-          Plotly.restyle('term-structure-chart', {
-            x: [dt.times, dt.times, dt.times],
-            y: [dt.vxn, dt.vix, dt.spread]
-          }, [0, 1, 2]);
-          Plotly.restyle('term-structure-chart', {
-            x: [[liveDt]],
-            y: [[techVol.spread]],
-            'marker.color': [(techVol.spread >= 6.0) ? '#EF4444' : '#F59E0B']
-          }, [5]);
+        } else {
+          // New date session: reset 1D to today
+          dt.times = [liveDt];
+          dt.vxn = [vxnVal];
+          dt.vix = [mkt.vix.current];
+          dt.spread = [techVol.spread];
+          dt.ratio = [techVol.ratio];
         }
+      } else {
+        dt.times.push(liveDt);
+        dt.vxn.push(vxnVal);
+        dt.vix.push(mkt.vix.current);
+        dt.spread.push(techVol.spread);
+        dt.ratio.push(techVol.ratio);
       }
+      Plotly.restyle('term-structure-chart', {
+        x: [dt.times, dt.times, dt.times],
+        y: [dt.vxn, dt.vix, dt.spread]
+      }, [0, 1, 2]);
+      if (dt.times.length > 0) {
+        Plotly.restyle('term-structure-chart', {
+          x: [[dt.times[0], liveDt], [dt.times[0], liveDt]]
+        }, [3, 4]);
+      }
+      Plotly.restyle('term-structure-chart', {
+        x: [[liveDt]],
+        y: [[techVol.spread]],
+        'marker.color': [(techVol.spread >= 9.0) ? '#EF4444' : (techVol.spread >= 6.5 ? '#F59E0B' : '#10B981')]
+      }, [5]);
     } else {
-      const d1 = cachedTs['1D'];
-      if (d1 && d1.times && d1.times.length > 0) {
+      let d1 = cachedTs['1D'];
+      if (!d1 || !d1.times) {
+        cachedTs['1D'] = { times: [], vix: [], vix3m: [], ratio: [] };
+        d1 = cachedTs['1D'];
+      }
+      if (d1.times.length > 0) {
         const lastT = d1.times[d1.times.length - 1];
         const lastDate = lastT.slice(0, 10);
         if (liveDate === lastDate) {
@@ -1580,38 +1663,58 @@ function updateUI(data) {
             d1.vix3m.push(mkt.vix3m.current);
             d1.ratio.push(ts.ratio);
           }
-          Plotly.restyle('term-structure-chart', {
-            x: [d1.times, d1.times, d1.times],
-            y: [d1.vix, d1.vix3m, d1.ratio]
-          }, [0, 1, 2]);
-          Plotly.restyle('term-structure-chart', {
-            x: [[liveDt]],
-            y: [[ts.ratio]],
-            'marker.color': [ts.is_inverted ? '#EF4444' : '#00E5FF']
-          }, [5]);
+        } else {
+          // New date session: reset 1D to today
+          d1.times = [liveDt];
+          d1.vix = [mkt.vix.current];
+          d1.vix3m = [mkt.vix3m.current];
+          d1.ratio = [ts.ratio];
         }
+      } else {
+        d1.times.push(liveDt);
+        d1.vix.push(mkt.vix.current);
+        d1.vix3m.push(mkt.vix3m.current);
+        d1.ratio.push(ts.ratio);
       }
+      Plotly.restyle('term-structure-chart', {
+        x: [d1.times, d1.times, d1.times],
+        y: [d1.vix, d1.vix3m, d1.ratio]
+      }, [0, 1, 2]);
+      if (d1.times.length > 0) {
+        Plotly.restyle('term-structure-chart', {
+          x: [[d1.times[0], liveDt], [d1.times[0], liveDt]]
+        }, [3, 4]);
+      }
+      Plotly.restyle('term-structure-chart', {
+        x: [[liveDt]],
+        y: [[ts.ratio]],
+        'marker.color': [ts.is_inverted ? '#EF4444' : '#00E5FF']
+      }, [5]);
     }
   }
 
   // 7. Update Intraday Correlation Real-Time (when 1D is active)
-  if (currentCorrTf === '1D') {
-    const liveDt = data.datetime || (new Date().toISOString().slice(0, 10) + ' ' + now.toTimeString().slice(0, 5));
+  if (currentCorrTf === '1D' && data.datetime) {
+    const liveDt = data.datetime;
     const liveDate = liveDt.slice(0, 10);
 
     if (isNdx && ndx) {
-      const cr = cachedCorrNdx['1D'];
-      if (cr && cr.times && cr.times.length > 0) {
+      let cr = cachedCorrNdx['1D'];
+      if (!cr || !cr.times) {
+        cachedCorrNdx['1D'] = { times: [], ndx_pct: [], vxn_pt: [], rolling_corr: [] };
+        cr = cachedCorrNdx['1D'];
+      }
+      const ndxPct = ndx.market ? ndx.market.pct_change : 0;
+      const vxnPt = (ndx.market && ndx.market.vxn) ? ndx.market.vxn.pt_change : 0;
+      const corrVal = ndx.correlation ? ndx.correlation.rolling_corr : -0.75;
+
+      const pctArr = cr.ndx_pct || cr.spx_pct;
+      const ptArr = cr.vxn_pt || cr.vix_pt;
+
+      if (cr.times.length > 0) {
         const lastT = cr.times[cr.times.length - 1];
         const lastDate = lastT.slice(0, 10);
         if (liveDate === lastDate) {
-          const ndxPct = ndx.market ? ndx.market.pct_change : 0;
-          const vxnPt = (ndx.market && ndx.market.vxn) ? ndx.market.vxn.pt_change : 0;
-          const corrVal = ndx.correlation ? ndx.correlation.rolling_corr : -0.75;
-
-          const pctArr = cr.ndx_pct || cr.spx_pct;
-          const ptArr = cr.vxn_pt || cr.vix_pt;
-
           if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
             pctArr[pctArr.length - 1] = ndxPct;
             ptArr[ptArr.length - 1] = vxnPt;
@@ -1622,23 +1725,48 @@ function updateUI(data) {
             ptArr.push(vxnPt);
             cr.rolling_corr.push(corrVal);
           }
+        } else {
+          // New date session: reset 1D to today
+          cr.times = [liveDt];
+          pctArr.length = 0; pctArr.push(ndxPct);
+          ptArr.length = 0; ptArr.push(vxnPt);
+          cr.rolling_corr = [corrVal];
+        }
+      } else {
+        cr.times.push(liveDt);
+        pctArr.push(ndxPct);
+        ptArr.push(vxnPt);
+        cr.rolling_corr.push(corrVal);
+      }
 
-          if (currentCorrMode === 'dual') {
-            Plotly.restyle('correlation-chart', {
-              x: [cr.times, cr.times, cr.times],
-              y: [pctArr, ptArr, cr.rolling_corr]
-            }, [0, 1, 2]);
-          } else {
-            Plotly.restyle('correlation-chart', {
-              x: [cr.times],
-              y: [cr.rolling_corr]
-            }, [0]);
-          }
+      if (currentCorrMode === 'dual') {
+        Plotly.restyle('correlation-chart', {
+          x: [cr.times, cr.times, cr.times],
+          y: [pctArr, ptArr, cr.rolling_corr]
+        }, [0, 1, 2]);
+        if (cr.times.length > 0) {
+          Plotly.restyle('correlation-chart', {
+            x: [[cr.times[0], liveDt], [cr.times[0], liveDt]]
+          }, [3, 4]);
+        }
+      } else {
+        Plotly.restyle('correlation-chart', {
+          x: [cr.times],
+          y: [cr.rolling_corr]
+        }, [0]);
+        if (cr.times.length > 0) {
+          Plotly.restyle('correlation-chart', {
+            x: [[cr.times[0], liveDt], [cr.times[0], liveDt]]
+          }, [1, 2]);
         }
       }
     } else {
-      const cr = cachedCorr['1D'];
-      if (cr && cr.times && cr.times.length > 0) {
+      let cr = cachedCorr['1D'];
+      if (!cr || !cr.times) {
+        cachedCorr['1D'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
+        cr = cachedCorr['1D'];
+      }
+      if (cr.times.length > 0) {
         const lastT = cr.times[cr.times.length - 1];
         const lastDate = lastT.slice(0, 10);
         if (liveDate === lastDate) {
@@ -1652,18 +1780,39 @@ function updateUI(data) {
             cr.vix_pt.push(mkt.vix.pt_change);
             if (corr) cr.rolling_corr.push(corr.rolling_corr);
           }
+        } else {
+          // New date session: reset 1D to today
+          cr.times = [liveDt];
+          cr.spx_pct = [mkt.spx.pct_change];
+          cr.vix_pt = [mkt.vix.pt_change];
+          cr.rolling_corr = [corr ? corr.rolling_corr : -0.75];
+        }
+      } else {
+        cr.times.push(liveDt);
+        cr.spx_pct.push(mkt.spx.pct_change);
+        cr.vix_pt.push(mkt.vix.pt_change);
+        if (corr) cr.rolling_corr.push(corr.rolling_corr);
+      }
 
-          if (currentCorrMode === 'dual') {
-            Plotly.restyle('correlation-chart', {
-              x: [cr.times, cr.times, cr.times],
-              y: [cr.spx_pct, cr.vix_pt, cr.rolling_corr]
-            }, [0, 1, 2]);
-          } else {
-            Plotly.restyle('correlation-chart', {
-              x: [cr.times],
-              y: [cr.rolling_corr]
-            }, [0]);
-          }
+      if (currentCorrMode === 'dual') {
+        Plotly.restyle('correlation-chart', {
+          x: [cr.times, cr.times, cr.times],
+          y: [cr.spx_pct, cr.vix_pt, cr.rolling_corr]
+        }, [0, 1, 2]);
+        if (cr.times.length > 0) {
+          Plotly.restyle('correlation-chart', {
+            x: [[cr.times[0], liveDt], [cr.times[0], liveDt]]
+          }, [3, 4]);
+        }
+      } else {
+        Plotly.restyle('correlation-chart', {
+          x: [cr.times],
+          y: [cr.rolling_corr]
+        }, [0]);
+        if (cr.times.length > 0) {
+          Plotly.restyle('correlation-chart', {
+            x: [[cr.times[0], liveDt], [cr.times[0], liveDt]]
+          }, [1, 2]);
         }
       }
     }
@@ -1680,6 +1829,9 @@ async function bootstrapData() {
     if (!res.ok) throw new Error("Bootstrap endpoint failed");
     const data = await res.json();
     cachedBootstrap = data;
+    cachedActiveSessionDate = data.session_date;
+    cachedIsRthActive = data.is_rth_active;
+    if (data.hist_version !== undefined) cachedHistVersion = data.hist_version;
 
     if (data.model && data.model.threshold_pts) {
       currentSpxThreshold = data.model.threshold_pts;
@@ -1759,9 +1911,13 @@ async function bootstrapData() {
 }
 
 function connectWebSocket() {
+  if (activeSocket && (activeSocket.readyState === WebSocket.OPEN || activeSocket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/ws/live`;
   const ws = new WebSocket(wsUrl);
+  activeSocket = ws;
 
   ws.onopen = () => {
     console.log("[WebSocket] Connected to live IBKR market stream.");
@@ -1778,6 +1934,7 @@ function connectWebSocket() {
 
   ws.onclose = () => {
     console.warn("[WebSocket] Connection lost. Reconnecting in 2 seconds...");
+    activeSocket = null;
     document.getElementById('connection-text').textContent = "Reconnecting...";
     setTimeout(connectWebSocket, 2000);
   };

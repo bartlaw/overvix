@@ -427,7 +427,7 @@
 
   <!-- REGIME GUIDE & SPOT-VOL PLAYBOOK MODAL -->
   <div id="modal-guide" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl p-6 shadow-2xl space-y-6 max-h-[92vh] overflow-y-auto">
       
       <!-- Modal Header -->
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -436,135 +436,226 @@
             📖
           </div>
           <div>
-            <h3 class="text-base font-bold text-white tracking-tight">Spot-Vol &amp; Pearson Correlation Playbook</h3>
-            <p class="text-xs text-slate-400">The 4 Market Regimes: Combining Overvix Residuals with Dynamic Pearson Correlation</p>
+            <h3 class="text-base font-bold text-white tracking-tight">Spot-Vol &amp; Volatility Regime Playbook</h3>
+            <p class="text-xs text-slate-400">Empirical 749-Session Benchmark: SPX vs NDX Overvix Models, Term Structure Inversion &amp; Tech Vol Premium</p>
           </div>
         </div>
         <button id="guide-modal-close" class="text-slate-400 hover:text-white text-2xl p-1 leading-none transition">&times;</button>
       </div>
 
-      <!-- Core Formula / Principle Box -->
-      <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between text-xs">
-        <div>
-          <span class="text-cyan-400 font-bold uppercase tracking-wider text-[10px]">Two Independent Dimensions:</span>
-          <p class="text-slate-300 mt-1 leading-relaxed">
-            <strong>Pearson Correlation (&rho;)</strong> measures <em>Directional Synchronicity</em> (Are SPX &amp; VIX moving opposite or decoupling?).<br>
-            <strong>The Overvix Signal</strong> measures <em>Magnitude Excess</em> (Did VIX overreact by &ge; +2.0 pts relative to the size of the SPX move?).
-          </p>
+      <!-- Statistical Baseline Strip (3-Column Architecture) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <!-- 1: SPX 500 Standards -->
+        <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3.5 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-cyan-400 font-bold uppercase tracking-wider text-[11px]">SPX 500 • VIX Baseline</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">Broad Market</span>
+          </div>
+          <ul class="text-xs space-y-1.5 text-slate-300">
+            <li class="flex justify-between"><span class="text-slate-400">Overvix Trigger:</span> <strong class="text-white font-mono">&ge; +2.0 pts (~3.4&sigma;)</strong></li>
+            <li class="flex justify-between"><span class="text-slate-400">Normal Pearson &rho;:</span> <span class="font-mono text-emerald-400">-0.75 to -0.85</span></li>
+            <li class="flex justify-between"><span class="text-slate-400">Term Structure:</span> <span class="font-mono text-amber-300">VIX/VIX3M &ge; 1.00 (Inversion)</span></li>
+            <li class="flex justify-between"><span class="text-slate-400">Regression Window:</span> <span class="font-mono text-slate-300">60 Trading Sessions</span></li>
+          </ul>
         </div>
-        <div class="bg-slate-900 px-3.5 py-2.5 rounded-lg border border-slate-800 font-mono text-slate-300 text-[11px] whitespace-nowrap shadow-sm">
-          <span class="text-slate-400">Slope:</span> &beta; = &rho; &times; (&sigma;<sub>VIX</sub> / &sigma;<sub>SPX</sub>)<br>
-          <span class="text-slate-400">Model Fit:</span> R&sup2; = &rho;&sup2;
+
+        <!-- 2: NASDAQ 100 Standards -->
+        <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3.5 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-purple-400 font-bold uppercase tracking-wider text-[11px]">NDX 100 • VXN Baseline</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">Tech Beta Model</span>
+          </div>
+          <ul class="text-xs space-y-1.5 text-slate-300">
+            <li class="flex justify-between"><span class="text-slate-400">Over-VXN Trigger:</span> <strong class="text-white font-mono">&ge; +2.5 pts (+25% scale)</strong></li>
+            <li class="flex justify-between"><span class="text-slate-400">Tech Index Beta &beta;:</span> <span class="font-mono text-purple-300">&approx; 1.25x vs SPX</span></li>
+            <li class="flex justify-between"><span class="text-slate-400">Normal Pearson &rho;:</span> <span class="font-mono text-emerald-400">-0.70 to -0.80</span></li>
+            <li class="flex justify-between"><span class="text-slate-400">Lead Indicator:</span> <span class="text-slate-300">Tech lows lead SPX by 24-72h</span></li>
+          </ul>
+        </div>
+
+        <!-- 3: Empirical Tech Vol Premium (VXN vs VIX) -->
+        <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3.5 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-amber-400 font-bold uppercase tracking-wider text-[11px]">Tech Vol Premium Benchmark</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800">749 Daily Bars</span>
+          </div>
+          <ul class="text-xs space-y-1.5 text-slate-300">
+            <li class="flex justify-between"><span class="text-slate-400">Equilibrium Median:</span> <span class="font-mono text-emerald-400">+3.9 to +5.6 pts (1.25x-1.30x)</span></li>
+            <li class="flex justify-between"><span class="text-slate-400">Elevated Skew (75-85%):</span> <span class="font-mono text-amber-300">+6.5 to +8.9 pts (1.35x-1.49x)</span></li>
+            <li class="flex justify-between"><span class="text-slate-400">Tech Panic (95th %ile):</span> <strong class="text-red-400 font-mono">&ge; +9.0 pts (&ge; 1.50x)</strong></li>
+            <li class="flex justify-between"><span class="text-slate-400">Capitulation (98th+ %):</span> <strong class="text-red-500 font-mono">&ge; +10.5 pts (&ge; 1.60x)</strong></li>
+          </ul>
         </div>
       </div>
 
-      <!-- 4-Regime Table -->
-      <div class="overflow-x-auto rounded-xl border border-slate-800">
-        <table class="w-full text-left text-xs">
-          <thead class="bg-slate-950 text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
-            <tr>
-              <th class="py-3 px-3.5">Regime</th>
-              <th class="py-3 px-3.5">Pearson Correlation (&rho;)</th>
-              <th class="py-3 px-3.5">Overvix Signal</th>
-              <th class="py-3 px-3.5">Market Reality &amp; Trading Interpretation</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-800/60 font-medium">
-            <!-- 1. Classic Capitulation -->
-            <tr class="hover:bg-slate-800/30 transition">
-              <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-red-400">
-                1. Classic Capitulation<br>
-                <span class="text-[11px] text-slate-400 font-normal">(Orderly Panic)</span>
-              </td>
-              <td class="py-3.5 px-3.5">
-                <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold uppercase whitespace-nowrap">Strongly Inverse</span>
-                <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &approx; -0.75 to -0.90</p>
-              </td>
-              <td class="py-3.5 px-3.5 whitespace-nowrap">
-                <span class="px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-700 text-[10px] font-bold uppercase">🚨 OVERVIXED</span>
-                <p class="text-[11px] font-mono text-red-400 mt-1">&ge; +2.0 pts</p>
-              </td>
-              <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
-                <strong class="text-white">Panic Overreaction:</strong> SPX is dumping, and dealers are getting squeezed into buying puts with extreme magnitude. High-probability <span class="text-emerald-400 font-semibold">mean-reversion long setup</span> once selling volume slows.
-              </td>
-            </tr>
+      <!-- Empirical Tech Vol Premium Distribution Table -->
+      <div class="space-y-2">
+        <div class="flex items-center justify-between">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center space-x-2">
+            <span>📊</span>
+            <span>Empirical Tech Vol Premium Distribution (VXN - VIX &amp; VXN / VIX)</span>
+          </h4>
+          <span class="text-[10px] text-slate-500">Based on 3-Year &amp; 1-Year Native IBKR Historical Closes</span>
+        </div>
+        <div class="overflow-x-auto rounded-xl border border-slate-800">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-950 text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
+              <tr>
+                <th class="py-2.5 px-3">Regime</th>
+                <th class="py-2.5 px-3">Tech Spread (VXN - VIX)</th>
+                <th class="py-2.5 px-3">Tech Ratio (VXN / VIX)</th>
+                <th class="py-2.5 px-3">Historical Frequency</th>
+                <th class="py-2.5 px-3">Market Reality &amp; Trading Context</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/60 font-medium text-slate-300">
+              <tr class="hover:bg-slate-800/30 transition">
+                <td class="py-2.5 px-3 font-bold text-emerald-400">🟢 Normal Equilibrium</td>
+                <td class="py-2.5 px-3 font-mono text-emerald-300">&lt; +6.5 pts</td>
+                <td class="py-2.5 px-3 font-mono text-emerald-300">&lt; 1.35x</td>
+                <td class="py-2.5 px-3 text-slate-400 font-mono">~70% of days</td>
+                <td class="py-2.5 px-3 text-slate-300">Standard tech beta premium. Market makers orderly hedging options; normal trend continuation environment.</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition">
+                <td class="py-2.5 px-3 font-bold text-amber-400">⚠️ Elevated Tech Vol</td>
+                <td class="py-2.5 px-3 font-mono text-amber-300">+6.5 to +8.9 pts</td>
+                <td class="py-2.5 px-3 font-mono text-amber-300">1.35x to 1.49x</td>
+                <td class="py-2.5 px-3 text-slate-400 font-mono">~25% of days (75th-94th %ile)</td>
+                <td class="py-2.5 px-3 text-slate-300">Tech underperforming broad market or pre-earnings skew. Higher tech options implied volatility; option sellers earn rich premiums.</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition bg-red-950/20">
+                <td class="py-2.5 px-3 font-bold text-red-400">🚨 Tech Panic Shock</td>
+                <td class="py-2.5 px-3 font-mono font-bold text-red-400">&ge; +9.0 pts</td>
+                <td class="py-2.5 px-3 font-mono font-bold text-red-400">&ge; 1.50x</td>
+                <td class="py-2.5 px-3 text-red-300 font-mono font-bold">~5% of days (95th %ile tail)</td>
+                <td class="py-2.5 px-3 text-slate-200">Acute tech option liquidation &amp; gamma squeeze. Fear is excessively concentrated in tech; prepare for high-expectancy mean-reversion long setups.</td>
+              </tr>
+              <tr class="hover:bg-slate-800/30 transition bg-red-950/40">
+                <td class="py-2.5 px-3 font-bold text-red-500">💥 Extreme Capitulation</td>
+                <td class="py-2.5 px-3 font-mono font-bold text-red-400">&ge; +10.5 pts</td>
+                <td class="py-2.5 px-3 font-mono font-bold text-red-400">&ge; 1.60x</td>
+                <td class="py-2.5 px-3 text-red-400 font-mono font-bold">&lt; 2% of days (98th+ %ile)</td>
+                <td class="py-2.5 px-3 text-white">Rare systemic margin liquidation across tech/semis (e.g. Aug 2024 carry trade crash). Maximum statistical reversal potential.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-            <!-- 2. Bullish Decoupling -->
-            <tr class="hover:bg-slate-800/30 transition">
-              <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-amber-400">
-                2. Bullish Decoupling<br>
-                <span class="text-[11px] text-slate-400 font-normal">(Hedging / Squeeze)</span>
-              </td>
-              <td class="py-3.5 px-3.5">
-                <span class="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-bold uppercase whitespace-nowrap">Decoupled / Positive</span>
-                <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &gt; -0.20 or &rho; &gt; 0</p>
-              </td>
-              <td class="py-3.5 px-3.5 whitespace-nowrap">
-                <span class="px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-700 text-[10px] font-bold uppercase">🚨 OVERVIXED</span>
-                <p class="text-[11px] font-mono text-red-400 mt-1">&ge; +2.0 pts</p>
-              </td>
-              <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
-                <strong class="text-white">Structural Anomaly:</strong> SPX is flat or rising, but VIX is spiking anyway. Institutional traders are aggressively paying up for upside calls or buying tail-risk crash puts ahead of a major binary event (e.g., FOMC, CPI).
-              </td>
-            </tr>
+      <!-- Master Confluence Playbook Table -->
+      <div class="space-y-2">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center space-x-2">
+          <span>🎯</span>
+          <span>The 5 Market Regimes: Spot-Vol Residuals &amp; Pearson Correlation</span>
+        </h4>
+        <div class="overflow-x-auto rounded-xl border border-slate-800">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-950 text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
+              <tr>
+                <th class="py-3 px-3.5">Regime</th>
+                <th class="py-3 px-3.5">Pearson Correlation (&rho;)</th>
+                <th class="py-3 px-3.5">Overvix Signal</th>
+                <th class="py-3 px-3.5">Market Reality &amp; Trading Interpretation</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/60 font-medium">
+              <!-- 1. Classic Capitulation -->
+              <tr class="hover:bg-slate-800/30 transition">
+                <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-red-400">
+                  1. Classic Capitulation<br>
+                  <span class="text-[11px] text-slate-400 font-normal">(Orderly Panic)</span>
+                </td>
+                <td class="py-3.5 px-3.5">
+                  <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold uppercase whitespace-nowrap">Strongly Inverse</span>
+                  <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &approx; -0.75 to -0.90</p>
+                </td>
+                <td class="py-3.5 px-3.5 whitespace-nowrap">
+                  <span class="px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-700 text-[10px] font-bold uppercase">🚨 OVERVIXED</span>
+                  <p class="text-[11px] font-mono text-red-400 mt-1">&ge; +2.0 pts (SPX) / &ge; +2.5 pts (NDX)</p>
+                </td>
+                <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
+                  <strong class="text-white">Panic Overreaction:</strong> Spot drops violently and dealers get squeezed into paying extreme premiums for front-month puts. High-probability <span class="text-emerald-400 font-semibold">mean-reversion swing long setup</span> once selling volume crests.
+                </td>
+              </tr>
 
-            <!-- 3. Healthy Orderly Market -->
-            <tr class="hover:bg-slate-800/30 transition">
-              <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-emerald-400">
-                3. Healthy Orderly Market
-              </td>
-              <td class="py-3.5 px-3.5">
-                <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold uppercase whitespace-nowrap">Normal Inverse</span>
-                <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &approx; -0.70 to -0.85</p>
-              </td>
-              <td class="py-3.5 px-3.5 whitespace-nowrap">
-                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold uppercase">NORMAL</span>
-                <p class="text-[11px] font-mono text-slate-400 mt-1">-1.0 to +1.0 pts</p>
-              </td>
-              <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
-                <strong class="text-white">Equilibrium:</strong> Normal market maker delta-hedging. VIX moves smoothly along the regression trendline in orderly fashion.
-              </td>
-            </tr>
+              <!-- 2. Bullish Decoupling -->
+              <tr class="hover:bg-slate-800/30 transition">
+                <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-amber-400">
+                  2. Bullish Decoupling<br>
+                  <span class="text-[11px] text-slate-400 font-normal">(Event Hedging / Squeeze)</span>
+                </td>
+                <td class="py-3.5 px-3.5">
+                  <span class="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-bold uppercase whitespace-nowrap">Decoupled / Positive</span>
+                  <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &gt; -0.20 or &rho; &gt; 0</p>
+                </td>
+                <td class="py-3.5 px-3.5 whitespace-nowrap">
+                  <span class="px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-700 text-[10px] font-bold uppercase">🚨 OVERVIXED</span>
+                  <p class="text-[11px] font-mono text-red-400 mt-1">&ge; +2.0 pts (SPX)</p>
+                </td>
+                <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
+                  <strong class="text-white">Structural Anomaly:</strong> Market is flat or rising, but vol is surging anyway. Institutions are paying up for tail-risk hedges or call convexity ahead of a major binary event (e.g. FOMC, NVDA earnings, CPI). Post-event vol collapse sparks a strong rally.
+                </td>
+              </tr>
 
-            <!-- 4. Volatility Crush / Exhaustion -->
-            <tr class="hover:bg-slate-800/30 transition">
-              <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-cyan-400">
-                4. Volatility Crush<br>
-                <span class="text-[11px] text-slate-400 font-normal">/ Exhaustion</span>
-              </td>
-              <td class="py-3.5 px-3.5">
-                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold uppercase whitespace-nowrap">Decoupled / Weak</span>
-                <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &gt; -0.30</p>
-              </td>
-              <td class="py-3.5 px-3.5 whitespace-nowrap">
-                <span class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10px] font-bold uppercase">UNDER-VIXED</span>
-                <p class="text-[11px] font-mono text-cyan-400 mt-1">Negative Residual</p>
-              </td>
-              <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
-                <strong class="text-white">Fear Deflation:</strong> SPX drops, but VIX refuses to rise (or drops). Option sellers dominate; fear is completely depleted. Often marks a market bottom.
-              </td>
-            </tr>
+              <!-- 3. Healthy Orderly Market -->
+              <tr class="hover:bg-slate-800/30 transition">
+                <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-emerald-400">
+                  3. Healthy Orderly Market<br>
+                  <span class="text-[11px] text-slate-400 font-normal">(Equilibrium Trend)</span>
+                </td>
+                <td class="py-3.5 px-3.5">
+                  <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold uppercase whitespace-nowrap">Normal Inverse</span>
+                  <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &approx; -0.70 to -0.85</p>
+                </td>
+                <td class="py-3.5 px-3.5 whitespace-nowrap">
+                  <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold uppercase">NORMAL</span>
+                  <p class="text-[11px] font-mono text-slate-400 mt-1">-1.0 to +1.0 pts</p>
+                </td>
+                <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
+                  <strong class="text-white">Equilibrium:</strong> Orderly market maker delta-hedging. Implied volatility moves smoothly along the 60-day regression slope. Trend continuation strategies perform best.
+                </td>
+              </tr>
 
-            <!-- 5. Tech Vol Panic & Skew Blowout -->
-            <tr class="hover:bg-slate-800/30 transition">
-              <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-purple-400">
-                5. Tech Vol Panic<br>
-                <span class="text-[11px] text-slate-400 font-normal">(VXN - VIX &ge; +6.0 pts)</span>
-              </td>
-              <td class="py-3.5 px-3.5">
-                <span class="px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800 text-[10px] font-bold uppercase whitespace-nowrap">High Beta Skew</span>
-                <p class="text-[11px] font-mono text-purple-400 mt-1">VXN/VIX &gt; 1.35x</p>
-              </td>
-              <td class="py-3.5 px-3.5 whitespace-nowrap">
-                <span class="px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-800 text-[10px] font-bold uppercase">OVER-VXN</span>
-                <p class="text-[11px] font-mono text-red-400 mt-1">&ge; +2.0 pts Residual</p>
-              </td>
-              <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
-                <strong class="text-white">Tech Option Capitulation:</strong> Acute institutional hedging in semiconductor and megacap tech options. Tech vol spread blows out past +6.0 to +10.0 pts. When Over-VXN triggers alongside an inverted curve, tech capitulation lows frequently precede broad SPX bottoms by 24 to 72 hours.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+              <!-- 4. Volatility Crush / Exhaustion -->
+              <tr class="hover:bg-slate-800/30 transition">
+                <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-cyan-400">
+                  4. Volatility Crush<br>
+                  <span class="text-[11px] text-slate-400 font-normal">/ Exhaustion</span>
+                </td>
+                <td class="py-3.5 px-3.5">
+                  <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold uppercase whitespace-nowrap">Decoupled / Weak</span>
+                  <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &gt; -0.30</p>
+                </td>
+                <td class="py-3.5 px-3.5 whitespace-nowrap">
+                  <span class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10px] font-bold uppercase">UNDER-VIXED</span>
+                  <p class="text-[11px] font-mono text-cyan-400 mt-1">Negative Residual</p>
+                </td>
+                <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
+                  <strong class="text-white">Fear Deflation:</strong> Spot drops, but volatility refuses to bid (or declines). Option sellers dominate and fear is completely exhausted. Classic hallmark of an impending market bottom.
+                </td>
+              </tr>
+
+              <!-- 5. Tech Vol Panic & Skew Blowout -->
+              <tr class="hover:bg-slate-800/30 transition bg-purple-950/20">
+                <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-purple-400">
+                  5. Tech Vol Capitulation<br>
+                  <span class="text-[11px] text-purple-300 font-normal">(VXN - VIX &ge; +9.0 pts)</span>
+                </td>
+                <td class="py-3.5 px-3.5">
+                  <span class="px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800 text-[10px] font-bold uppercase whitespace-nowrap">95th %ile Tail</span>
+                  <p class="text-[11px] font-mono text-purple-400 mt-1">VXN/VIX &ge; 1.50x</p>
+                </td>
+                <td class="py-3.5 px-3.5 whitespace-nowrap">
+                  <span class="px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-800 text-[10px] font-bold uppercase">OVER-VXN</span>
+                  <p class="text-[11px] font-mono text-red-400 mt-1">&ge; +2.5 pts Residual</p>
+                </td>
+                <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
+                  <strong class="text-white">Tech Option Capitulation:</strong> Tech vol spread blows out into the statistical 95th percentile (&ge; +9.0 pts / &ge; 1.50x). When Over-VXN triggers alongside macro term structure inversion (VIX/VIX3M &ge; 1.00), Nasdaq capitulation lows reliably front-run broad market SPX bottoms by 24 to 72 hours.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <!-- Footer & Close Button -->
@@ -576,7 +667,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v3.0 with Plotly Subplot & Threshold Beacon Fixes) -->
-  <script src="/static/dashboard.js?v=3.0"></script>
+  <!-- DASHBOARD SCRIPT (v3.6 with High-Contrast Nasdaq Intraday Trail) -->
+  <script src="/static/dashboard.js?v=3.6"></script>
 </body>
 </html>
