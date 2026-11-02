@@ -376,6 +376,14 @@
             <button id="btn-corr-dual" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition">Dual Overlay + &rho;</button>
             <button id="btn-corr-only" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">Correlation Only</button>
           </div>
+
+          <!-- Volatility Axis Invert Toggle -->
+          <div id="corr-invert-group" class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium">
+            <button id="btn-corr-invert" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1" title="Invert Volatility scale so VIX tracks Spot in lockstep">
+              <span>Invert Vol</span>
+              <span id="corr-invert-icon" class="text-[10px] font-bold">▼</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -667,7 +675,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v3.6 with High-Contrast Nasdaq Intraday Trail) -->
-  <script src="/static/dashboard.js?v=3.6"></script>
+  <!-- DASHBOARD SCRIPT (v3.7 with Invertible Volatility Axis) -->
+  <script src="/static/dashboard.js?v=3.7"></script>
 </body>
 </html>

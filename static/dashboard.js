@@ -13,6 +13,7 @@ let currentThreshold = 2.0;
 let currentTimeframe = '1D'; // '1D', '5D', '1Y'
 let currentTrailMode = 'both'; // 'both', 'today', '60d'
 let currentCorrMode = 'dual'; // 'dual', 'corr_only'
+let isVolInverted = true; // Invert volatility axis on correlation overlay for lockstep tracking
 let currentAssetPair = 'SPX'; // 'SPX' | 'NDX'
 
 // Historical Mode State
@@ -364,6 +365,9 @@ function switchTrailMode(mode) {
 // Correlation Mode & Timeframe Selector
 const btnCorrDual = document.getElementById('btn-corr-dual');
 const btnCorrOnly = document.getElementById('btn-corr-only');
+const btnCorrInvert = document.getElementById('btn-corr-invert');
+const corrInvertGroup = document.getElementById('corr-invert-group');
+const corrInvertIcon = document.getElementById('corr-invert-icon');
 const btnCorrTf1D = document.getElementById('btn-corr-tf-1d');
 const btnCorrTf5D = document.getElementById('btn-corr-tf-5d');
 const btnCorrTf1Y = document.getElementById('btn-corr-tf-1y');
@@ -374,10 +378,25 @@ const corrLiveLabel = document.getElementById('corr-live-label');
 function setupCorrButtons() {
   btnCorrDual.addEventListener('click', () => switchCorrMode('dual'));
   btnCorrOnly.addEventListener('click', () => switchCorrMode('corr_only'));
+  if (btnCorrInvert) btnCorrInvert.addEventListener('click', () => toggleCorrVolInvert());
 
   if (btnCorrTf1D) btnCorrTf1D.addEventListener('click', () => switchCorrTf('1D'));
   if (btnCorrTf5D) btnCorrTf5D.addEventListener('click', () => switchCorrTf('5D'));
   if (btnCorrTf1Y) btnCorrTf1Y.addEventListener('click', () => switchCorrTf('1Y'));
+}
+
+function toggleCorrVolInvert() {
+  isVolInverted = !isVolInverted;
+  if (btnCorrInvert) {
+    if (isVolInverted) {
+      btnCorrInvert.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1";
+      if (corrInvertIcon) corrInvertIcon.textContent = "▼";
+    } else {
+      btnCorrInvert.className = "px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1";
+      if (corrInvertIcon) corrInvertIcon.textContent = "▲";
+    }
+  }
+  renderCorrelationChart(currentCorrMode, currentCorrTf);
 }
 
 function switchCorrMode(mode) {
@@ -385,9 +404,11 @@ function switchCorrMode(mode) {
   if (mode === 'dual') {
     btnCorrDual.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
     btnCorrOnly.className = "px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition";
+    if (corrInvertGroup) corrInvertGroup.style.display = "flex";
   } else {
     btnCorrOnly.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
     btnCorrDual.className = "px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition";
+    if (corrInvertGroup) corrInvertGroup.style.display = "none";
   }
   renderCorrelationChart(mode, currentCorrTf);
 }
@@ -980,7 +1001,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
     const traceVol = {
       x: times,
       y: volPt,
-      name: `${volLabel} Point Move`,
+      name: isVolInverted ? `${volLabel} Point Move (Inv)` : `${volLabel} Point Move`,
       mode: 'lines',
       line: { color: volColor, width: 1.8 },
       xaxis: 'x',
@@ -1046,9 +1067,10 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       },
       yaxis2: {
         domain: [0.48, 1.0],
-        title: { text: `${volLabel} Point Move`, font: { color: volColor, size: 10 } },
+        title: { text: isVolInverted ? `${volLabel} Point Move (Inverted ▼)` : `${volLabel} Point Move`, font: { color: volColor, size: 10 } },
         overlaying: 'y',
         side: 'right',
+        autorange: isVolInverted ? 'reversed' : true,
         gridcolor: 'transparent',
         tickfont: { color: volColor, size: 10 }
       },
