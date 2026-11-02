@@ -57,6 +57,14 @@ except ImportError:
         Index = None
         util = None
 
+from session_history import (
+    fetch_and_build_historical_session,
+    get_cached_dates,
+    load_cached_session,
+    load_notable_dates,
+    save_notable_date
+)
+
 # ==============================================================================
 # CONFIGURATION DEFAULTS
 # ==============================================================================
@@ -101,6 +109,7 @@ class DashboardState:
         self.df_spx_vix_1d = pd.DataFrame()  # Intraday 1-min bars for SPX & VIX
         self.df_spx_vix_5d = pd.DataFrame()  # 5-day 15-min bars for SPX & VIX
         self.df_spx_vix_1y = pd.DataFrame()  # Macro 1-year daily bars for SPX & VIX
+        self.df_daily = pd.DataFrame()        # Combined daily SPX, VIX, VIX3M (for historical slicing)
 
         # Model metrics
         self.r_squared: float = 0.0
@@ -371,6 +380,9 @@ async def refresh_historical_data():
         df_s1y = util.df(spx_bars_1y).set_index('date')['close'].rename('spx')
         df_v1y = util.df(vix_bars_1y).set_index('date')['close'].rename('vix')
         df_v3y = util.df(vix3m_bars_1y).set_index('date')['close'].rename('vix3m')
+        
+        # Combined daily dataset for historical baseline slicing
+        state.df_daily = pd.concat([df_s1y, df_v1y, df_v3y], axis=1).dropna()
         
         # 1Y Term Structure
         df_1y = pd.concat([df_v1y, df_v3y], axis=1).dropna()
@@ -787,6 +799,72 @@ async def get_bootstrap():
 @app.get("/api/status")
 async def get_status():
     return compute_live_payload()
+
+
+@app.get("/api/available-dates")
+async def get_available_dates():
+    """
+    Return list of dates with pre-computed sessions on disk, available date range,
+    and notable historical market regimes for 1-click inspection.
+    """
+    cached = get_cached_dates()
+    min_date = ""
+    max_date = ""
+    if not state.df_daily.empty:
+        idx = [str(d)[:10] for d in state.df_daily.index]
+        min_date = idx[0]
+        max_date = idx[-1]
+
+    notable = load_notable_dates()
+
+    return {
+        "cached": cached,
+        "min_date": min_date,
+        "max_date": max_date,
+        "notable": notable
+    }
+
+
+class NotableDateRequest(BaseModel):
+    date: str
+    label: Optional[str] = None
+
+
+@app.post("/api/notable-dates")
+async def add_notable_date_endpoint(req: NotableDateRequest):
+    """Save a user-defined custom notable date preset to data/notable_dates.json."""
+    if not req.date or len(req.date) != 10:
+        return JSONResponse(status_code=400, content={"detail": "Invalid date format. Expected YYYY-MM-DD."})
+    label = req.label.strip() if req.label and req.label.strip() else req.date
+    updated = save_notable_date(req.date, label)
+    return {"status": "ok", "notable": updated}
+
+
+@app.get("/api/session")
+async def get_historical_session(date: str):
+    """
+    Retrieve or fetch complete historical 1-minute intraday session replay for date (YYYY-MM-DD).
+    Returns Spot-Vol trail, 1-min Term Structure, 1-min Dynamic Correlation, and model metrics.
+    """
+    if not date or len(date) != 10:
+        return JSONResponse(status_code=400, content={"detail": "Invalid date format. Expected YYYY-MM-DD."})
+
+    try:
+        payload = await fetch_and_build_historical_session(
+            ib=state.ib,
+            spx_contract=state.spx_contract,
+            vix_contract=state.vix_contract,
+            vix3m_contract=state.vix3m_contract,
+            df_daily=state.df_daily,
+            target_date=date,
+            threshold_pts=state.threshold_pts,
+            window_days=state.window_days
+        )
+        return payload
+    except ValueError as ve:
+        return JSONResponse(status_code=404, content={"detail": str(ve)})
+    except Exception as ex:
+        return JSONResponse(status_code=500, content={"detail": f"Failed fetching historical session: {str(ex)}"})
 
 
 class ConfigRequest(BaseModel):

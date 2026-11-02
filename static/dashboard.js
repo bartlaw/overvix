@@ -12,6 +12,14 @@ let currentTimeframe = '1D'; // '1D', '5D', '1Y'
 let currentTrailMode = 'both'; // 'both', 'today', '60d'
 let currentCorrMode = 'dual'; // 'dual', 'corr_only'
 
+// Historical Mode State
+let currentViewMode = 'live'; // 'live' | 'historical'
+let selectedHistoricalDate = null;
+let cachedLiveBootstrap = null;
+let cachedLiveTs = null;
+let cachedLiveCorr = null;
+let lastLiveUpdatePayload = null;
+
 // Cached Datasets
 let cachedBootstrap = null;
 let cachedTs = {
@@ -406,30 +414,30 @@ function renderOvervixChart(bootstrap) {
       name: 'Overvix Zone',
       hoverinfo: 'none'
     },
-    // 4: Today's Intraday Breadcrumb Trail
+    // 4: Intraday Breadcrumb Trail
     {
       x: trail.x || [],
       y: trail.y || [],
       text: trail.times || [],
       mode: 'lines+markers',
-      name: "Today's Intraday Path",
+      name: bootstrap.is_historical ? `${bootstrap.session_date} Path` : "Today's Intraday Path",
       line: { color: '#00E5FF', width: 1.8, shape: 'spline' },
       marker: { color: '#00E5FF', size: 4, opacity: 0.8 },
-      hovertemplate: '<b>%{text} (Today)</b><br>SPX: %{x:+.2f}%<br>VIX: %{y:+.2f} pts<extra></extra>',
+      hovertemplate: bootstrap.is_historical ? '<b>%{text}</b><br>SPX: %{x:+.2f}%<br>VIX: %{y:+.2f} pts<extra></extra>' : '<b>%{text} (Today)</b><br>SPX: %{x:+.2f}%<br>VIX: %{y:+.2f} pts<extra></extra>',
       visible: currentTrailMode === '60d' ? false : true
     },
-    // 5: Live Current Point
+    // 5: Session End / Live Current Point
     {
       x: [currX],
       y: [currY],
       mode: 'markers',
-      name: 'Live Point',
+      name: bootstrap.is_historical ? "Session Close Point" : "Live Point",
       marker: {
         color: isOvervixed ? '#FF1744' : '#00E5FF',
         size: 14,
         line: { color: '#FFFFFF', width: 2 }
       },
-      hovertemplate: '<b>Live Current Point</b><br>SPX: %{x:+.2f}%<br>VIX: %{y:+.2f} pts<extra></extra>'
+      hovertemplate: bootstrap.is_historical ? '<b>Session Close</b><br>SPX: %{x:+.2f}%<br>VIX: %{y:+.2f} pts<extra></extra>' : '<b>Live Current Point</b><br>SPX: %{x:+.2f}%<br>VIX: %{y:+.2f} pts<extra></extra>'
     }
   ];
 
@@ -842,6 +850,21 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
 // ==============================================================================
 
 function updateUI(data) {
+  // If this is a live tick from WebSocket, track it
+  if (!data.is_historical) {
+    lastLiveUpdatePayload = data;
+    // When viewing a historical session archive, maintain connection pill status but preserve historical data on charts
+    if (currentViewMode === 'historical') {
+      const connPill = document.getElementById('connection-pill');
+      const connText = document.getElementById('connection-text');
+      if (data.connection && data.connection.connected) {
+        connPill.className = "flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-medium bg-emerald-950/70 text-emerald-400 border border-emerald-800/60";
+        connText.textContent = `IBKR Connected [Port ${data.connection.port}]`;
+      }
+      return;
+    }
+  }
+
   const mkt = data.market;
   const ov = data.overvix;
   const ts = data.term_structure;
@@ -1001,8 +1024,13 @@ function updateUI(data) {
 
   // Time & Tags
   const now = new Date();
-  document.getElementById('last-update-time').textContent = `Updated: ${now.toLocaleTimeString()}`;
+  document.getElementById('last-update-time').textContent = data.is_historical ? `Session: ${data.session_date}` : `Updated: ${now.toLocaleTimeString()}`;
   document.getElementById('chart-ratio-tag').textContent = `Ratio: ${fmtNum(ts.ratio, 4)}`;
+
+  // If this is a historical replay dataset, charts were already fully plotted by render functions
+  if (data.is_historical) {
+    return;
+  }
 
   // 4. Update Overvix Plotly Chart Real-Time
   const currX = data.current_point.x;
@@ -1182,10 +1210,276 @@ function connectWebSocket() {
   };
 }
 
+// ==============================================================================
+// HISTORICAL INTRADAY SESSION REPLAY ENGINE
+// ==============================================================================
+
+async function refreshNotableDates(selectedDateToFocus = null) {
+  const inputDate = document.getElementById('input-session-date');
+  const selectNotable = document.getElementById('select-notable-date');
+  if (!selectNotable) return;
+
+  try {
+    const res = await fetch('/api/available-dates');
+    if (res.ok) {
+      const data = await res.json();
+      if (inputDate) {
+        if (data.min_date) inputDate.min = data.min_date;
+        if (data.max_date) inputDate.max = data.max_date;
+      }
+
+      selectNotable.innerHTML = '<option value="">Historical Sessions...</option>';
+      if (data.notable && data.notable.length > 0) {
+        data.notable.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.date;
+          opt.textContent = p.label;
+          if (selectedDateToFocus && p.date === selectedDateToFocus) {
+            opt.selected = true;
+          }
+          selectNotable.appendChild(opt);
+        });
+      }
+
+      if (data.cached && data.cached.length > 0) {
+        const group = document.createElement('optgroup');
+        group.label = '⚡ Cached on Disk';
+        data.cached.forEach(d => {
+          if (!data.notable || !data.notable.some(p => p.date === d)) {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = `${d} (Cached)`;
+            group.appendChild(opt);
+          }
+        });
+        if (group.children.length > 0) selectNotable.appendChild(group);
+      }
+    }
+  } catch (e) {
+    console.warn("Failed refreshing notable dates:", e);
+  }
+}
+
+async function bookmarkCurrentDate() {
+  const inputDate = document.getElementById('input-session-date');
+  const d = selectedHistoricalDate || (inputDate ? inputDate.value : null);
+  if (!d || d.length !== 10) {
+    alert("Please select or load a valid date first (YYYY-MM-DD).");
+    return;
+  }
+
+  const defaultLabel = `${d} (Custom Regime)`;
+  const label = prompt(`Enter a descriptive label for preset ${d}:`, defaultLabel);
+  if (!label || !label.trim()) return;
+
+  try {
+    const res = await fetch('/api/notable-dates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: d, label: label.trim() })
+    });
+    if (res.ok) {
+      await refreshNotableDates(d);
+      alert(`Saved "${label.trim()}" to notable presets!`);
+    } else {
+      const err = await res.json();
+      alert(`Failed saving preset: ${err.detail || 'Unknown error'}`);
+    }
+  } catch (e) {
+    alert(`Error saving preset: ${e.message}`);
+  }
+}
+
+async function initHistoricalControls() {
+  const btnLive = document.getElementById('btn-mode-live');
+  const btnReturnLive = document.getElementById('btn-return-live');
+  const btnBannerReturnLive = document.getElementById('btn-banner-return-live');
+  const btnBookmark = document.getElementById('btn-bookmark-date');
+  const btnBannerBookmark = document.getElementById('btn-banner-bookmark');
+  const inputDate = document.getElementById('input-session-date');
+  const selectNotable = document.getElementById('select-notable-date');
+
+  // Populate notable presets from API
+  await refreshNotableDates();
+
+  // Event handlers
+  if (btnLive) btnLive.addEventListener('click', returnToLiveMode);
+  if (btnReturnLive) btnReturnLive.addEventListener('click', returnToLiveMode);
+  if (btnBannerReturnLive) btnBannerReturnLive.addEventListener('click', returnToLiveMode);
+  if (btnBookmark) btnBookmark.addEventListener('click', bookmarkCurrentDate);
+  if (btnBannerBookmark) btnBannerBookmark.addEventListener('click', bookmarkCurrentDate);
+
+  const btnLoadDate = document.getElementById('btn-load-date');
+  if (btnLoadDate) {
+    btnLoadDate.addEventListener('click', () => {
+      const d = inputDate ? inputDate.value : null;
+      if (d) loadHistoricalSession(d);
+      else alert("Please select or enter a date (YYYY-MM-DD).");
+    });
+  }
+
+  if (inputDate) {
+    const handleDate = (e) => {
+      const d = e.target.value;
+      if (d && d.length === 10) loadHistoricalSession(d);
+    };
+    inputDate.addEventListener('change', handleDate);
+    inputDate.addEventListener('input', handleDate);
+  }
+
+  if (selectNotable) {
+    selectNotable.addEventListener('change', (e) => {
+      const d = e.target.value;
+      if (d) {
+        if (inputDate) inputDate.value = d;
+        loadHistoricalSession(d);
+      }
+    });
+  }
+}
+
+async function loadHistoricalSession(dateStr) {
+  if (!dateStr) return;
+
+  const banner = document.getElementById('historical-archive-banner');
+  const bannerText = document.getElementById('historical-banner-text');
+  const cacheTag = document.getElementById('historical-cache-tag');
+  const btnLive = document.getElementById('btn-mode-live');
+  const btnReturnLive = document.getElementById('btn-return-live');
+  const headerModeBadge = document.getElementById('header-mode-badge');
+
+  // Save current live state snapshot before switching
+  if (currentViewMode === 'live' && cachedBootstrap) {
+    cachedLiveBootstrap = JSON.parse(JSON.stringify(cachedBootstrap));
+    cachedLiveTs = JSON.parse(JSON.stringify(cachedTs));
+    cachedLiveCorr = JSON.parse(JSON.stringify(cachedCorr));
+  }
+
+  banner.classList.remove('hidden');
+  bannerText.textContent = `Loading ${dateStr} from IBKR / disk cache...`;
+  cacheTag.textContent = '⏳ FETCHING BARS';
+  cacheTag.className = 'text-[10px] text-amber-400 font-mono px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/40 animate-pulse';
+
+  try {
+    const res = await fetch(`/api/session?date=${dateStr}`);
+    if (!res.ok) {
+      const err = await res.json();
+      alert(`Could not load session for ${dateStr}: ${err.detail || 'Market may have been closed or holiday.'}`);
+      if (currentViewMode === 'live') {
+        banner.classList.add('hidden');
+      }
+      return;
+    }
+
+    const data = await res.json();
+    currentViewMode = 'historical';
+    selectedHistoricalDate = dateStr;
+
+    // Update banner & controls
+    bannerText.textContent = `Viewing Historical Session: ${dateStr} (${data.session_bars} 1-min bars)`;
+    cacheTag.textContent = '⚡ ARCHIVE LOADED';
+    cacheTag.className = 'text-[10px] text-emerald-400 font-mono px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/40';
+
+    btnLive.className = "px-2.5 py-1 rounded text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center space-x-1.5 cursor-pointer";
+    btnReturnLive.classList.remove('hidden');
+
+    if (headerModeBadge) {
+      headerModeBadge.textContent = `ARCHIVE: ${dateStr}`;
+      headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60 font-semibold";
+    }
+
+    // Cache intraday series for the charts
+    if (data.term_structure && data.term_structure.intraday_1d) {
+      cachedTs['1D'] = data.term_structure.intraday_1d;
+    }
+    if (data.intraday_correlation && data.intraday_correlation['1D']) {
+      cachedCorr['1D'] = data.intraday_correlation['1D'];
+      cachedCorr.metrics['1D'] = data.intraday_correlation.metrics['1D'];
+    }
+
+    // Force timeframe to 1D to inspect that day's intraday bars
+    currentTimeframe = '1D';
+    currentCorrTf = '1D';
+
+    if (tsLivePill) {
+      tsLivePill.textContent = `${dateStr} 1m`;
+      tsLivePill.className = "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60";
+    }
+    if (corrTfPill) {
+      corrTfPill.textContent = `${dateStr} 1M`;
+      corrTfPill.className = "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60";
+    }
+
+    // Render charts
+    renderOvervixChart(data);
+    renderTermStructureChart('1D');
+    renderCorrelationChart(currentCorrMode, '1D');
+    updateCorrMetricDisplay();
+    updateUI(data);
+
+  } catch (e) {
+    console.error("Historical session fetch error:", e);
+    alert(`Error loading historical session for ${dateStr}: ${e.message}`);
+    if (currentViewMode === 'live') banner.classList.add('hidden');
+  }
+}
+
+function returnToLiveMode() {
+  if (currentViewMode === 'live') return;
+
+  currentViewMode = 'live';
+  selectedHistoricalDate = null;
+
+  const banner = document.getElementById('historical-archive-banner');
+  const btnLive = document.getElementById('btn-mode-live');
+  const btnReturnLive = document.getElementById('btn-return-live');
+  const headerModeBadge = document.getElementById('header-mode-badge');
+  const inputDate = document.getElementById('input-session-date');
+  const selectNotable = document.getElementById('select-notable-date');
+
+  banner.classList.add('hidden');
+  btnLive.className = "px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500 text-black shadow-sm transition flex items-center space-x-1.5";
+  btnReturnLive.classList.add('hidden');
+
+  if (headerModeBadge) {
+    headerModeBadge.textContent = "IBKR Live";
+    headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-semibold";
+  }
+
+  if (inputDate) inputDate.value = '';
+  if (selectNotable) selectNotable.value = '';
+
+  if (tsLivePill) {
+    tsLivePill.textContent = (currentTimeframe === '1D') ? "Intraday 1m" : ((currentTimeframe === '5D') ? "Recent 15m" : "Daily Close");
+    tsLivePill.className = (currentTimeframe === '1D') ? "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60" : "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60";
+  }
+  if (corrTfPill) {
+    corrTfPill.textContent = (currentCorrTf === '1D') ? "Intraday 1M" : ((currentCorrTf === '5D') ? "Recent 15M" : "Daily Macro");
+    corrTfPill.className = (currentCorrTf === '1D') ? "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60" : "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60";
+  }
+
+  // Restore live datasets
+  if (cachedLiveBootstrap) {
+    cachedBootstrap = cachedLiveBootstrap;
+    cachedTs = cachedLiveTs;
+    cachedCorr = cachedLiveCorr;
+
+    renderOvervixChart(cachedBootstrap);
+    renderTermStructureChart(currentTimeframe);
+    renderCorrelationChart(currentCorrMode, currentCorrTf);
+    updateCorrMetricDisplay();
+  }
+
+  if (lastLiveUpdatePayload) {
+    updateUI(lastLiveUpdatePayload);
+  }
+}
+
 // Start Dashboard on load
 window.addEventListener('DOMContentLoaded', () => {
   setupTimeframeButtons();
   setupTrailButtons();
   setupCorrButtons();
+  initHistoricalControls();
   bootstrapData();
 });

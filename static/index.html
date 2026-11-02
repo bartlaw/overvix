@@ -47,10 +47,43 @@
         <div>
           <div class="flex items-center space-x-2">
             <h1 class="text-base font-bold tracking-tight text-white uppercase">Overvix & Term Structure</h1>
-            <span class="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-semibold">IBKR Live</span>
+            <span id="header-mode-badge" class="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-semibold">IBKR Live</span>
           </div>
           <p class="text-xs text-slate-400">Spot-Vol Regression & VIX / VIX3M Term Structure Monitor</p>
         </div>
+      </div>
+
+      <!-- Global Date & Replay Controls -->
+      <div class="flex items-center space-x-2 bg-slate-900/90 border border-slate-700/80 rounded-lg p-1 shadow-inner">
+        <!-- Live Toggle Button -->
+        <button id="btn-mode-live" class="px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500 text-black shadow-sm transition flex items-center space-x-1.5" title="View Real-Time Live Streaming Data">
+          <span class="w-2 h-2 rounded-full bg-emerald-950 animate-pulse"></span>
+          <span>LIVE</span>
+        </button>
+
+        <!-- Date Picker Input + Load Button -->
+        <div class="flex items-center space-x-1 px-1 border-l border-slate-800">
+          <span class="text-xs text-slate-400">📅</span>
+          <input type="date" id="input-session-date" class="bg-slate-950 text-slate-200 border border-slate-700/80 rounded px-2 py-0.5 text-xs font-mono focus:border-cyan-400 focus:outline-none transition cursor-pointer" title="Pick an Intraday Session Date" />
+          <button id="btn-load-date" class="px-2 py-0.5 rounded text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white transition shadow-sm cursor-pointer" title="Load selected date">Load</button>
+        </div>
+
+        <!-- Notable Presets Dropdown -->
+        <select id="select-notable-date" class="bg-slate-950 text-slate-300 border border-slate-700/80 rounded px-2 py-0.5 text-xs font-medium focus:border-cyan-400 focus:outline-none transition cursor-pointer" title="Quick Historical Regimes">
+          <option value="">Historical Sessions...</option>
+        </select>
+
+        <!-- Bookmark / Add Preset Button -->
+        <button id="btn-bookmark-date" class="px-2 py-0.5 rounded text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 hover:border-amber-500/50 transition shadow-sm cursor-pointer" title="Save current/selected date to your presets">
+          <span>⭐</span>
+          <span>+Preset</span>
+        </button>
+
+        <!-- Return to Live Action Button (active in historical mode) -->
+        <button id="btn-return-live" class="hidden px-2.5 py-1 rounded text-xs font-bold bg-amber-500 hover:bg-amber-400 text-black shadow transition flex items-center space-x-1 animate-pulse" title="Resume Live Real-Time Stream">
+          <span>↺</span>
+          <span>Return to Live</span>
+        </button>
       </div>
 
       <!-- Action Controls & Status -->
@@ -83,6 +116,34 @@
       </div>
     </div>
   </header>
+
+  <!-- HISTORICAL ARCHIVE BANNER (Active only in Historical Replay Mode) -->
+  <div id="historical-archive-banner" class="hidden bg-gradient-to-r from-amber-950/90 via-slate-900 to-amber-950/90 border-b border-amber-600/60 px-4 py-2 transition duration-300">
+    <div class="max-w-[1720px] mx-auto flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center space-x-3">
+        <span class="px-2 py-0.5 rounded text-[11px] font-black uppercase tracking-wider bg-amber-500 text-black shadow-sm">
+          HISTORICAL ARCHIVE
+        </span>
+        <span id="historical-banner-text" class="text-xs font-semibold text-amber-200">
+          Viewing Session: --
+        </span>
+        <span id="historical-cache-tag" class="text-[10px] text-emerald-400 font-mono px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/40">
+          ⚡ CACHED ON DISK
+        </span>
+      </div>
+      <div class="flex items-center space-x-3">
+        <button id="btn-banner-bookmark" class="px-2.5 py-1 rounded text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 hover:border-amber-500/50 shadow transition flex items-center space-x-1 cursor-pointer">
+          <span>⭐</span>
+          <span>Save to Presets</span>
+        </button>
+        <span class="text-xs text-slate-400">Live ticks paused:</span>
+        <button id="btn-banner-return-live" class="px-3 py-1 rounded text-xs font-bold bg-amber-500 hover:bg-amber-400 text-black shadow transition flex items-center space-x-1">
+          <span>↺</span>
+          <span>Return to Live Market</span>
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- MASTER CONFLUENCE BANNER -->
   <div class="px-4 py-2 bg-[#090e1a] border-b border-slate-800/80">
@@ -472,7 +533,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT -->
-  <script src="/static/dashboard.js"></script>
+  <!-- DASHBOARD SCRIPT (v2.3 with Custom Presets) -->
+  <script src="/static/dashboard.js?v=2.3"></script>
 </body>
 </html>
