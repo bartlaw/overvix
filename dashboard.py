@@ -75,7 +75,9 @@ DEFAULT_IBKR_PORT = 7496        # 7496: TWS Live, 7497: TWS Paper, 4001: Gateway
 DEFAULT_CLIENT_ID = 20
 DEFAULT_WEB_PORT = 8000
 DEFAULT_WINDOW_DAYS = 60
-DEFAULT_THRESHOLD_PTS = 2.0
+DEFAULT_SPX_THRESHOLD_PTS = 2.0
+DEFAULT_NDX_THRESHOLD_PTS = 2.5
+DEFAULT_THRESHOLD_PTS = DEFAULT_SPX_THRESHOLD_PTS
 DEFAULT_UPDATE_INTERVAL = 1.0
 COMMON_IBKR_PORTS = [7496, 7497, 4001, 4002]
 
@@ -90,7 +92,9 @@ class DashboardState:
         self.port: int = DEFAULT_IBKR_PORT
         self.client_id: int = DEFAULT_CLIENT_ID
         self.window_days: int = DEFAULT_WINDOW_DAYS
-        self.threshold_pts: float = DEFAULT_THRESHOLD_PTS
+        self.spx_threshold_pts: float = DEFAULT_SPX_THRESHOLD_PTS
+        self.ndx_threshold_pts: float = DEFAULT_NDX_THRESHOLD_PTS
+        self.threshold_pts: float = DEFAULT_SPX_THRESHOLD_PTS
         self.interval: float = DEFAULT_UPDATE_INTERVAL
 
         # Contracts
@@ -686,12 +690,12 @@ def compute_live_payload() -> Dict[str, Any]:
     # SPX Overvix Calculations
     expected_vix_pt = state.intercept + state.slope * curr_x
     residual_pts = curr_y - expected_vix_pt
-    is_overvixed = bool(residual_pts >= state.threshold_pts)
+    is_overvixed = bool(residual_pts >= state.spx_threshold_pts)
 
     # NDX Over-VXN Calculations
     expected_vxn_pt = state.ndx_intercept + state.ndx_slope * curr_ndx_x
     residual_ndx_pts = curr_ndx_y - expected_vxn_pt
-    is_overvxned = bool(residual_ndx_pts >= state.threshold_pts)
+    is_overvxned = bool(residual_ndx_pts >= state.ndx_threshold_pts)
 
     # Term Structure Calculations (VIX / VIX3M)
     ratio = float(vix_curr / vix3m_curr) if vix3m_curr > 0 else 0.0
@@ -821,7 +825,7 @@ def compute_live_payload() -> Dict[str, Any]:
             "vol_slope": round(state.vol_slope, 4),
             "intercept": round(state.intercept, 4),
             "window_days": state.window_days,
-            "threshold_pts": round(state.threshold_pts, 2)
+            "threshold_pts": round(state.spx_threshold_pts, 2)
         },
         "overvix": {
             "expected_vix_pt": round(expected_vix_pt, 2),
@@ -880,7 +884,7 @@ def compute_live_payload() -> Dict[str, Any]:
                 "vol_slope": round(state.ndx_vol_slope, 4),
                 "intercept": round(state.ndx_intercept, 4),
                 "window_days": state.window_days,
-                "threshold_pts": round(state.threshold_pts, 2)
+                "threshold_pts": round(state.ndx_threshold_pts, 2)
             },
             "overvix": {
                 "expected_vol_pt": round(expected_vxn_pt, 2),
@@ -1307,10 +1311,11 @@ async def get_historical_session(date: str):
             vix3m_contract=state.vix3m_contract,
             df_daily=state.df_daily,
             target_date=date,
-            threshold_pts=state.threshold_pts,
+            threshold_pts=state.spx_threshold_pts,
             window_days=state.window_days,
             ndx_contract=state.ndx_contract,
-            vxn_contract=state.vxn_contract
+            vxn_contract=state.vxn_contract,
+            ndx_threshold_pts=state.ndx_threshold_pts
         )
         return payload
     except ValueError as ve:
@@ -1321,21 +1326,38 @@ async def get_historical_session(date: str):
 
 class ConfigRequest(BaseModel):
     threshold: Optional[float] = None
+    spx_threshold: Optional[float] = None
+    ndx_threshold: Optional[float] = None
     window: Optional[int] = None
     interval: Optional[float] = None
 
 
 @app.post("/api/config")
 async def post_config(req: ConfigRequest):
-    if req.threshold is not None:
-        state.threshold_pts = float(req.threshold)
+    if req.spx_threshold is not None:
+        state.spx_threshold_pts = float(req.spx_threshold)
+        state.threshold_pts = state.spx_threshold_pts
+    elif req.threshold is not None:
+        state.spx_threshold_pts = float(req.threshold)
+        state.threshold_pts = state.spx_threshold_pts
+
+    if req.ndx_threshold is not None:
+        state.ndx_threshold_pts = float(req.ndx_threshold)
+
     if req.window is not None and req.window != state.window_days:
         state.window_days = int(req.window)
         await refresh_historical_data()
     if req.interval is not None:
         state.interval = max(0.2, float(req.interval))
 
-    return {"status": "ok", "threshold": state.threshold_pts, "window": state.window_days, "interval": state.interval}
+    return {
+        "status": "ok", 
+        "spx_threshold": state.spx_threshold_pts,
+        "ndx_threshold": state.ndx_threshold_pts,
+        "threshold": state.spx_threshold_pts, 
+        "window": state.window_days, 
+        "interval": state.interval
+    }
 
 
 @app.websocket("/ws/live")

@@ -395,9 +395,15 @@
 
       <div class="space-y-3 text-sm">
         <div>
-          <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">Overvix Trigger Threshold (Points above expected)</label>
-          <input type="number" id="input-threshold" step="0.1" min="0.5" max="5.0" value="2.0" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-cyan-500">
-          <p class="text-[11px] text-slate-400 mt-1">Default is +2.0 points (standard Volland Point-Based signal).</p>
+          <label class="block text-xs font-semibold text-cyan-400 uppercase mb-1">SPX Overvix Threshold (+pts above expected)</label>
+          <input type="number" id="input-spx-threshold" step="0.1" min="0.5" max="5.0" value="2.0" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-cyan-500">
+          <p class="text-[11px] text-slate-400 mt-1">Broad market standard is +2.0 pts (~3.4&sigma; tail event).</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-purple-400 uppercase mb-1">NDX Over-VXN Threshold (+pts above expected)</label>
+          <input type="number" id="input-ndx-threshold" step="0.1" min="0.5" max="6.0" value="2.5" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-purple-500">
+          <p class="text-[11px] text-slate-400 mt-1">Tech market default is +2.5 pts (scaled for higher NDX beta &amp; vol).</p>
         </div>
 
         <div>
@@ -570,7 +576,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v2.7 with Pre-Market GTH & Prior Session Alignment) -->
-  <script src="/static/dashboard.js?v=2.7"></script>
+  <!-- DASHBOARD SCRIPT (v3.0 with Plotly Subplot & Threshold Beacon Fixes) -->
+  <script src="/static/dashboard.js?v=3.0"></script>
 </body>
 </html>

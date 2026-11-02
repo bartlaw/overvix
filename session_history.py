@@ -93,7 +93,7 @@ def load_cached_session(date_str: str) -> Optional[Dict[str, Any]]:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # Auto-upgrade ndx current_point if missing
+            # Auto-upgrade ndx current_point if missing & ensure 2.5 pt threshold default
             if data and isinstance(data.get("ndx"), dict):
                 if "current_point" not in data["ndx"]:
                     m = data["ndx"].get("market", {})
@@ -108,11 +108,20 @@ def load_cached_session(date_str: str) -> Optional[Dict[str, Any]]:
                             px = 0.0
                             py = 0.0
                     data["ndx"]["current_point"] = {"x": round(float(px), 2), "y": round(float(py), 2)}
-                    try:
-                        with open(filepath, 'w', encoding='utf-8') as f_out:
-                            json.dump(data, f_out, indent=2)
-                    except Exception:
-                        pass
+
+                ndx_mod = data["ndx"].get("model")
+                if isinstance(ndx_mod, dict) and ndx_mod.get("threshold_pts") in (None, 2.0):
+                    ndx_mod["threshold_pts"] = 2.5
+                    ov = data["ndx"].get("overvix", {})
+                    res_pts = ov.get("residual_pts", 0.0)
+                    ov["is_overvixed"] = bool(res_pts >= 2.5)
+                    ov["status"] = "OVER-VXN" if ov["is_overvixed"] else "NORMAL"
+
+                try:
+                    with open(filepath, 'w', encoding='utf-8') as f_out:
+                        json.dump(data, f_out, indent=2)
+                except Exception:
+                    pass
             return data
         except Exception as e:
             print(f"[Cache Error] Failed reading cache for {date_str}: {e}")
@@ -155,7 +164,8 @@ async def fetch_and_build_historical_session(
     threshold_pts: float = 2.0,
     window_days: int = 60,
     ndx_contract: Optional[Contract] = None,
-    vxn_contract: Optional[Contract] = None
+    vxn_contract: Optional[Contract] = None,
+    ndx_threshold_pts: float = 2.5
 ) -> Dict[str, Any]:
     """
     Fetch and assemble full historical session payload for target_date (YYYY-MM-DD):
@@ -386,7 +396,7 @@ async def fetch_and_build_historical_session(
 
             expected_vxn_pt = ndx_intercept + ndx_slope * final_ndx_x
             residual_ndx_pts = final_ndx_y - expected_vxn_pt
-            is_overvxned = bool(residual_ndx_pts >= threshold_pts)
+            is_overvxned = bool(residual_ndx_pts >= ndx_threshold_pts)
 
             ndx_package = {
                 "market": {
@@ -405,7 +415,7 @@ async def fetch_and_build_historical_session(
                     "vol_slope": round(ndx_vol_slope, 4),
                     "intercept": round(ndx_intercept, 4),
                     "window_days": window_days,
-                    "threshold_pts": round(threshold_pts, 2)
+                    "threshold_pts": round(ndx_threshold_pts, 2)
                 },
                 "overvix": {
                     "expected_vol_pt": round(expected_vxn_pt, 2),

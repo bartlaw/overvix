@@ -7,6 +7,8 @@ let soundEnabled = true;
 let lastOvervixSignal = false;
 let lastInversionSignal = false;
 let audioCtx = null;
+let currentSpxThreshold = 2.0;
+let currentNdxThreshold = 2.5;
 let currentThreshold = 2.0;
 let currentTimeframe = '1D'; // '1D', '5D', '1Y'
 let currentTrailMode = 'both'; // 'both', 'today', '60d'
@@ -136,12 +138,19 @@ const modalClose = document.getElementById('modal-close');
 const btnCancelSettings = document.getElementById('btn-cancel-settings');
 const btnSaveSettings = document.getElementById('btn-save-settings');
 
-btnSettings.addEventListener('click', () => modalSettings.classList.remove('hidden'));
+btnSettings.addEventListener('click', () => {
+  const inputSpx = document.getElementById('input-spx-threshold');
+  const inputNdx = document.getElementById('input-ndx-threshold');
+  if (inputSpx) inputSpx.value = currentSpxThreshold;
+  if (inputNdx) inputNdx.value = currentNdxThreshold;
+  modalSettings.classList.remove('hidden');
+});
 modalClose.addEventListener('click', () => modalSettings.classList.add('hidden'));
 btnCancelSettings.addEventListener('click', () => modalSettings.classList.add('hidden'));
 
 btnSaveSettings.addEventListener('click', async () => {
-  const thresh = parseFloat(document.getElementById('input-threshold').value);
+  const spxThresh = parseFloat(document.getElementById('input-spx-threshold').value) || currentSpxThreshold;
+  const ndxThresh = parseFloat(document.getElementById('input-ndx-threshold').value) || currentNdxThreshold;
   const win = parseInt(document.getElementById('input-window').value, 10);
   const interval = parseFloat(document.getElementById('input-interval').value);
 
@@ -149,11 +158,19 @@ btnSaveSettings.addEventListener('click', async () => {
     const res = await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ threshold: thresh, window: win, interval: interval })
+      body: JSON.stringify({ 
+        spx_threshold: spxThresh,
+        ndx_threshold: ndxThresh,
+        window: win, 
+        interval: interval 
+      })
     });
     if (res.ok) {
-      currentThreshold = thresh;
-      document.getElementById('disp-thresh-pts').textContent = thresh.toFixed(1);
+      currentSpxThreshold = spxThresh;
+      currentNdxThreshold = ndxThresh;
+      currentThreshold = (currentAssetPair === 'NDX') ? currentNdxThreshold : currentSpxThreshold;
+      const dispEl = document.getElementById('disp-thresh-pts');
+      if (dispEl) dispEl.textContent = currentThreshold.toFixed(1);
       modalSettings.classList.add('hidden');
       bootstrapData();
     }
@@ -216,13 +233,14 @@ function switchAssetPair(pair) {
   currentAssetPair = pair;
 
   if (pair === 'SPX') {
+    currentThreshold = currentSpxThreshold;
     if (btnAssetSpx) btnAssetSpx.className = "px-2.5 py-1 rounded text-xs font-bold bg-cyan-500 text-black shadow-sm transition flex items-center space-x-1.5";
     if (btnAssetNdx) btnAssetNdx.className = "px-2.5 py-1 rounded text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1.5";
 
     const spTitle = document.getElementById('spotvol-title');
     if (spTitle) spTitle.textContent = "Spot-Vol Regression & Overvix Zone";
     const spSub = document.getElementById('spotvol-sub');
-    if (spSub) spSub.textContent = "SPX % vs VIX Point Move with +2.0 pt Threshold & Today's Intraday Path";
+    if (spSub) spSub.textContent = `SPX % vs VIX Point Move with +${currentSpxThreshold.toFixed(1)} pt Threshold & Intraday Path`;
 
     const tsTitle = document.getElementById('ts-title');
     if (tsTitle) tsTitle.textContent = "Volatility Term Structure (VIX / VIX3M)";
@@ -234,13 +252,14 @@ function switchAssetPair(pair) {
     const corrSub = document.getElementById('corr-subtitle');
     if (corrSub) corrSub.textContent = "Minute-by-Minute Normalized Overlay (Upper) & Rolling 30-Minute Pearson Correlation ρ(ΔSPX, ΔVIX) (Lower)";
   } else {
+    currentThreshold = currentNdxThreshold;
     if (btnAssetNdx) btnAssetNdx.className = "px-2.5 py-1 rounded text-xs font-bold bg-purple-500 text-white shadow-sm transition flex items-center space-x-1.5";
     if (btnAssetSpx) btnAssetSpx.className = "px-2.5 py-1 rounded text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1.5";
 
     const spTitle = document.getElementById('spotvol-title');
     if (spTitle) spTitle.textContent = "Nasdaq Spot-Vol Regression & Over-VXN Zone";
     const spSub = document.getElementById('spotvol-sub');
-    if (spSub) spSub.textContent = "NDX % vs VXN Point Move with +2.0 pt Threshold & Intraday Path";
+    if (spSub) spSub.textContent = `NDX % vs VXN Point Move with +${currentNdxThreshold.toFixed(1)} pt Threshold & Intraday Path`;
 
     const tsTitle = document.getElementById('ts-title');
     if (tsTitle) tsTitle.textContent = "Tech Vol Premium (VXN vs VIX Spread & Ratio)";
@@ -252,6 +271,9 @@ function switchAssetPair(pair) {
     const corrSub = document.getElementById('corr-subtitle');
     if (corrSub) corrSub.textContent = "Minute-by-Minute Normalized Overlay (Upper) & Rolling 30-Minute Pearson Correlation ρ(ΔNDX, ΔVXN) (Lower)";
   }
+
+  const dispEl = document.getElementById('disp-thresh-pts');
+  if (dispEl) dispEl.textContent = currentThreshold.toFixed(1);
 
   // Re-render charts and UI immediately from cache
   const activeData = (currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap;
@@ -435,7 +457,8 @@ function renderOvervixChart(bootstrap) {
   const dates = (targetData.overvix && targetData.overvix.dates) ? targetData.overvix.dates : [];
   const slope = (targetData.model && targetData.model.slope) || 0;
   const intercept = (targetData.model && targetData.model.intercept) || 0;
-  const threshold = (targetData.model && targetData.model.threshold_pts) || currentThreshold;
+  const assetDefaultThresh = isNdx ? currentNdxThreshold : currentSpxThreshold;
+  const threshold = (targetData.model && targetData.model.threshold_pts) || assetDefaultThresh;
 
   // Intraday Trail Data
   const trail = (targetData.overvix && targetData.overvix.intraday_trail) ? targetData.overvix.intraday_trail : { x: [], y: [], times: [] };
@@ -452,7 +475,10 @@ function renderOvervixChart(bootstrap) {
 
   let currX = 0;
   let currY = 0;
-  if (targetData.current_point && targetData.current_point.x !== undefined && targetData.current_point.y !== undefined) {
+  if (bootstrap.is_historical && trail.x && trail.x.length > 0) {
+    currX = trail.x[trail.x.length - 1];
+    currY = trail.y[trail.y.length - 1];
+  } else if (targetData.current_point && targetData.current_point.x !== undefined && targetData.current_point.y !== undefined) {
     currX = targetData.current_point.x;
     currY = targetData.current_point.y;
   } else if (targetData.market && targetData.market.pct_change !== undefined) {
@@ -464,6 +490,14 @@ function renderOvervixChart(bootstrap) {
     currX = trail.x[trail.x.length - 1];
     currY = trail.y[trail.y.length - 1];
   }
+
+  // Update subtitle & card target dynamically
+  const spSub = document.getElementById('spotvol-sub');
+  if (spSub) {
+    spSub.textContent = `${assetLabel} % vs ${volLabel} Point Move with +${threshold.toFixed(1)} pt Threshold & Intraday Path`;
+  }
+  const dispEl = document.getElementById('disp-thresh-pts');
+  if (dispEl) dispEl.textContent = threshold.toFixed(1);
   const isOvervixed = targetData.overvix ? targetData.overvix.is_overvixed : false;
 
   const traces = [
@@ -583,8 +617,9 @@ function renderTechVolChart(tf = currentTimeframe) {
   const spread = data.spread || [];
   const ratio = data.ratio || [];
 
-  const dStart = times.length > 0 ? times[0] : '';
-  const dEnd = times.length > 0 ? times[times.length - 1] : '';
+  const dStart = times.length > 0 ? times[0] : null;
+  const dEnd = times.length > 0 ? times[times.length - 1] : null;
+  const hasValidDates = Boolean(dStart && dEnd);
   const timeHoverFmt = (tf === '1Y') ? '%b %d, %Y' : '%b %d, %H:%M';
 
   const traceVXN = {
@@ -594,7 +629,7 @@ function renderTechVolChart(tf = currentTimeframe) {
     mode: 'lines',
     line: { color: '#C084FC', width: 1.8 },
     xaxis: 'x',
-    yaxis: 'y1',
+    yaxis: 'y',
     hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>VXN: %{y:.2f}<extra></extra>`
   };
 
@@ -605,7 +640,7 @@ function renderTechVolChart(tf = currentTimeframe) {
     mode: 'lines',
     line: { color: '#00E5FF', width: 1.5 },
     xaxis: 'x',
-    yaxis: 'y1',
+    yaxis: 'y',
     hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>VIX: %{y:.2f}<extra></extra>`
   };
 
@@ -621,8 +656,8 @@ function renderTechVolChart(tf = currentTimeframe) {
   };
 
   const traceEquilibrium = {
-    x: [dStart, dEnd],
-    y: [3.0, 3.0],
+    x: hasValidDates ? [dStart, dEnd] : [],
+    y: hasValidDates ? [3.0, 3.0] : [],
     mode: 'lines',
     name: 'Normal Spread (+3.0 pts)',
     line: { color: '#10B981', width: 1, dash: 'dot' },
@@ -632,8 +667,8 @@ function renderTechVolChart(tf = currentTimeframe) {
   };
 
   const tracePanic = {
-    x: [dStart, dEnd],
-    y: [6.0, 6.0],
+    x: hasValidDates ? [dStart, dEnd] : [],
+    y: hasValidDates ? [6.0, 6.0] : [],
     mode: 'lines',
     name: 'Tech Panic Spread (+6.0 pts)',
     line: { color: '#EF4444', width: 1.5, dash: 'dash' },
@@ -724,8 +759,9 @@ function renderTermStructureChart(tf = '1D') {
   const vix3m = data.vix3m || [];
   const ratio = data.ratio || [];
 
-  const dStart = times.length > 0 ? times[0] : '';
-  const dEnd = times.length > 0 ? times[times.length - 1] : '';
+  const dStart = times.length > 0 ? times[0] : null;
+  const dEnd = times.length > 0 ? times[times.length - 1] : null;
+  const hasValidDates = Boolean(dStart && dEnd);
 
   const timeHoverFmt = (tf === '1Y') ? '%b %d, %Y' : '%b %d, %H:%M';
 
@@ -736,7 +772,7 @@ function renderTermStructureChart(tf = '1D') {
     mode: 'lines',
     line: { color: '#00E5FF', width: 1.5 },
     xaxis: 'x',
-    yaxis: 'y1',
+    yaxis: 'y',
     hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>VIX (30d): %{y:.2f}<extra></extra>`
   };
 
@@ -747,7 +783,7 @@ function renderTermStructureChart(tf = '1D') {
     mode: 'lines',
     line: { color: '#FFA726', width: 1.5 },
     xaxis: 'x',
-    yaxis: 'y1',
+    yaxis: 'y',
     hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>VIX3M (90d): %{y:.2f}<extra></extra>`
   };
 
@@ -763,8 +799,8 @@ function renderTermStructureChart(tf = '1D') {
   };
 
   const traceFlattening = {
-    x: [dStart, dEnd],
-    y: [0.90, 0.90],
+    x: hasValidDates ? [dStart, dEnd] : [],
+    y: hasValidDates ? [0.90, 0.90] : [],
     mode: 'lines',
     name: 'Flattening (0.90)',
     line: { color: '#FFA726', width: 1, dash: 'dot' },
@@ -774,8 +810,8 @@ function renderTermStructureChart(tf = '1D') {
   };
 
   const traceInversion = {
-    x: [dStart, dEnd],
-    y: [1.00, 1.00],
+    x: hasValidDates ? [dStart, dEnd] : [],
+    y: hasValidDates ? [1.00, 1.00] : [],
     mode: 'lines',
     name: 'Inversion (1.00)',
     line: { color: '#EF4444', width: 1.5, dash: 'dash' },
@@ -933,7 +969,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       mode: 'lines',
       line: { color: assetColor, width: 1.8 },
       xaxis: 'x',
-      yaxis: 'y1',
+      yaxis: 'y',
       hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{y:+.2f}%<extra></extra>`
     };
 
@@ -1301,6 +1337,10 @@ function updateUI(data) {
       cardOvervix.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
     }
 
+    const ndxThresh = (ndxMod && ndxMod.threshold_pts) || currentNdxThreshold;
+    const dispThreshNdxEl = document.getElementById('disp-thresh-pts');
+    if (dispThreshNdxEl) dispThreshNdxEl.textContent = ndxThresh.toFixed(1);
+
     // Model Parameters Strip (NDX)
     document.getElementById('param-window').textContent = ndxMod.window_days;
     document.getElementById('param-r2').textContent = fmtNum(ndxMod.r_squared, 4);
@@ -1358,6 +1398,10 @@ function updateUI(data) {
       overvixStatusBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase';
       cardOvervix.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
     }
+
+    const spxThresh = (mod && mod.threshold_pts) || currentSpxThreshold;
+    const dispThreshSpxEl = document.getElementById('disp-thresh-pts');
+    if (dispThreshSpxEl) dispThreshSpxEl.textContent = spxThresh.toFixed(1);
 
     // Model Parameters Strip (SPX)
     document.getElementById('param-window').textContent = mod.window_days;
@@ -1637,10 +1681,22 @@ async function bootstrapData() {
     const data = await res.json();
     cachedBootstrap = data;
 
-    currentThreshold = data.model.threshold_pts;
-    document.getElementById('disp-thresh-pts').textContent = currentThreshold.toFixed(1);
-    document.getElementById('input-threshold').value = currentThreshold;
-    document.getElementById('input-window').value = data.model.window_days;
+    if (data.model && data.model.threshold_pts) {
+      currentSpxThreshold = data.model.threshold_pts;
+    }
+    if (data.ndx && data.ndx.model && data.ndx.model.threshold_pts) {
+      currentNdxThreshold = data.ndx.model.threshold_pts;
+    }
+    currentThreshold = (currentAssetPair === 'NDX') ? currentNdxThreshold : currentSpxThreshold;
+
+    const dispThreshEl = document.getElementById('disp-thresh-pts');
+    if (dispThreshEl) dispThreshEl.textContent = currentThreshold.toFixed(1);
+    const inputSpx = document.getElementById('input-spx-threshold');
+    if (inputSpx) inputSpx.value = currentSpxThreshold;
+    const inputNdx = document.getElementById('input-ndx-threshold');
+    if (inputNdx) inputNdx.value = currentNdxThreshold;
+    const inputWin = document.getElementById('input-window');
+    if (inputWin && data.model) inputWin.value = data.model.window_days;
 
     // Cache SPX Term Structure datasets
     if (data.term_structure.intraday_1d) {
@@ -1944,6 +2000,14 @@ async function loadHistoricalSession(dateStr) {
     }
 
     // Render charts
+    if (data.model && data.model.threshold_pts) {
+      currentSpxThreshold = data.model.threshold_pts;
+    }
+    if (data.ndx && data.ndx.model && data.ndx.model.threshold_pts) {
+      currentNdxThreshold = data.ndx.model.threshold_pts;
+    }
+    currentThreshold = (currentAssetPair === 'NDX') ? currentNdxThreshold : currentSpxThreshold;
+
     renderOvervixChart(data);
     renderTermStructureChart('1D');
     renderCorrelationChart(currentCorrMode, '1D');
