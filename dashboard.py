@@ -338,70 +338,6 @@ async def refresh_historical_data():
             barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
         )
 
-        now_et = datetime.now(pytz.timezone('US/Eastern'))
-        today_et = now_et.strftime('%Y-%m-%d')
-
-        # SPX / VIX Spot-Vol Baseline
-        df_spx = safe_to_series(spx_bars, 'spx_close')
-        df_vix = safe_to_series(vix_bars, 'vix_close')
-        df_sv = pd.concat([df_spx, df_vix], axis=1).dropna()
-        df_sv['spx_pct'] = df_sv['spx_close'].pct_change() * 100.0
-        df_sv['vix_pt'] = df_sv['vix_close'].diff()
-        df_sv = df_sv.dropna()
-
-        # Exclude today's forming/incomplete daily bar so baseline regression is strictly completed sessions
-        is_today_in_sv = (str(df_sv.index[-1])[:10] == today_et) if not df_sv.empty else False
-        df_sv_comp = df_sv.iloc[:-1] if is_today_in_sv and len(df_sv) > 1 else df_sv
-        state.df_spotvol = df_sv_comp.iloc[-state.window_days:].copy()
-
-        x = state.df_spotvol['spx_pct'].values
-        y = state.df_spotvol['vix_pt'].values
-        slope, intercept, r_value, _, _ = stats.linregress(x, y)
-        state.slope = float(slope)
-        state.intercept = float(intercept)
-        state.r_squared = float(r_value ** 2)
-        state.vol_slope = float(1.0 / slope) if slope != 0 else 0.0
-
-        # Reference close prices for today's session moves (always the latest completed session close)
-        state.latest_spx_close = float(df_sv_comp['spx_close'].iloc[-1])
-        state.latest_vix_close = float(df_sv_comp['vix_close'].iloc[-1])
-        state.prior_spx_close = float(df_sv_comp['spx_close'].iloc[-2]) if len(df_sv_comp) > 1 else state.latest_spx_close
-        state.prior_vix_close = float(df_sv_comp['vix_close'].iloc[-2]) if len(df_sv_comp) > 1 else state.latest_vix_close
-        state.last_sess_x = float(state.df_spotvol['spx_pct'].iloc[-1])
-        state.last_sess_y = float(state.df_spotvol['vix_pt'].iloc[-1])
-
-        # NDX / VXN Spot-Vol Baseline
-        df_ndx = safe_to_series(ndx_bars, 'ndx_close')
-        df_vxn = safe_to_series(vxn_bars, 'vxn_close')
-        df_sv_ndx = pd.concat([df_ndx, df_vxn], axis=1).dropna()
-        df_sv_ndx['ndx_pct'] = df_sv_ndx['ndx_close'].pct_change() * 100.0
-        df_sv_ndx['vxn_pt'] = df_sv_ndx['vxn_close'].diff()
-        df_sv_ndx = df_sv_ndx.dropna()
-
-        is_today_in_ndx = (str(df_sv_ndx.index[-1])[:10] == today_et) if not df_sv_ndx.empty else False
-        df_sv_ndx_comp = df_sv_ndx.iloc[:-1] if is_today_in_ndx and len(df_sv_ndx) > 1 else df_sv_ndx
-        state.df_spotvol_ndx = df_sv_ndx_comp.iloc[-state.window_days:].copy()
-
-        x_ndx = state.df_spotvol_ndx['ndx_pct'].values
-        y_ndx = state.df_spotvol_ndx['vxn_pt'].values
-        ndx_slope, ndx_intercept, ndx_r_val, _, _ = stats.linregress(x_ndx, y_ndx)
-        state.ndx_slope = float(ndx_slope)
-        state.ndx_intercept = float(ndx_intercept)
-        state.ndx_r_squared = float(ndx_r_val ** 2)
-        state.ndx_vol_slope = float(1.0 / ndx_slope) if ndx_slope != 0 else 0.0
-
-        state.latest_ndx_close = float(df_sv_ndx_comp['ndx_close'].iloc[-1])
-        state.latest_vxn_close = float(df_sv_ndx_comp['vxn_close'].iloc[-1])
-        state.prior_ndx_close = float(df_sv_ndx_comp['ndx_close'].iloc[-2]) if len(df_sv_ndx_comp) > 1 else state.latest_ndx_close
-        state.prior_vxn_close = float(df_sv_ndx_comp['vxn_close'].iloc[-2]) if len(df_sv_ndx_comp) > 1 else state.latest_vxn_close
-        state.prior_tech_spread_close = state.latest_vxn_close - state.latest_vix_close
-        state.prior_tech_ratio_close = (state.latest_vxn_close / state.latest_vix_close) if state.latest_vix_close > 0 else 1.0
-        state.last_sess_ndx_x = float(state.df_spotvol_ndx['ndx_pct'].iloc[-1])
-        state.last_sess_ndx_y = float(state.df_spotvol_ndx['vxn_pt'].iloc[-1])
-
-        print(f" SPX Spot-Vol Baseline ({len(state.df_spotvol)} bars): R²={state.r_squared:.4f}, Slope={state.slope:.4f}")
-        print(f" NDX Spot-Vol Baseline ({len(state.df_spotvol_ndx)} bars): R²={state.ndx_r_squared:.4f}, Slope={state.ndx_slope:.4f}")
-
         # B. Intraday 1D Bars (1-min)
         b1_spx = await state.ib.reqHistoricalDataAsync(
             state.spx_contract, endDateTime='', durationStr='1 D',
@@ -427,8 +363,8 @@ async def refresh_historical_data():
         # Pre-market / GTH Session Synchronization:
         # SPX, NDX, VIX3M, and VXN only trade during Regular Trading Hours (09:30-16:00 ET).
         # CBOE VIX trades overnight / GTH starting at 03:15 ET.
-        # Before 09:30 ET, SPX/NDX are on the prior completed session (e.g. 2026-10-30),
-        # while VIX has pre-market bars for today (2026-11-02).
+        # Before 09:30 ET, SPX/NDX are on the prior completed session (e.g. 2026-11-05),
+        # while VIX has pre-market bars for today (2026-11-06).
         # Re-align VIX to the active RTH session date so all 5 assets align on the exact same session.
         now_et = datetime.now(pytz.timezone('US/Eastern'))
         today_et = now_et.strftime('%Y-%m-%d')
@@ -458,6 +394,87 @@ async def refresh_historical_data():
                         state.vix_contract, endDateTime=f"{clean_dt} 23:00:00", durationStr='1 D',
                         barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
                     )
+
+        # Slicing Daily Bars strictly prior to active_sess_date:
+        # Every intraday session move must be measured against the close of the trading day
+        # strictly preceding active_sess_date (e.g. for 2026-11-05 session, reference is 2026-11-04 close).
+        # Furthermore, the 60-day baseline regression must strictly reflect the 60 completed sessions prior to active_sess_date.
+
+        # SPX / VIX Spot-Vol Baseline
+        df_spx = safe_to_series(spx_bars, 'spx_close')
+        df_vix = safe_to_series(vix_bars, 'vix_close')
+        df_sv = pd.concat([df_spx, df_vix], axis=1).dropna()
+
+        if active_sess_date:
+            df_prior_sv = df_sv.loc[[str(d)[:10] < active_sess_date for d in df_sv.index]]
+            if df_prior_sv.empty:
+                df_prior_sv = df_sv.iloc[:-1] if len(df_sv) > 1 else df_sv
+        else:
+            is_today_in_sv = (str(df_sv.index[-1])[:10] == today_et) if not df_sv.empty else False
+            df_prior_sv = df_sv.iloc[:-1] if is_today_in_sv and len(df_sv) > 1 else df_sv
+
+        df_prior_sv = df_prior_sv.copy()
+        df_prior_sv['spx_pct'] = df_prior_sv['spx_close'].pct_change() * 100.0
+        df_prior_sv['vix_pt'] = df_prior_sv['vix_close'].diff()
+        df_prior_sv = df_prior_sv.dropna()
+
+        state.df_spotvol = df_prior_sv.iloc[-state.window_days:].copy()
+
+        x = state.df_spotvol['spx_pct'].values
+        y = state.df_spotvol['vix_pt'].values
+        slope, intercept, r_value, _, _ = stats.linregress(x, y)
+        state.slope = float(slope)
+        state.intercept = float(intercept)
+        state.r_squared = float(r_value ** 2)
+        state.vol_slope = float(1.0 / slope) if slope != 0 else 0.0
+
+        # Reference close prices strictly from the session preceding active_sess_date
+        state.latest_spx_close = float(state.df_spotvol['spx_close'].iloc[-1])
+        state.latest_vix_close = float(state.df_spotvol['vix_close'].iloc[-1])
+        state.prior_spx_close = float(state.df_spotvol['spx_close'].iloc[-2]) if len(state.df_spotvol) > 1 else state.latest_spx_close
+        state.prior_vix_close = float(state.df_spotvol['vix_close'].iloc[-2]) if len(state.df_spotvol) > 1 else state.latest_vix_close
+        state.last_sess_x = float(state.df_spotvol['spx_pct'].iloc[-1])
+        state.last_sess_y = float(state.df_spotvol['vix_pt'].iloc[-1])
+
+        # NDX / VXN Spot-Vol Baseline
+        df_ndx = safe_to_series(ndx_bars, 'ndx_close')
+        df_vxn = safe_to_series(vxn_bars, 'vxn_close')
+        df_sv_ndx = pd.concat([df_ndx, df_vxn], axis=1).dropna()
+
+        if active_sess_date:
+            df_prior_ndx = df_sv_ndx.loc[[str(d)[:10] < active_sess_date for d in df_sv_ndx.index]]
+            if df_prior_ndx.empty:
+                df_prior_ndx = df_sv_ndx.iloc[:-1] if len(df_sv_ndx) > 1 else df_sv_ndx
+        else:
+            is_today_in_ndx = (str(df_sv_ndx.index[-1])[:10] == today_et) if not df_sv_ndx.empty else False
+            df_prior_ndx = df_sv_ndx.iloc[:-1] if is_today_in_ndx and len(df_sv_ndx) > 1 else df_sv_ndx
+
+        df_prior_ndx = df_prior_ndx.copy()
+        df_prior_ndx['ndx_pct'] = df_prior_ndx['ndx_close'].pct_change() * 100.0
+        df_prior_ndx['vxn_pt'] = df_prior_ndx['vxn_close'].diff()
+        df_prior_ndx = df_prior_ndx.dropna()
+
+        state.df_spotvol_ndx = df_prior_ndx.iloc[-state.window_days:].copy()
+
+        x_ndx = state.df_spotvol_ndx['ndx_pct'].values
+        y_ndx = state.df_spotvol_ndx['vxn_pt'].values
+        ndx_slope, ndx_intercept, ndx_r_val, _, _ = stats.linregress(x_ndx, y_ndx)
+        state.ndx_slope = float(ndx_slope)
+        state.ndx_intercept = float(ndx_intercept)
+        state.ndx_r_squared = float(ndx_r_val ** 2)
+        state.ndx_vol_slope = float(1.0 / ndx_slope) if ndx_slope != 0 else 0.0
+
+        state.latest_ndx_close = float(state.df_spotvol_ndx['ndx_close'].iloc[-1])
+        state.latest_vxn_close = float(state.df_spotvol_ndx['vxn_close'].iloc[-1])
+        state.prior_ndx_close = float(state.df_spotvol_ndx['ndx_close'].iloc[-2]) if len(state.df_spotvol_ndx) > 1 else state.latest_ndx_close
+        state.prior_vxn_close = float(state.df_spotvol_ndx['vxn_close'].iloc[-2]) if len(state.df_spotvol_ndx) > 1 else state.latest_vxn_close
+        state.prior_tech_spread_close = state.latest_vxn_close - state.latest_vix_close
+        state.prior_tech_ratio_close = (state.latest_vxn_close / state.latest_vix_close) if state.latest_vix_close > 0 else 1.0
+        state.last_sess_ndx_x = float(state.df_spotvol_ndx['ndx_pct'].iloc[-1])
+        state.last_sess_ndx_y = float(state.df_spotvol_ndx['vxn_pt'].iloc[-1])
+
+        print(f" SPX Spot-Vol Baseline ({len(state.df_spotvol)} bars): R²={state.r_squared:.4f}, Slope={state.slope:.4f}")
+        print(f" NDX Spot-Vol Baseline ({len(state.df_spotvol_ndx)} bars): R²={state.ndx_r_squared:.4f}, Slope={state.ndx_slope:.4f}")
 
         # Term Structure 1D
         df_v1 = safe_to_series(b1_vix, 'vix')
@@ -657,8 +674,13 @@ async def refresh_historical_data():
             df_tech_1y['ratio'] = df_tech_1y['vxn'] / df_tech_1y['vix']
             state.df_tech_vol_1y = df_tech_1y.copy()
 
-        is_today_in_1y = (str(df_1y.index[-1])[:10] == today_et) if not df_1y.empty else False
-        df_1y_comp = df_1y.iloc[:-1] if is_today_in_1y and len(df_1y) > 1 else df_1y
+        if active_sess_date:
+            df_1y_comp = df_1y.loc[[str(d)[:10] < active_sess_date for d in df_1y.index]]
+            if df_1y_comp.empty:
+                df_1y_comp = df_1y.iloc[:-1] if len(df_1y) > 1 else df_1y
+        else:
+            is_today_in_1y = (str(df_1y.index[-1])[:10] == today_et) if not df_1y.empty else False
+            df_1y_comp = df_1y.iloc[:-1] if is_today_in_1y and len(df_1y) > 1 else df_1y
 
         if not df_1y_comp.empty:
             state.latest_vix3m_close = float(df_1y_comp['vix3m'].iloc[-1])

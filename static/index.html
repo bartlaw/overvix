@@ -107,10 +107,10 @@
           <span id="connection-text">Connecting to IBKR...</span>
         </div>
 
-        <!-- Audio Alert Toggle -->
-        <button id="btn-sound" class="flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
-          <span id="sound-icon">🔊</span>
-          <span id="sound-text">Sound ON</span>
+        <!-- Audio Alert Toggle (Muted by default) -->
+        <button id="btn-sound" class="flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition opacity-60" title="Toggle audio chime alerts">
+          <span id="sound-icon">🔇</span>
+          <span id="sound-text">Muted</span>
         </button>
 
         <!-- Regime Guide Button -->
@@ -675,7 +675,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v3.8 with Session Close Alignment Fix) -->
-  <script src="/static/dashboard.js?v=3.8"></script>
+  <!-- DASHBOARD SCRIPT (v4.0 with Sound Muted by Default) -->
+  <script src="/static/dashboard.js?v=4.1"></script>
 </body>
 </html>

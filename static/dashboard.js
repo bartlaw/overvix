@@ -3,7 +3,7 @@
  */
 
 // Global State
-let soundEnabled = true;
+let soundEnabled = false; // Muted by default
 let lastOvervixSignal = false;
 let lastInversionSignal = false;
 let audioCtx = null;
@@ -702,24 +702,6 @@ function renderTechVolChart(tf = currentTimeframe) {
     hoverinfo: 'none'
   };
 
-  const latestSpread = spread.length > 0 ? spread[spread.length - 1] : null;
-  const latestTime = times.length > 0 ? times[times.length - 1] : null;
-
-  const traceLivePoint = {
-    x: latestTime ? [latestTime] : [],
-    y: latestSpread !== null ? [latestSpread] : [],
-    mode: 'markers',
-    name: 'Live Spread',
-    marker: {
-      color: (latestSpread !== null && latestSpread >= 9.0) ? '#EF4444' : (latestSpread >= 6.5 ? '#F59E0B' : '#10B981'),
-      size: 10,
-      line: { color: '#FFFFFF', width: 1.5 }
-    },
-    xaxis: 'x',
-    yaxis: 'y2',
-    hoverinfo: 'none'
-  };
-
   const xTitle = (tf === '1D') ? 'Today Intraday Time (US/Eastern)' : ((tf === '5D') ? '5-Day Timeline' : '1-Year Daily Date');
   let rangebreaks = [];
   if (tf === '1D') {
@@ -767,7 +749,7 @@ function renderTechVolChart(tf = currentTimeframe) {
     showlegend: true
   };
 
-  Plotly.newPlot('term-structure-chart', [traceVXN, traceVIX, traceSpread, traceEquilibrium, tracePanic, traceLivePoint], layout, {
+  Plotly.newPlot('term-structure-chart', [traceVXN, traceVIX, traceSpread, traceEquilibrium, tracePanic], layout, {
     responsive: true,
     displayModeBar: false
   });
@@ -845,25 +827,6 @@ function renderTermStructureChart(tf = '1D') {
     hoverinfo: 'none'
   };
 
-  const latestRatio = ratio.length > 0 ? ratio[ratio.length - 1] : null;
-  const latestTime = times.length > 0 ? times[times.length - 1] : null;
-  const isInv = latestRatio !== null && latestRatio >= 1.00;
-
-  const traceLivePoint = {
-    x: latestTime ? [latestTime] : [],
-    y: latestRatio !== null ? [latestRatio] : [],
-    mode: 'markers',
-    name: 'Live Ratio',
-    marker: {
-      color: isInv ? '#EF4444' : '#00E5FF',
-      size: 10,
-      line: { color: '#FFFFFF', width: 1.5 }
-    },
-    xaxis: 'x',
-    yaxis: 'y2',
-    hoverinfo: 'none'
-  };
-
   const xTitle = (tf === '1D') ? 'Today Intraday Time (US/Eastern)' : ((tf === '5D') ? '5-Day Timeline' : '1-Year Daily Date');
 
   let rangebreaks = [];
@@ -919,7 +882,7 @@ function renderTermStructureChart(tf = '1D') {
     showlegend: true
   };
 
-  Plotly.newPlot('term-structure-chart', [traceVIX, traceVIX3M, traceRatio, traceFlattening, traceInversion, traceLivePoint], layout, {
+  Plotly.newPlot('term-structure-chart', [traceVIX, traceVIX3M, traceRatio, traceFlattening, traceInversion], layout, {
     responsive: true,
     displayModeBar: false
   });
@@ -1662,11 +1625,6 @@ function updateUI(data) {
             x: [[dt.times[0], liveDt], [dt.times[0], liveDt]]
           }, [3, 4]);
         }
-        Plotly.restyle('term-structure-chart', {
-          x: [[liveDt]],
-          y: [[techVol.spread]],
-          'marker.color': [(techVol.spread >= 9.0) ? '#EF4444' : (techVol.spread >= 6.5 ? '#F59E0B' : '#10B981')]
-        }, [5]);
       } else {
         let d1 = cachedTs['1D'];
         if (!d1 || !d1.times) {
@@ -1708,36 +1666,6 @@ function updateUI(data) {
           Plotly.restyle('term-structure-chart', {
             x: [[d1.times[0], liveDt], [d1.times[0], liveDt]]
           }, [3, 4]);
-        }
-        Plotly.restyle('term-structure-chart', {
-          x: [[liveDt]],
-          y: [[ts.ratio]],
-          'marker.color': [ts.is_inverted ? '#EF4444' : '#00E5FF']
-        }, [5]);
-      }
-    } else {
-      // Market closed: pin terminal beacon marker to the last point of the existing intraday line
-      if (isNdx && techVol) {
-        const dt = cachedTechVol['1D'];
-        if (dt && dt.times && dt.times.length > 0) {
-          const lastT = dt.times[dt.times.length - 1];
-          const lastVal = dt.spread[dt.spread.length - 1];
-          Plotly.restyle('term-structure-chart', {
-            x: [[lastT]],
-            y: [[lastVal]],
-            'marker.color': [(lastVal >= 9.0) ? '#EF4444' : (lastVal >= 6.5 ? '#F59E0B' : '#10B981')]
-          }, [5]);
-        }
-      } else {
-        const d1 = cachedTs['1D'];
-        if (d1 && d1.times && d1.times.length > 0) {
-          const lastT = d1.times[d1.times.length - 1];
-          const lastVal = d1.ratio[d1.ratio.length - 1];
-          Plotly.restyle('term-structure-chart', {
-            x: [[lastT]],
-            y: [[lastVal]],
-            'marker.color': [(lastVal >= 1.0) ? '#EF4444' : '#00E5FF']
-          }, [5]);
         }
       }
     }
