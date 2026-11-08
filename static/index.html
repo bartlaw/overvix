@@ -161,7 +161,7 @@
   <div class="px-4 py-2 bg-[#090e1a] border-b border-slate-800/80">
     <div class="max-w-[1720px] mx-auto">
       <div id="confluence-banner" class="flex items-center justify-between px-4 py-2.5 rounded-lg bg-slate-900 border border-slate-800 transition duration-300">
-        <div class="flex items-center space-x-3">
+        <div class="flex flex-wrap items-center gap-2">
           <span id="confluence-badge" class="px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-slate-800 text-slate-300">
             INITIALIZING
           </span>
@@ -346,7 +346,7 @@
 
         <!-- Intraday Session Stats Strip -->
         <div class="flex flex-wrap items-center justify-between bg-slate-950/50 rounded-lg px-3 py-1.5 mb-2 text-xs border border-slate-800/60 text-slate-300">
-          <div class="flex items-center space-x-3">
+          <div class="flex flex-wrap items-center gap-2">
             <span>Session Range: <strong id="ts-day-low" class="text-emerald-400 font-mono">-.----</strong> &ndash; <strong id="ts-day-high" class="text-red-400 font-mono">-.----</strong></span>
             <span class="text-slate-600">|</span>
             <span>Day Net &Delta;: <strong id="ts-day-delta" class="font-mono text-slate-200">-.----</strong> (<strong id="ts-day-deltapct" class="font-mono text-slate-200">--.--%</strong>)</span>
@@ -380,7 +380,7 @@
           <p id="corr-subtitle" class="text-xs text-slate-400">Minute-by-Minute Normalized Overlay (Upper) &amp; Rolling Pearson Correlation &rho;(&Delta;ln S, &Delta;ln Vol) (Lower)</p>
         </div>
 
-        <div class="flex items-center space-x-3">
+        <div class="flex flex-wrap items-center gap-2">
           <!-- Real-Time Rolling Correlation Badge -->
           <div class="flex items-center space-x-2 bg-slate-950/90 px-3 py-1.5 rounded-lg border border-slate-800 text-xs font-mono">
             <span id="corr-live-label" class="text-slate-400 text-[11px]">Current 30m &rho;:</span>
@@ -523,7 +523,7 @@
       
       <!-- Modal Header -->
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <div class="flex items-center space-x-3">
+        <div class="flex flex-wrap items-center gap-2">
           <div class="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-base">
             📖
           </div>

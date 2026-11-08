@@ -101,7 +101,7 @@ const TF_CONFIG = {
     xTitle: '3-Month Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
+    rangebreaks: [{ bounds: ['sat', 'mon'] }]
   },
   '6M': {
     step: 4,
@@ -118,7 +118,7 @@ const TF_CONFIG = {
     xTitle: '6-Month Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
+    rangebreaks: [{ bounds: ['sat', 'mon'] }]
   },
   'YTD': {
     step: 5,
@@ -609,6 +609,7 @@ function switchTimeframe(tf, triggeredBySlider = false) {
       sliderCorrTimeframe.value = conf.step;
     }
     updateCorrSliderUI(tf);
+    syncCorrAnchorForTimeframe(tf);
     renderCorrelationChart(currentCorrMode, tf);
     updateCorrMetricDisplay();
   }
@@ -765,6 +766,7 @@ function switchCorrTf(tf, triggeredBySlider = false) {
     renderTermStructureChart(tf);
   }
 
+  syncCorrAnchorForTimeframe(tf);
   updateCorrMetricDisplay();
   renderCorrelationChart(currentCorrMode, tf);
 }
@@ -1277,7 +1279,26 @@ function findClosestTimeIndex(times, target) {
     }
   }
 
-  // 5. Epoch timestamp comparison (if numeric string or number > 1e9)
+  // 5. Full Timestamp / Date comparison (Chronological Distance in ms)
+  // Must execute BEFORE stripping time-of-day so multi-month dates are never confused
+  const parsedTarget = Date.parse(clean.replace(' ', 'T'));
+  if (!isNaN(parsedTarget)) {
+    let closestIdx = 0;
+    let minDiff = Infinity;
+    for (let i = 0; i < times.length; i++) {
+      const tMs = Date.parse(times[i].replace(' ', 'T'));
+      if (!isNaN(tMs)) {
+        const diff = Math.abs(tMs - parsedTarget);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestIdx = i;
+        }
+      }
+    }
+    return closestIdx;
+  }
+
+  // 6. Epoch timestamp comparison (if numeric string or number > 1e9)
   const num = Number(clean);
   if (!isNaN(num) && num > 1e9) {
     const targetMs = (num < 1e11) ? (num * 1000) : num;
@@ -1296,7 +1317,7 @@ function findClosestTimeIndex(times, target) {
     return closestIdx;
   }
 
-  // 6. Time HH:MM comparison (e.g. '10:45' or '10:45:00')
+  // 7. Time HH:MM comparison (intraday only fallback if no date supplied)
   let cleanTime = clean;
   if (clean.includes(' ')) {
     cleanTime = clean.split(' ')[1];
@@ -1326,24 +1347,6 @@ function findClosestTimeIndex(times, target) {
       }
       return closestIdx;
     }
-  }
-
-  // 7. General Date.parse fallback
-  const parsedTarget = Date.parse(clean.replace(' ', 'T'));
-  if (!isNaN(parsedTarget)) {
-    let closestIdx = 0;
-    let minDiff = Infinity;
-    for (let i = 0; i < times.length; i++) {
-      const tMs = Date.parse(times[i].replace(' ', 'T'));
-      if (!isNaN(tMs)) {
-        const diff = Math.abs(tMs - parsedTarget);
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestIdx = i;
-        }
-      }
-    }
-    return closestIdx;
   }
 
   return times.length - 1;
@@ -1482,13 +1485,60 @@ function computeAnchoredCorrelation(spotRaw, volRaw, anchorIdx) {
   return { series: series, latestCorr: latestCorr, count: count };
 }
 
+function syncCorrAnchorForTimeframe(tf) {
+  if (!corrAnchor.active) return;
+  const isNdx = (currentAssetPair === 'NDX');
+  const c = isNdx ? (cachedCorrNdx[tf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[tf] || cachedCorr['1D'] || cachedCorr);
+  const times = c.times || [];
+  if (!times || times.length === 0) return;
+
+  const raw = getRawSpotVolSeries(c, isNdx);
+  const spotRaw = raw.spot;
+  const volRaw = raw.vol;
+
+  let newIdx = -1;
+  if (corrAnchor.mode === 'spot_low') {
+    let minVal = Infinity;
+    for (let i = 0; i < spotRaw.length; i++) {
+      if (typeof spotRaw[i] === 'number' && !isNaN(spotRaw[i]) && spotRaw[i] < minVal) {
+        minVal = spotRaw[i];
+        newIdx = i;
+      }
+    }
+  } else if (corrAnchor.mode === 'vol_high') {
+    let maxVal = -Infinity;
+    for (let i = 0; i < volRaw.length; i++) {
+      if (typeof volRaw[i] === 'number' && !isNaN(volRaw[i]) && volRaw[i] > maxVal) {
+        maxVal = volRaw[i];
+        newIdx = i;
+      }
+    }
+  } else if (corrAnchor.time) {
+    newIdx = findClosestTimeIndex(times, corrAnchor.time);
+  }
+
+  if (newIdx < 0 || newIdx >= times.length) newIdx = 0;
+
+  corrAnchor.index = newIdx;
+  corrAnchor.time = times[newIdx];
+  if (spotRaw[newIdx] !== undefined) corrAnchor.spotBase = spotRaw[newIdx];
+  if (volRaw[newIdx] !== undefined) corrAnchor.volBase = volRaw[newIdx];
+
+  const assetLabel = isNdx ? 'NDX' : 'SPX';
+  const volLabel = isNdx ? 'VXN' : 'VIX';
+  const timeDisplay = (tf === '1D') ? (corrAnchor.time.length > 10 ? corrAnchor.time.slice(11) : corrAnchor.time) : corrAnchor.time;
+  corrAnchor.label = `${timeDisplay} (${assetLabel}: ${corrAnchor.spotBase ? corrAnchor.spotBase.toFixed(2) : '-'}, ${volLabel}: ${corrAnchor.volBase ? corrAnchor.volBase.toFixed(2) : '-'})`;
+
+  updateAnchorUI();
+}
+
 function computeAnchoredSeries(c, isNdx) {
   const times = c.times || [];
   const raw = getRawSpotVolSeries(c, isNdx);
   const spotRaw = raw.spot;
   const volRaw = raw.vol;
 
-  if (!corrAnchor.active || corrAnchor.index < 0 || corrAnchor.index >= times.length) {
+  if (!corrAnchor.active || times.length === 0) {
     return {
       times: times,
       spotPct: isNdx ? (c.ndx_pct || c.spx_pct || []) : (c.spx_pct || []),
@@ -1504,7 +1554,34 @@ function computeAnchoredSeries(c, isNdx) {
     };
   }
 
-  const idx = corrAnchor.index;
+  // Ensure index is valid and in sync for this specific dataset
+  let idx = corrAnchor.index;
+  if (idx < 0 || idx >= times.length || (corrAnchor.time && times[idx] !== corrAnchor.time)) {
+    if (corrAnchor.mode === 'spot_low') {
+      let minVal = Infinity;
+      for (let i = 0; i < spotRaw.length; i++) {
+        if (typeof spotRaw[i] === 'number' && !isNaN(spotRaw[i]) && spotRaw[i] < minVal) {
+          minVal = spotRaw[i];
+          idx = i;
+        }
+      }
+    } else if (corrAnchor.mode === 'vol_high') {
+      let maxVal = -Infinity;
+      for (let i = 0; i < volRaw.length; i++) {
+        if (typeof volRaw[i] === 'number' && !isNaN(volRaw[i]) && volRaw[i] > maxVal) {
+          maxVal = volRaw[i];
+          idx = i;
+        }
+      }
+    } else if (corrAnchor.time) {
+      idx = findClosestTimeIndex(times, corrAnchor.time);
+    }
+    if (idx < 0 || idx >= times.length) idx = 0;
+    corrAnchor.index = idx;
+    corrAnchor.time = times[idx];
+    if (spotRaw[idx] !== undefined) corrAnchor.spotBase = spotRaw[idx];
+    if (volRaw[idx] !== undefined) corrAnchor.volBase = volRaw[idx];
+  }
   const s0 = spotRaw[idx];
   const v0 = volRaw[idx];
 
@@ -1768,14 +1845,18 @@ function computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted) {
   const R2 = Math.max(e2Up / (1.0 - alpha), e2Dn / alpha);
 
   // Left axis (Spot %): bottom is negative, top is positive
-  const range1 = [-R1 * alpha, R1 * (1.0 - alpha)];
+  let range1 = [-R1 * alpha, R1 * (1.0 - alpha)];
 
   // Right axis (Vol pt):
   // If inverted: bottom is positive (panic), top is negative (crush)
   // If normal: bottom is negative, top is positive
-  const range2 = isVolInverted 
+  let range2 = isVolInverted 
     ? [R2 * alpha, -R2 * (1.0 - alpha)] 
     : [-R2 * alpha, R2 * (1.0 - alpha)];
+
+  // Guard against non-finite bounds
+  if (!isFinite(range1[0]) || !isFinite(range1[1])) range1 = [-5, 5];
+  if (!isFinite(range2[0]) || !isFinite(range2[1])) range2 = isVolInverted ? [10, -10] : [-10, 10];
 
   return { range1, range2, alpha };
 }
@@ -1828,9 +1909,18 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
   const dEnd = times.length > 0 ? times[times.length - 1] : '';
 
   // Dynamic Pearson upper bound: 0.05 by default (framing 0.0 Decoupling line at top), expanding only if ρ > 0
-  const allCorrs = rollingCorr.concat(isAnchored && anchoredSeries.anchoredCorr ? anchoredSeries.anchoredCorr : []);
-  const validCorrs = allCorrs.filter(v => typeof v === 'number' && !isNaN(v));
-  const maxCorrVal = validCorrs.length > 0 ? Math.max(...validCorrs) : -0.7;
+  let maxCorrVal = -0.7;
+  for (let i = 0; i < rollingCorr.length; i++) {
+    const v = rollingCorr[i];
+    if (typeof v === 'number' && !isNaN(v) && v > maxCorrVal) maxCorrVal = v;
+  }
+  if (isAnchored && anchoredSeries.anchoredCorr) {
+    const ac = anchoredSeries.anchoredCorr;
+    for (let i = 0; i < ac.length; i++) {
+      const v = ac[i];
+      if (typeof v === 'number' && !isNaN(v) && v > maxCorrVal) maxCorrVal = v;
+    }
+  }
   const upperY = maxCorrVal > 0 ? Math.min(1.05, Math.ceil((maxCorrVal + 0.05) * 10) / 10) : 0.05;
 
   const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
@@ -1840,8 +1930,8 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
   const corrTraceName = conf.corrTraceName;
   const corrHoverLabel = conf.corrHoverLabel;
   const timeHoverFmt = conf.timeHoverFmt;
-  let assetHoverLabel = isAnchored ? `${assetLabel} from Anchor` : ((tf === '1D') ? `${assetLabel} Day Move` : ((tf === '5D') ? `${assetLabel} 5D Move` : `${assetLabel} 1Y Move`));
-  let volHoverLabel = isAnchored ? `${volLabel} from Anchor` : ((tf === '1D') ? `${volLabel} Day Move` : ((tf === '5D') ? `${volLabel} 5D Move` : `${volLabel} 1Y Move`));
+  let assetHoverLabel = isAnchored ? `${assetLabel} from Anchor` : `${assetLabel} Move (${conf.label})`;
+  let volHoverLabel = isAnchored ? `${volLabel} from Anchor` : `${volLabel} Move (${conf.label})`;
 
   const assetColor = isNdx ? '#C084FC' : '#10B981';
   const volColor = '#F59E0B';
@@ -1951,6 +2041,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       line: { color: '#EF4444', width: 1.5, dash: 'dash' },
       xaxis: 'x',
       yaxis: 'y3',
+      showlegend: false,
       hoverinfo: 'none'
     };
 
@@ -1962,6 +2053,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       line: { color: '#F59E0B', width: 1.5, dash: 'dot' },
       xaxis: 'x',
       yaxis: 'y3',
+      showlegend: false,
       hoverinfo: 'none'
     };
 
@@ -1973,6 +2065,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       line: { color: '#10B981', width: 1, dash: 'dot' },
       xaxis: 'x',
       yaxis: 'y3',
+      showlegend: false,
       hoverinfo: 'none'
     };
 
@@ -2011,7 +2104,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       dragmode: false,
       clickmode: 'event',
       hoverdistance: 50,
-      margin: { l: 50, r: 50, t: 25, b: 40 },
+      margin: { l: 55, r: 60, t: 25, b: 35 },
       xaxis: {
         anchor: 'y3',
         type: 'date',
@@ -2116,6 +2209,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       mode: 'lines',
       name: 'Decoupling (0.0)',
       line: { color: '#EF4444', width: 1.5, dash: 'dash' },
+      showlegend: false,
       hoverinfo: 'none'
     };
 
@@ -2125,6 +2219,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       mode: 'lines',
       name: 'Regime Shift (-0.50)',
       line: { color: '#F59E0B', width: 1.5, dash: 'dot' },
+      showlegend: false,
       hoverinfo: 'none'
     };
 
@@ -2134,6 +2229,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       mode: 'lines',
       name: 'Normal Band (-0.70 to -0.85)',
       line: { color: '#10B981', width: 1, dash: 'dot' },
+      showlegend: false,
       hoverinfo: 'none'
     };
 
@@ -2151,7 +2247,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       dragmode: false,
       clickmode: 'event',
       hoverdistance: 50,
-      margin: { l: 50, r: 20, t: 25, b: 40 },
+      margin: { l: 55, r: 30, t: 25, b: 35 },
       xaxis: {
         type: 'date',
         rangebreaks: rangebreaks,
@@ -2621,7 +2717,20 @@ function updateUI(data) {
 
   const activeCorrObj = (isNdx && ndx && ndx.correlation) ? ndx.correlation : corr;
   if (activeCorrObj) {
-    const corrVal = (currentCorrTf === '1D') ? activeCorrObj.rolling_corr : ((currentCorrTf === '5D') ? (activeCorrObj.corr_5d || activeCorrObj.rolling_corr) : (activeCorrObj.corr_1y || activeCorrObj.rolling_corr));
+    let corrVal = null;
+    const m = (isNdx && cachedCorrNdx.metrics) ? cachedCorrNdx.metrics : (cachedCorr.metrics || {});
+    if (m[currentCorrTf] !== undefined && m[currentCorrTf] !== null) {
+      corrVal = m[currentCorrTf];
+    } else {
+      const c = isNdx ? cachedCorrNdx : cachedCorr;
+      const ds = c[currentCorrTf];
+      if (ds && ds.rolling_corr && ds.rolling_corr.length > 0) {
+        corrVal = ds.rolling_corr[ds.rolling_corr.length - 1];
+      }
+    }
+    if (corrVal === null || corrVal === undefined) {
+      corrVal = (currentCorrTf === '1D') ? activeCorrObj.rolling_corr : ((currentCorrTf === '5D') ? (activeCorrObj.corr_5d || activeCorrObj.rolling_corr) : (activeCorrObj.corr_1y || activeCorrObj.rolling_corr));
+    }
     const corrPill = document.getElementById('corr-status-pill');
     if (corrPill) {
       if (corrVal <= -0.50) {
