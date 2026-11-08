@@ -116,8 +116,8 @@ class DashboardState:
         self.df_ts_1d = pd.DataFrame()       # Intraday 1-min bars for VIX/VIX3M
         self.df_ts_5d = pd.DataFrame()       # Recent 5-day 5-min bars for VIX/VIX3M
         self.df_ts_1m = pd.DataFrame()       # 1-Month 30-min bars for VIX/VIX3M
-        self.df_ts_3m = pd.DataFrame()       # 3-Month 2-hour bars for VIX/VIX3M
-        self.df_ts_6m = pd.DataFrame()       # 6-Month 4-hour bars for VIX/VIX3M
+        self.df_ts_3m = pd.DataFrame()       # 3-Month 30-min bars for VIX/VIX3M
+        self.df_ts_6m = pd.DataFrame()       # 6-Month 30-min bars for VIX/VIX3M
         self.df_ts_ytd = pd.DataFrame()      # YTD daily bars for VIX/VIX3M
         self.df_ts_1y = pd.DataFrame()       # Macro 1-year daily bars for VIX/VIX3M
         self.df_ts_max = pd.DataFrame()      # 2-Year daily bars for VIX/VIX3M
@@ -125,8 +125,8 @@ class DashboardState:
         self.df_spx_vix_1d = pd.DataFrame()  # Intraday 1-min bars for SPX & VIX
         self.df_spx_vix_5d = pd.DataFrame()  # 5-day 5-min bars for SPX & VIX
         self.df_spx_vix_1m = pd.DataFrame()  # 1-Month 30-min bars for SPX & VIX
-        self.df_spx_vix_3m = pd.DataFrame()  # 3-Month 2-hour bars for SPX & VIX
-        self.df_spx_vix_6m = pd.DataFrame()  # 6-Month 4-hour bars for SPX & VIX
+        self.df_spx_vix_3m = pd.DataFrame()  # 3-Month 30-min bars for SPX & VIX
+        self.df_spx_vix_6m = pd.DataFrame()  # 6-Month 30-min bars for SPX & VIX
         self.df_spx_vix_ytd = pd.DataFrame() # YTD daily bars for SPX & VIX
         self.df_spx_vix_1y = pd.DataFrame()  # Macro 1-year daily bars for SPX & VIX
         self.df_spx_vix_max = pd.DataFrame() # 2-Year daily bars for SPX & VIX
@@ -136,8 +136,8 @@ class DashboardState:
         self.df_ndx_vxn_1d = pd.DataFrame()  # Intraday 1-min bars for NDX & VXN
         self.df_ndx_vxn_5d = pd.DataFrame()  # 5-day 5-min bars for NDX & VXN
         self.df_ndx_vxn_1m = pd.DataFrame()  # 1-Month 30-min bars for NDX & VXN
-        self.df_ndx_vxn_3m = pd.DataFrame()  # 3-Month 2-hour bars for NDX & VXN
-        self.df_ndx_vxn_6m = pd.DataFrame()  # 6-Month 4-hour bars for NDX & VXN
+        self.df_ndx_vxn_3m = pd.DataFrame()  # 3-Month 30-min bars for NDX & VXN
+        self.df_ndx_vxn_6m = pd.DataFrame()  # 6-Month 30-min bars for NDX & VXN
         self.df_ndx_vxn_ytd = pd.DataFrame() # YTD daily bars for NDX & VXN
         self.df_ndx_vxn_1y = pd.DataFrame()  # Macro 1-year daily bars for NDX & VXN
         self.df_ndx_vxn_max = pd.DataFrame() # 2-Year daily bars for NDX & VXN
@@ -447,8 +447,8 @@ async def refresh_historical_data():
       - 1D: 1-minute intraday bars (today's active session)
       - 5D: 5-minute weekly bars (~390 bars)
       - 1M: 30-minute monthly bars (~286 bars)
-      - 3M: 2-hour quarterly bars (~256 bars, native VIX3M contract match)
-      - 6M: 4-hour semi-annual bars (~257 bars)
+      - 3M: 30-minute quarterly bars (~832 bars, native VIX3M contract match)
+      - 6M: 30-minute semi-annual bars (~1638 bars)
       - YTD: Daily bars from Jan 1 of active session year
       - 1Y: Macro daily bars (252 trading days)
       - MAX: Multi-year daily bars (500 trading days / 2Y)
@@ -732,26 +732,26 @@ async def refresh_historical_data():
             s_1m, v_1m, v3_1m, n_1m, vx_1m, roll_win=39, min_p=10
         )
 
-        # 6. Process 3M Bars (Session-anchored 2-hour bars for last 64 trading days, starts strictly at 09:30 ET)
-        s_3m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_3m)], '2h', 'spx')
-        v_3m = resample_30m_to_session(dfs_pool['vix'][dfs_pool['vix']['day'].isin(days_3m)], '2h', 'vix')
-        v3_3m = resample_30m_to_session(dfs_pool['vix3m'][dfs_pool['vix3m']['day'].isin(days_3m)], '2h', 'vix3m')
-        n_3m = resample_30m_to_session(dfs_pool['ndx'][dfs_pool['ndx']['day'].isin(days_3m)], '2h', 'ndx')
-        vx_3m = resample_30m_to_session(dfs_pool['vxn'][dfs_pool['vxn']['day'].isin(days_3m)], '2h', 'vxn')
+        # 6. Process 3M Bars (RTH 30-min bars for last 64 trading days, ~832 bars)
+        s_3m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_3m)], '30m', 'spx')
+        v_3m = resample_30m_to_session(dfs_pool['vix'][dfs_pool['vix']['day'].isin(days_3m)], '30m', 'vix')
+        v3_3m = resample_30m_to_session(dfs_pool['vix3m'][dfs_pool['vix3m']['day'].isin(days_3m)], '30m', 'vix3m')
+        n_3m = resample_30m_to_session(dfs_pool['ndx'][dfs_pool['ndx']['day'].isin(days_3m)], '30m', 'ndx')
+        vx_3m = resample_30m_to_session(dfs_pool['vxn'][dfs_pool['vxn']['day'].isin(days_3m)], '30m', 'vxn')
         (state.df_ts_3m, state.df_spx_vix_3m, state.df_ndx_vxn_3m,
          state.df_tech_vol_3m, state.corr_3m, state.corr_3m_ndx) = build_horizon_pack(
-            s_3m, v_3m, v3_3m, n_3m, vx_3m, roll_win=30, min_p=10
+            s_3m, v_3m, v3_3m, n_3m, vx_3m, roll_win=130, min_p=20
         )
 
-        # 7. Process 6M Bars (Session-anchored 4-hour bars for all 126 trading days, starts strictly at 09:30 ET)
-        s_6m = resample_30m_to_session(dfs_pool['spx'], '4h', 'spx')
-        v_6m = resample_30m_to_session(dfs_pool['vix'], '4h', 'vix')
-        v3_6m = resample_30m_to_session(dfs_pool['vix3m'], '4h', 'vix3m')
-        n_6m = resample_30m_to_session(dfs_pool['ndx'], '4h', 'ndx')
-        vx_6m = resample_30m_to_session(dfs_pool['vxn'], '4h', 'vxn')
+        # 7. Process 6M Bars (RTH 30-min bars for all 126 trading days, ~1638 bars)
+        s_6m = resample_30m_to_session(dfs_pool['spx'], '30m', 'spx')
+        v_6m = resample_30m_to_session(dfs_pool['vix'], '30m', 'vix')
+        v3_6m = resample_30m_to_session(dfs_pool['vix3m'], '30m', 'vix3m')
+        n_6m = resample_30m_to_session(dfs_pool['ndx'], '30m', 'ndx')
+        vx_6m = resample_30m_to_session(dfs_pool['vxn'], '30m', 'vxn')
         (state.df_ts_6m, state.df_spx_vix_6m, state.df_ndx_vxn_6m,
          state.df_tech_vol_6m, state.corr_6m, state.corr_6m_ndx) = build_horizon_pack(
-            s_6m, v_6m, v3_6m, n_6m, vx_6m, roll_win=30, min_p=10
+            s_6m, v_6m, v3_6m, n_6m, vx_6m, roll_win=195, min_p=30
         )
 
         # 8. Combined Daily Dataset (2Y pool) for YTD, 1Y, and MAX
@@ -837,7 +837,7 @@ async def refresh_historical_data():
         state.hist_version += 1
         print(f"[IBKR] Baseline & multi-timeframe datasets successfully loaded (Version {state.hist_version}):")
         print(f"       1D={len(state.df_ts_1d)} bars, 5D={len(state.df_ts_5d)} bars, 1M={len(state.df_ts_1m)} bars (30m), "
-              f"3M={len(state.df_ts_3m)} bars (session-anchored 2h), 6M={len(state.df_ts_6m)} bars (session-anchored 4h), YTD={len(state.df_ts_ytd)} bars, "
+              f"3M={len(state.df_ts_3m)} bars (30m), 6M={len(state.df_ts_6m)} bars (30m), YTD={len(state.df_ts_ytd)} bars, "
               f"1Y={len(state.df_ts_1y)} bars, MAX={len(state.df_ts_max)} bars.")
 
     except Exception as ex:
