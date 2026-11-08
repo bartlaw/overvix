@@ -1458,8 +1458,8 @@ function computeAnchoredCorrelation(spotRaw, volRaw, anchorIdx) {
     sumSV += rs * rv;
     count++;
 
-    // Minimum 3 return points for valid correlation
-    if (count >= 3) {
+    // Suppress rendering during the first 10 bars post-anchor where statistical confidence is too low
+    if (count > 10) {
       const meanS = sumS / count;
       const meanV = sumV / count;
       const varS = (sumS2 / count) - (meanS * meanS);
@@ -1733,9 +1733,12 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
       corrColor = "text-rose-400";
       corrSummaryPart = ` Post-anchor correlation turned positive (ρ = ${corrStr})! Spot and volatility are moving in tandem.`;
     }
-  } else if (anchoredSeries.returnCount < 3) {
-    corrStr = "Calibrating (< 3 bars)";
+  } else if (anchoredSeries.returnCount <= 10) {
+    corrStr = "Calibrating (≤ 10 bars)";
     corrRegime = "CALIBRATING";
+    corrBadgeClass = "bg-slate-800 text-slate-400 border border-slate-700";
+    corrColor = "text-slate-400";
+    corrSummaryPart = ` Post-anchor correlation is calibrating (first 10 bars post-anchor suppressed for statistical confidence).`;
   }
 
   summary += corrSummaryPart;
@@ -2022,7 +2025,9 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
     };
 
     // Anchored Recovery Correlation (Foreground recovery trajectory strictly since anchor)
-    const traceAnchoredCorr = (isAnchored && anchoredSeries.anchoredCorr) ? {
+    // Suppressed during first 10 bars post-anchor where statistical confidence is low
+    const hasAnchoredCorr = isAnchored && anchoredSeries.anchoredCorr && (anchoredSeries.latestAnchoredCorr !== null);
+    const traceAnchoredCorr = hasAnchoredCorr ? {
       x: times,
       y: anchoredSeries.anchoredCorr,
       name: `Anchored Recovery ρ (${assetLabel}, ${volLabel})`,
@@ -2194,7 +2199,8 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${corrHoverLabel}: %{y:.3f}<extra></extra>`
     };
 
-    const traceAnchoredCorr = (isAnchored && anchoredSeries.anchoredCorr) ? {
+    const hasAnchoredCorr = isAnchored && anchoredSeries.anchoredCorr && (anchoredSeries.latestAnchoredCorr !== null);
+    const traceAnchoredCorr = hasAnchoredCorr ? {
       x: times,
       y: anchoredSeries.anchoredCorr,
       name: `Anchored Recovery ρ (${assetLabel}, ${volLabel})`,
