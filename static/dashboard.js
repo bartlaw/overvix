@@ -866,7 +866,7 @@ function renderOvervixChart(bootstrap) {
         opacity: 0.75,
         line: { color: isNdx ? '#9333EA' : '#B39F50', width: 0.5 }
       },
-      hovertemplate: `<b>%{text}</b><br>${assetLabel} Move: %{x:+.2f}%<br>${volLabel} Move: %{y:+.2f} pts<extra></extra>`,
+      hovertemplate: `<b>%{text}</b><br>${assetLabel} Move: %{x:.2f}%<br>${volLabel} Move: %{y:.2f} pts<extra></extra>`,
       visible: currentTrailMode === 'today' ? false : true
     },
     // 1: Regression Trendline
@@ -906,7 +906,7 @@ function renderOvervixChart(bootstrap) {
       name: bootstrap.is_historical ? `${bootstrap.session_date} Path` : (bootstrap.session_date ? `Session ${bootstrap.session_date} Path` : "Intraday Path"),
       line: { color: '#00E5FF', width: 1.8, shape: 'spline' },
       marker: { color: '#00E5FF', size: 4, opacity: 0.8 },
-      hovertemplate: `<b>%{text}</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<extra></extra>`,
+      hovertemplate: `<b>%{text}</b><br>${assetLabel}: %{x:.2f}%<br>${volLabel}: %{y:.2f} pts<extra></extra>`,
       visible: currentTrailMode === '60d' ? false : true
     },
     // 5: Session End / Live Current Point
@@ -1005,7 +1005,7 @@ function renderTechVolChart(tf = currentTimeframe) {
     line: { color: '#F59E0B', width: 2 },
     xaxis: 'x',
     yaxis: 'y2',
-    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>Spread: %{y:+.2f} pts<extra></extra>`
+    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>Spread: %{y:.2f} pts<extra></extra>`
   };
 
   const traceEquilibrium = {
@@ -1591,8 +1591,8 @@ function computeAnchoredSeries(c, isNdx) {
   const s0 = spotRaw[idx];
   const v0 = volRaw[idx];
 
-  const anchoredSpotPct = spotRaw.map(s => (s0 > 0 ? ((s - s0) / s0 * 100.0) : 0));
-  const anchoredVolPt = volRaw.map(v => (v - v0));
+  const anchoredSpotPct = spotRaw.map(s => (s0 > 0 ? Math.round(((s - s0) / s0 * 100.0) * 10000) / 10000 : 0));
+  const anchoredVolPt = volRaw.map(v => Math.round((v - v0) * 10000) / 10000);
 
   // Compute post-anchor expanding Pearson correlation on log returns strictly from anchorIdx to latest
   const corrRes = computeAnchoredCorrelation(spotRaw, volRaw, idx);
@@ -2050,18 +2050,27 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   const dualRanges = computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted, isBetaScaled, beta);
 
   // Subplot 1: Asset % Move (left axis) vs Vol pt move (right axis)
+  const assetCustomdata = times.map((t, i) => {
+    const raw = (anchoredSeries.spotRaw && anchoredSeries.spotRaw[i] !== undefined)
+      ? (typeof anchoredSeries.spotRaw[i] === 'number' ? anchoredSeries.spotRaw[i].toFixed(2) : anchoredSeries.spotRaw[i])
+      : '-';
+    const s = assetPct[i];
+    const sStr = (typeof s === 'number' && !isNaN(s)) ? (s >= 0 ? `+${s.toFixed(2)}` : s.toFixed(2)) : '-';
+    return [raw, sStr];
+  });
+
   const traceAsset = {
     x: times,
     y: assetPct,
-    customdata: anchoredSeries.spotRaw ? anchoredSeries.spotRaw.map(v => typeof v === 'number' ? v.toFixed(2) : v) : [],
+    customdata: assetCustomdata,
     name: isAnchored ? `${assetLabel} % (Anchored)` : `${assetLabel} % Move`,
     mode: 'lines',
     line: { color: assetColor, width: 1.8 },
     xaxis: 'x',
     yaxis: 'y',
     hovertemplate: isAnchored 
-      ? `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{y:+.2f}%<br>Price: %{customdata}<extra></extra>`
-      : `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{y:+.2f}%<extra></extra>`
+      ? `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{customdata[1]}%<br>Price: %{customdata[0]}<extra></extra>`
+      : `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{customdata[1]}%<extra></extra>`
   };
 
   // Shaded Divergence Ribbon: dual-color fill area between Spot % and Vol (in % units) when Beta Scaled and Invert Vol are active
@@ -2120,7 +2129,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     }
   }
 
-  // Vol Customdata: [volRaw, instantaneous Overvix residual]
+  // Vol Customdata: [volRaw, instantaneous Overvix residual, volPtStr]
   const volCustomdata = times.map((t, i) => {
     const raw = (anchoredSeries.volRaw && anchoredSeries.volRaw[i] !== undefined) 
       ? (typeof anchoredSeries.volRaw[i] === 'number' ? anchoredSeries.volRaw[i].toFixed(2) : anchoredSeries.volRaw[i]) 
@@ -2132,7 +2141,9 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     const alpha = (!isAnchored && targetTf === '1D') ? rawIntercept : 0;
     // Overvix residual = vPt - (alpha - beta * sPct) = vPt - alpha + beta * sPct
     const resid = vPt - alpha + beta * sPct;
-    return [raw, resid.toFixed(2)];
+    const residStr = (resid >= 0 ? `+${resid.toFixed(2)}` : resid.toFixed(2));
+    const vPtStr = (typeof vPt === 'number' && !isNaN(vPt)) ? (vPt >= 0 ? `+${vPt.toFixed(2)}` : vPt.toFixed(2)) : '-';
+    return [raw, residStr, vPtStr];
   });
 
   const traceVol = {
@@ -2148,11 +2159,11 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     yaxis: 'y2',
     hovertemplate: isBetaScaled
       ? (isAnchored 
-          ? `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<br>Level: %{customdata[0]}<br>Overvix Residual: %{customdata[1]:+s} pts<extra></extra>`
-          : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<br>Overvix Residual: %{customdata[1]:+s} pts<extra></extra>`)
+          ? `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<br>Level: %{customdata[0]}<br>Overvix Residual: %{customdata[1]} pts<extra></extra>`
+          : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<br>Overvix Residual: %{customdata[1]} pts<extra></extra>`)
       : (isAnchored 
-          ? `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<br>Level: %{customdata[0]}<extra></extra>`
-          : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<extra></extra>`)
+          ? `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<br>Level: %{customdata[0]}<extra></extra>`
+          : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<extra></extra>`)
   };
 
     // Subplot 2: Rolling Pearson Correlation (Background context when anchored)
