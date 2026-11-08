@@ -371,13 +371,13 @@
           <div class="flex items-center space-x-2">
             <h2 id="corr-title" class="text-sm font-bold text-white uppercase tracking-tight">SPX &amp; VIX Dynamic Correlation &amp; Divergence Monitor</h2>
             <span id="corr-tf-pill" class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60">Intraday 1M</span>
-            <span id="corr-status-pill" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">Normal Inverse (&rho; &lt; -0.40)</span>
+            <span id="corr-status-pill" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">Normal Inverse (&rho; &le; -0.50)</span>
             <button id="btn-corr-guide" title="View 4-Regime Spot-Vol Playbook" class="text-slate-400 hover:text-cyan-400 text-xs px-2 py-0.5 rounded border border-slate-800 hover:border-cyan-800 bg-slate-950/60 transition flex items-center space-x-1">
               <span>📖</span>
               <span class="text-[10px] font-semibold uppercase tracking-wider">Playbook</span>
             </button>
           </div>
-          <p id="corr-subtitle" class="text-xs text-slate-400">Minute-by-Minute Normalized Overlay (Upper) &amp; Rolling 30-Minute Pearson Correlation &rho;(&Delta;SPX, &Delta;VIX) (Lower)</p>
+          <p id="corr-subtitle" class="text-xs text-slate-400">Minute-by-Minute Normalized Overlay (Upper) &amp; Rolling Pearson Correlation &rho;(&Delta;ln S, &Delta;ln Vol) (Lower)</p>
         </div>
 
         <div class="flex items-center space-x-3">
@@ -580,6 +580,37 @@
         </div>
       </div>
 
+      <!-- Quantitative Spot-Vol Pearson Correlation Regime Framework Banner -->
+      <div class="bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border border-cyan-800/60 rounded-xl p-4 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <span class="text-cyan-400 text-sm">📐</span>
+            <h4 class="text-xs font-bold uppercase tracking-wider text-cyan-300">Quantitative Formulation: Pearson Correlation &rho;(&Delta;ln S<sub>t</sub>, &Delta;ln Vol<sub>t</sub>)</h4>
+          </div>
+          <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800 font-semibold">Regime Indicator • Never a Hedge Ratio</span>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-300">
+          <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/80 space-y-1">
+            <span class="font-bold text-emerald-400 block text-[11px]">1. Strict Return Stationarity</span>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              Always computed on <strong class="text-slate-200">log returns</strong> (&Delta;ln S<sub>t</sub> vs. &Delta;ln VIX<sub>t</sub>) or percentage changes, <em>never on raw index levels</em> (which introduces spurious non-stationary correlation).
+            </p>
+          </div>
+          <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/80 space-y-1">
+            <span class="font-bold text-cyan-400 block text-[11px]">2. Typical Equilibrium Band (-0.70 to -0.85)</span>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              A standard 20-day or 60-day rolling Pearson correlation naturally oscillates between <strong class="text-emerald-400 font-mono">-0.70 and -0.85</strong> under normal dealer gamma hedging conditions.
+            </p>
+          </div>
+          <div class="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/80 space-y-1">
+            <span class="font-bold text-amber-400 block text-[11px]">3. Regime Shift Trigger (&rho; &gt; -0.50)</span>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              When &rho; breaks above <strong class="text-amber-300 font-mono">-0.50</strong> or turns positive (&rho; &gt; 0), it is not a hedge adjustment signal, but an alert for <strong class="text-white">vol-of-vol stress</strong>, <strong class="text-white">call-buying frenzies</strong>, or <strong class="text-white">dealer repositioning</strong>.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- Empirical Tech Vol Premium Distribution Table -->
       <div class="space-y-2">
         <div class="flex items-center justify-between">
@@ -670,22 +701,22 @@
                 </td>
               </tr>
 
-              <!-- 2. Bullish Decoupling -->
+              <!-- 2. Bullish Decoupling / Stress Breakout -->
               <tr class="hover:bg-slate-800/30 transition">
                 <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-amber-400">
-                  2. Bullish Decoupling<br>
-                  <span class="text-[11px] text-slate-400 font-normal">(Event Hedging / Squeeze)</span>
+                  2. Regime Shift / Stress<br>
+                  <span class="text-[11px] text-slate-400 font-normal">(Vol-of-Vol Stress / Frenzy)</span>
                 </td>
                 <td class="py-3.5 px-3.5">
-                  <span class="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-bold uppercase whitespace-nowrap">Decoupled / Positive</span>
-                  <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &gt; -0.20 or &rho; &gt; 0</p>
+                  <span class="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-bold uppercase whitespace-nowrap">Stress / Decoupled</span>
+                  <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &gt; -0.50 or &rho; &gt; 0</p>
                 </td>
                 <td class="py-3.5 px-3.5 whitespace-nowrap">
                   <span class="px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-700 text-[10px] font-bold uppercase">🚨 OVERVIXED</span>
                   <p class="text-[11px] font-mono text-red-400 mt-1">&ge; +2.0 pts (SPX)</p>
                 </td>
                 <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
-                  <strong class="text-white">Structural Anomaly:</strong> Market is flat or rising, but vol is surging anyway. Institutions are paying up for tail-risk hedges or call convexity ahead of a major binary event (e.g. FOMC, NVDA earnings, CPI). Post-event vol collapse sparks a strong rally.
+                  <strong class="text-white">Regime Shift &amp; Stress:</strong> Rolling correlation breaks above <span class="text-amber-300 font-mono">-0.50</span> or turns positive. Signals acute vol-of-vol stress, institutional call-buying frenzies, or structural dealer gamma repositioning. Not a hedge ratio, but a regime alert.
                 </td>
               </tr>
 
@@ -693,18 +724,18 @@
               <tr class="hover:bg-slate-800/30 transition">
                 <td class="py-3.5 px-3.5 whitespace-nowrap font-bold text-emerald-400">
                   3. Healthy Orderly Market<br>
-                  <span class="text-[11px] text-slate-400 font-normal">(Equilibrium Trend)</span>
+                  <span class="text-[11px] text-slate-400 font-normal">(Equilibrium Channel)</span>
                 </td>
                 <td class="py-3.5 px-3.5">
                   <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold uppercase whitespace-nowrap">Normal Inverse</span>
-                  <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &approx; -0.70 to -0.85</p>
+                  <p class="text-[11px] font-mono text-slate-400 mt-1">&rho; &le; -0.50 (-0.70 to -0.85)</p>
                 </td>
                 <td class="py-3.5 px-3.5 whitespace-nowrap">
                   <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold uppercase">NORMAL</span>
                   <p class="text-[11px] font-mono text-slate-400 mt-1">-1.0 to +1.0 pts</p>
                 </td>
                 <td class="py-3.5 px-3.5 text-slate-300 leading-relaxed">
-                  <strong class="text-white">Equilibrium:</strong> Orderly market maker delta-hedging. Implied volatility moves smoothly along the 60-day regression slope. Trend continuation strategies perform best.
+                  <strong class="text-white">Equilibrium Baseline:</strong> Standard 20-day or 60-day rolling correlation oscillates between -0.70 and -0.85. Orderly market maker delta-hedging. Implied volatility moves smoothly along the regression slope.
                 </td>
               </tr>
 
@@ -759,7 +790,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v5.1 with 5-minute bars for 5D) -->
-  <script src="/static/dashboard.js?v=5.4"></script>
+  <!-- DASHBOARD SCRIPT (v5.5 with Log Returns Correlation & Regime Indicator) -->
+  <script src="/static/dashboard.js?v=5.5"></script>
 </body>
 </html>

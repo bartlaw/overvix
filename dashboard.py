@@ -621,9 +621,10 @@ async def refresh_historical_data():
             ref_vix = state.latest_vix_close if state.latest_vix_close > 0 else float(df_sv_1d['vix'].iloc[0])
             df_sv_1d['spx_pct'] = (df_sv_1d['spx'] - ref_spx) / ref_spx * 100.0
             df_sv_1d['vix_pt'] = df_sv_1d['vix'] - ref_vix
-            df_sv_1d['spx_ret'] = df_sv_1d['spx'].pct_change()
-            df_sv_1d['vix_diff'] = df_sv_1d['vix'].diff()
-            df_sv_1d['rolling_corr'] = df_sv_1d['spx_ret'].rolling(30, min_periods=10).corr(df_sv_1d['vix_diff']).fillna(-0.70)
+            # Always compute on log returns: Δ ln(S_t) vs Δ ln(VIX_t) to prevent spurious non-stationarity
+            df_sv_1d['spx_ret'] = np.log(df_sv_1d['spx'] / df_sv_1d['spx'].shift(1))
+            df_sv_1d['vix_ret'] = np.log(df_sv_1d['vix'] / df_sv_1d['vix'].shift(1))
+            df_sv_1d['rolling_corr'] = df_sv_1d['spx_ret'].rolling(30, min_periods=10).corr(df_sv_1d['vix_ret']).fillna(-0.75)
             state.df_spx_vix_1d = df_sv_1d.copy()
             state.current_rolling_corr = float(df_sv_1d['rolling_corr'].iloc[-1])
         else:
@@ -637,9 +638,10 @@ async def refresh_historical_data():
             ref_vxn = state.latest_vxn_close if state.latest_vxn_close > 0 else float(df_nv_1d['vxn'].iloc[0])
             df_nv_1d['ndx_pct'] = (df_nv_1d['ndx'] - ref_ndx) / ref_ndx * 100.0
             df_nv_1d['vxn_pt'] = df_nv_1d['vxn'] - ref_vxn
-            df_nv_1d['ndx_ret'] = df_nv_1d['ndx'].pct_change()
-            df_nv_1d['vxn_diff'] = df_nv_1d['vxn'].diff()
-            df_nv_1d['rolling_corr'] = df_nv_1d['ndx_ret'].rolling(30, min_periods=10).corr(df_nv_1d['vxn_diff']).fillna(-0.70)
+            # Always compute on log returns: Δ ln(NDX_t) vs Δ ln(VXN_t)
+            df_nv_1d['ndx_ret'] = np.log(df_nv_1d['ndx'] / df_nv_1d['ndx'].shift(1))
+            df_nv_1d['vxn_ret'] = np.log(df_nv_1d['vxn'] / df_nv_1d['vxn'].shift(1))
+            df_nv_1d['rolling_corr'] = df_nv_1d['ndx_ret'].rolling(30, min_periods=10).corr(df_nv_1d['vxn_ret']).fillna(-0.75)
             state.df_ndx_vxn_1d = df_nv_1d.copy()
             state.current_rolling_corr_ndx = float(df_nv_1d['rolling_corr'].iloc[-1])
         else:
@@ -679,9 +681,10 @@ async def refresh_historical_data():
                 ref_v = float(df_sv['vix'].iloc[0])
                 df_sv['spx_pct'] = (df_sv['spx'] - ref_s) / ref_s * 100.0
                 df_sv['vix_pt'] = df_sv['vix'] - ref_v
-                df_sv['spx_ret'] = df_sv['spx'].pct_change()
-                df_sv['vix_diff'] = df_sv['vix'].diff()
-                df_sv['rolling_corr'] = df_sv['spx_ret'].rolling(roll_win, min_periods=min_p).corr(df_sv['vix_diff']).fillna(-0.75)
+                # Always compute on log returns: Δ ln(S_t) vs Δ ln(VIX_t)
+                df_sv['spx_ret'] = np.log(df_sv['spx'] / df_sv['spx'].shift(1))
+                df_sv['vix_ret'] = np.log(df_sv['vix'] / df_sv['vix'].shift(1))
+                df_sv['rolling_corr'] = df_sv['spx_ret'].rolling(roll_win, min_periods=min_p).corr(df_sv['vix_ret']).fillna(-0.75)
                 corr_val = float(df_sv['rolling_corr'].iloc[-1])
 
             # NDX / VXN Corr
@@ -692,9 +695,10 @@ async def refresh_historical_data():
                 ref_vx = float(df_nv['vxn'].iloc[0])
                 df_nv['ndx_pct'] = (df_nv['ndx'] - ref_n) / ref_n * 100.0
                 df_nv['vxn_pt'] = df_nv['vxn'] - ref_vx
-                df_nv['ndx_ret'] = df_nv['ndx'].pct_change()
-                df_nv['vxn_diff'] = df_nv['vxn'].diff()
-                df_nv['rolling_corr'] = df_nv['ndx_ret'].rolling(roll_win, min_periods=min_p).corr(df_nv['vxn_diff']).fillna(-0.75)
+                # Always compute on log returns: Δ ln(NDX_t) vs Δ ln(VXN_t)
+                df_nv['ndx_ret'] = np.log(df_nv['ndx'] / df_nv['ndx'].shift(1))
+                df_nv['vxn_ret'] = np.log(df_nv['vxn'] / df_nv['vxn'].shift(1))
+                df_nv['rolling_corr'] = df_nv['ndx_ret'].rolling(roll_win, min_periods=min_p).corr(df_nv['vxn_ret']).fillna(-0.75)
                 corr_ndx_val = float(df_nv['rolling_corr'].iloc[-1])
 
             # Tech Vol Spread & Ratio
@@ -775,9 +779,10 @@ async def refresh_historical_data():
             ref_v = float(df_sv['vix'].iloc[0])
             df_sv['spx_pct'] = (df_sv['spx'] - ref_s) / ref_s * 100.0
             df_sv['vix_pt'] = df_sv['vix'] - ref_v
-            df_sv['spx_ret'] = df_sv['spx'].pct_change()
-            df_sv['vix_diff'] = df_sv['vix'].diff()
-            df_sv['rolling_corr'] = df_sv['spx_ret'].rolling(roll_win, min_periods=min_p).corr(df_sv['vix_diff']).fillna(-0.75)
+            # Always compute on log returns: Δ ln(S_t) vs Δ ln(VIX_t)
+            df_sv['spx_ret'] = np.log(df_sv['spx'] / df_sv['spx'].shift(1))
+            df_sv['vix_ret'] = np.log(df_sv['vix'] / df_sv['vix'].shift(1))
+            df_sv['rolling_corr'] = df_sv['spx_ret'].rolling(roll_win, min_periods=min_p).corr(df_sv['vix_ret']).fillna(-0.75)
             corr_val = float(df_sv['rolling_corr'].iloc[-1])
 
             # NDX / VXN Corr
@@ -786,9 +791,10 @@ async def refresh_historical_data():
             ref_vx = float(df_nv['vxn'].iloc[0])
             df_nv['ndx_pct'] = (df_nv['ndx'] - ref_n) / ref_n * 100.0
             df_nv['vxn_pt'] = df_nv['vxn'] - ref_vx
-            df_nv['ndx_ret'] = df_nv['ndx'].pct_change()
-            df_nv['vxn_diff'] = df_nv['vxn'].diff()
-            df_nv['rolling_corr'] = df_nv['ndx_ret'].rolling(roll_win, min_periods=min_p).corr(df_nv['vxn_diff']).fillna(-0.75)
+            # Always compute on log returns: Δ ln(NDX_t) vs Δ ln(VXN_t)
+            df_nv['ndx_ret'] = np.log(df_nv['ndx'] / df_nv['ndx'].shift(1))
+            df_nv['vxn_ret'] = np.log(df_nv['vxn'] / df_nv['vxn'].shift(1))
+            df_nv['rolling_corr'] = df_nv['ndx_ret'].rolling(roll_win, min_periods=min_p).corr(df_nv['vxn_ret']).fillna(-0.75)
             corr_ndx_val = float(df_nv['rolling_corr'].iloc[-1])
 
             # Tech Vol Spread & Ratio
@@ -798,20 +804,20 @@ async def refresh_historical_data():
 
             return df_ts, df_sv, df_nv, df_tv, corr_val, corr_ndx_val
 
-        # A. MAX Horizon (all 500 bars / 2Y)
+        # A. MAX Horizon (all 500 bars / 2Y - 60-day rolling Pearson correlation)
         (state.df_ts_max, state.df_spx_vix_max, state.df_ndx_vxn_max,
          state.df_tech_vol_max, state.corr_max, state.corr_max_ndx) = build_from_daily_df(
-            state.df_daily, roll_win=30, min_p=10
+            state.df_daily, roll_win=60, min_p=20
         )
 
-        # B. 1Y Horizon (last 252 bars)
+        # B. 1Y Horizon (last 252 bars - 60-day rolling Pearson correlation)
         df_1y_pool = state.df_daily.iloc[-252:] if len(state.df_daily) >= 252 else state.df_daily
         (state.df_ts_1y, state.df_spx_vix_1y, state.df_ndx_vxn_1y,
          state.df_tech_vol_1y, state.corr_1y, state.corr_1y_ndx) = build_from_daily_df(
-            df_1y_pool, roll_win=20, min_p=10
+            df_1y_pool, roll_win=60, min_p=15
         )
 
-        # C. YTD Horizon (from Jan 1 of active year)
+        # C. YTD Horizon (from Jan 1 of active year - 20-day rolling Pearson correlation)
         active_year = str(state.active_session_date)[:4] if state.active_session_date else datetime.now().strftime('%Y')
         df_ytd_pool = state.df_daily.loc[[str(d)[:4] == active_year for d in state.df_daily.index]]
         if df_ytd_pool.empty:
@@ -961,29 +967,29 @@ def compute_live_payload() -> Dict[str, Any]:
     tech_ratio = float(vxn_curr / vix_curr) if vix_curr > 0 else 1.0
     tech_spread_change = tech_spread - state.prior_tech_spread_close if state.prior_tech_spread_close != 0 else 0.0
 
-    # Intraday SPX-VIX Correlation Evaluation
+    # Intraday SPX-VIX Correlation Evaluation (Non-linear Regime Indicator, not a hedge ratio)
     corr_val = state.current_rolling_corr
-    if corr_val < -0.40:
+    if corr_val <= -0.50:
         corr_status = "NORMAL INVERSE"
-        corr_desc = "Healthy inverse spot-vol correlation (SPX & VIX moving opposite)."
+        corr_desc = "Healthy inverse spot-vol correlation (typical -0.70 to -0.85 regime indicator)."
         corr_badge = "HEALTHY"
     elif corr_val < 0.0:
-        corr_status = "WEAKENING"
-        corr_desc = "Spot-vol correlation weakening towards zero."
-        corr_badge = "CAUTION"
+        corr_status = "REGIME SHIFT (STRESS)"
+        corr_desc = "Spot-vol correlation broke above -0.50: signals vol-of-vol stress, call-buying frenzies, or dealer repositioning."
+        corr_badge = "STRESS"
     else:
         corr_status = "POSITIVE DECOUPLING"
-        corr_desc = "Spot-vol decoupling: SPX and VIX moving in tandem!"
+        corr_desc = "Spot-vol decoupling: SPX and VIX moving in tandem (extreme stress / frenzy)!"
         corr_badge = "DECOUPLED"
 
     # Intraday NDX-VXN Correlation Evaluation
     corr_ndx_val = state.current_rolling_corr_ndx
-    if corr_ndx_val < -0.40:
+    if corr_ndx_val <= -0.50:
         ndx_corr_status = "NORMAL INVERSE"
         ndx_corr_badge = "HEALTHY"
     elif corr_ndx_val < 0.0:
-        ndx_corr_status = "WEAKENING"
-        ndx_corr_badge = "CAUTION"
+        ndx_corr_status = "REGIME SHIFT (STRESS)"
+        ndx_corr_badge = "STRESS"
     else:
         ndx_corr_status = "POSITIVE DECOUPLING"
         ndx_corr_badge = "DECOUPLED"

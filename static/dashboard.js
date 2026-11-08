@@ -43,7 +43,7 @@ const TF_CONFIG = {
     pillClass: 'bg-amber-950/80 text-amber-300 border-amber-800/60',
     granularity: '1m',
     tsSub: '30-Day vs. 90-Day Volatility Ratio & Inversion Monitor (1-min bars)',
-    corrSub: 'Minute-by-Minute Normalized Overlay (Upper) & Rolling 30-Minute Pearson Correlation ρ(ΔSPX, ΔVIX) (Lower)',
+    corrSub: 'Minute-by-Minute Normalized Overlay (Upper) & Rolling 30-Minute Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
     corrTraceName: 'Rolling 30m Correlation (ρ)',
     corrHoverLabel: 'Rolling 30m ρ',
     liveLabel: 'Current 30m ρ:',
@@ -60,7 +60,7 @@ const TF_CONFIG = {
     pillClass: 'bg-blue-950/80 text-blue-300 border-blue-800/60',
     granularity: '5m',
     tsSub: '5-Day Term Structure Progression & Ratio Shifts (5-min bars)',
-    corrSub: '5-Minute Normalized Overlay (Upper) & Rolling 1-Day Pearson Correlation ρ (Lower)',
+    corrSub: '5-Minute Normalized Overlay (Upper) & Rolling 1-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
     corrTraceName: 'Rolling 1D Correlation (ρ)',
     corrHoverLabel: 'Rolling 1D ρ',
     liveLabel: 'Current 1D ρ:',
@@ -77,7 +77,7 @@ const TF_CONFIG = {
     pillClass: 'bg-indigo-950/80 text-indigo-300 border-indigo-800/60',
     granularity: '30m',
     tsSub: 'Monthly OPEX Cycle & Term Structure Inversions (30-min bars)',
-    corrSub: '30-Minute Normalized Overlay (Upper) & Rolling 3-Day Pearson Correlation ρ (Lower)',
+    corrSub: '30-Minute Normalized Overlay (Upper) & Rolling 3-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
     corrTraceName: 'Rolling 3D Correlation (ρ)',
     corrHoverLabel: 'Rolling 3D ρ',
     liveLabel: 'Current 3D ρ:',
@@ -94,7 +94,7 @@ const TF_CONFIG = {
     pillClass: 'bg-purple-950/80 text-purple-300 border-purple-800/60',
     granularity: '30m',
     tsSub: 'Quarterly Term Structure & Native VIX3M Tenor Match (30-min bars)',
-    corrSub: '30-Minute Normalized Overlay (Upper) & Rolling 10-Day Pearson Correlation ρ (Lower)',
+    corrSub: '30-Minute Normalized Overlay (Upper) & Rolling 10-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
     corrTraceName: 'Rolling 10D Correlation (ρ)',
     corrHoverLabel: 'Rolling 10D ρ',
     liveLabel: 'Current 10D ρ:',
@@ -111,7 +111,7 @@ const TF_CONFIG = {
     pillClass: 'bg-pink-950/80 text-pink-300 border-pink-800/60',
     granularity: '30m',
     tsSub: 'Semi-Annual Volatility Cycle & Macro Term Structure (30-min bars)',
-    corrSub: '30-Minute Normalized Overlay (Upper) & Rolling 15-Day Pearson Correlation ρ (Lower)',
+    corrSub: '30-Minute Normalized Overlay (Upper) & Rolling 15-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
     corrTraceName: 'Rolling 15D Correlation (ρ)',
     corrHoverLabel: 'Rolling 15D ρ',
     liveLabel: 'Current 15D ρ:',
@@ -128,7 +128,7 @@ const TF_CONFIG = {
     pillClass: 'bg-teal-950/80 text-teal-300 border-teal-800/60',
     granularity: '1d',
     tsSub: 'Year-to-Date Term Structure & Benchmark Performance (Daily Close)',
-    corrSub: 'Daily Close Normalized Overlay (Upper) & Rolling 20-Day Pearson Correlation ρ (Lower)',
+    corrSub: 'Daily Close Normalized Overlay (Upper) & Rolling 20-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
     corrTraceName: 'Rolling 20D Correlation (ρ)',
     corrHoverLabel: 'Rolling 20D ρ',
     liveLabel: 'Current 20D ρ:',
@@ -145,10 +145,10 @@ const TF_CONFIG = {
     pillClass: 'bg-slate-800 text-slate-300 border-slate-700',
     granularity: '1d',
     tsSub: '1-Year Macro Volatility Regime & Historical Seasonality (Daily Close)',
-    corrSub: 'Daily Close Normalized Overlay (Upper) & Rolling 20-Day Pearson Correlation ρ (Lower)',
-    corrTraceName: 'Rolling 20D Correlation (ρ)',
-    corrHoverLabel: 'Rolling 20D ρ',
-    liveLabel: 'Current 20D ρ:',
+    corrSub: 'Daily Close Normalized Overlay (Upper) & Rolling 60-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
+    corrTraceName: 'Rolling 60D Correlation (ρ)',
+    corrHoverLabel: 'Rolling 60D ρ',
+    liveLabel: 'Current 60D ρ:',
     xTitle: '1-Year Macro Date',
     tickformat: '%b %Y',
     timeHoverFmt: '%b %d, %Y',
@@ -162,10 +162,10 @@ const TF_CONFIG = {
     pillClass: 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60',
     granularity: '1d',
     tsSub: 'Multi-Year Historical Regime & Volatility Crisis Comparison (Daily Close)',
-    corrSub: 'Daily Close Normalized Overlay (Upper) & Rolling 30-Day Pearson Correlation ρ (Lower)',
-    corrTraceName: 'Rolling 30D Correlation (ρ)',
-    corrHoverLabel: 'Rolling 30D ρ',
-    liveLabel: 'Current 30D ρ:',
+    corrSub: 'Daily Close Normalized Overlay (Upper) & Rolling 60-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
+    corrTraceName: 'Rolling 60D Correlation (ρ)',
+    corrHoverLabel: 'Rolling 60D ρ',
+    liveLabel: 'Current 60D ρ:',
     xTitle: 'Multi-Year Timeline (2Y)',
     tickformat: '%b %Y',
     timeHoverFmt: '%b %d, %Y',
@@ -1819,11 +1819,22 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       hoverinfo: 'none'
     };
 
-    const traceNormal = {
+    const traceStress = {
       x: [dStart, dEnd],
-      y: [-0.40, -0.40],
+      y: [-0.50, -0.50],
       mode: 'lines',
-      name: 'Normal Inverse (-0.40)',
+      name: 'Regime Shift (-0.50)',
+      line: { color: '#F59E0B', width: 1.5, dash: 'dot' },
+      xaxis: 'x',
+      yaxis: 'y3',
+      hoverinfo: 'none'
+    };
+
+    const traceBaseline = {
+      x: [dStart, dEnd],
+      y: [-0.75, -0.75],
+      mode: 'lines',
+      name: 'Normal Band (-0.70 to -0.85)',
       line: { color: '#10B981', width: 1, dash: 'dot' },
       xaxis: 'x',
       yaxis: 'y3',
@@ -1848,7 +1859,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       showlegend: false
     } : null;
 
-    const plotTraces = [traceAsset, traceVol, traceCorr, traceZero, traceNormal];
+    const plotTraces = [traceAsset, traceVol, traceCorr, traceZero, traceStress, traceBaseline];
     if (traceAnchorOrigin) {
       plotTraces.push(traceAnchorOrigin);
     }
@@ -1956,11 +1967,20 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       hoverinfo: 'none'
     };
 
-    const traceNormal = {
+    const traceStress = {
       x: [dStart, dEnd],
-      y: [-0.40, -0.40],
+      y: [-0.50, -0.50],
       mode: 'lines',
-      name: 'Normal Inverse (-0.40)',
+      name: 'Regime Shift (-0.50)',
+      line: { color: '#F59E0B', width: 1.5, dash: 'dot' },
+      hoverinfo: 'none'
+    };
+
+    const traceBaseline = {
+      x: [dStart, dEnd],
+      y: [-0.75, -0.75],
+      mode: 'lines',
+      name: 'Normal Band (-0.70 to -0.85)',
       line: { color: '#10B981', width: 1, dash: 'dot' },
       hoverinfo: 'none'
     };
@@ -2009,7 +2029,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       showlegend: true
     };
 
-    Plotly.newPlot('correlation-chart', [traceCorr, traceZero, traceNormal], layout, {
+    Plotly.newPlot('correlation-chart', [traceCorr, traceZero, traceStress, traceBaseline], layout, {
       responsive: true,
       displayModeBar: false
     }).then(attachCorrelationChartClickListener);
@@ -2446,15 +2466,18 @@ function updateUI(data) {
     const corrVal = (currentCorrTf === '1D') ? activeCorrObj.rolling_corr : ((currentCorrTf === '5D') ? (activeCorrObj.corr_5d || activeCorrObj.rolling_corr) : (activeCorrObj.corr_1y || activeCorrObj.rolling_corr));
     const corrPill = document.getElementById('corr-status-pill');
     if (corrPill) {
-      if (corrVal < -0.40) {
+      if (corrVal <= -0.50) {
         corrPill.textContent = `Normal Inverse (ρ = ${fmtNum(corrVal, 3)})`;
         corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800";
+        corrPill.title = "Typical baseline oscillating between -0.70 and -0.85 (Regime Indicator)";
       } else if (corrVal < 0.0) {
-        corrPill.textContent = `Weakening (ρ = ${fmtNum(corrVal, 3)})`;
-        corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800";
+        corrPill.textContent = `Stress / Shift (ρ = ${fmtNum(corrVal, 3)})`;
+        corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 animate-pulse";
+        corrPill.title = "Broke above -0.50: Vol-of-vol stress, call-buying frenzy, or dealer repositioning";
       } else {
         corrPill.textContent = `Positive Decoupling (ρ = ${fmtNum(corrVal, 3)})`;
         corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 animate-pulse";
+        corrPill.title = "Positive correlation: Spot and Vol moving in tandem (extreme stress / frenzy)";
       }
     }
   }

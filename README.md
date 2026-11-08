@@ -55,11 +55,12 @@ The **Overvix Terminal** monitors the real-time pricing relationship between spo
 - **🔗 Timeframe Synchronization Toggle**: Link sliders between Term Structure and Dynamic Correlation with a single click. Clickable tick labels, drag slider, or keyboard arrow keys for rapid inspection.
 
 ### 3. Dynamic Spot-Vol Correlation & Divergence Monitor
-- Calculates rolling 30-minute Pearson correlation $\rho(\Delta\text{Spot}, \Delta\text{Vol})$.
-- **Regimes**:
-  - **Healthy Inverse ($\rho < -0.40$)**: Normal inverse spot-vol dynamics.
-  - **Weakening ($-0.40 \le \rho < 0.00$)**: Spot-vol link degrading.
-  - **Positive Decoupling ($\rho \ge 0.00$)**: Spot equities and volatility moving in tandem (extreme market stress or short-covering rallies).
+- **Stationary Log Returns Formulation**: Always computed on **log returns** ($\Delta \ln(S_t)$ vs. $\Delta \ln(\text{VIX}_t)$) or percentage changes, **never on raw index levels** (which introduces spurious correlation due to non-stationarity and macro price drift).
+- **Regime Indicator vs. Hedge Ratio**: A typical 20-day or 60-day rolling Pearson correlation (usually oscillating between **$-0.70$ and $-0.85$**) is treated **not as a hedge ratio**, but strictly as a **non-linear regime indicator**.
+- **Regime Thresholds**:
+  - **Healthy Inverse Baseline ($\rho \le -0.50$, typically $-0.70$ to $-0.85$)**: Standard orderly market maker delta-hedging regime.
+  - **Regime Shift / Stress ($-0.50 < \rho < 0.00$)**: When rolling correlation breaks above **$-0.50$**, it signals **vol-of-vol stress**, **institutional call-buying frenzies**, or **structural dealer repositioning**.
+  - **Positive Decoupling ($\rho \ge 0.00$)**: Spot equities and volatility moving in tandem (extreme tail-hedging ahead of binary catalysts, speculative call squeezes, or systemic liquidations).
 - **Interactive Dual Overlay**: Plots minute-by-minute normalized trajectories of Spot % move and Vol point move, with a one-click toggle to invert the volatility axis for direct parallel visual comparison.
 - **Recovery Anchor & Leader Diagnostic**:
   - Re-anchors baseline moves to any specific timestamp $t_0$ (e.g. market bottom or panic spike peak).
@@ -259,9 +260,16 @@ $$\text{Overvix Residual} = \Delta\text{VIX}_{\text{curr}} - \text{Expected } \D
 
 $$\text{Overvix Alert Triggered} \iff \text{Residual} \ge 2.0\text{ pts}$$
 
-### 2. Rolling Pearson Correlation
-For a rolling window of $W = 30$ one-minute returns:
-$$\rho = \frac{\sum (r_{\text{spx}} - \bar{r}_{\text{spx}})(\Delta\text{vix} - \overline{\Delta\text{vix}})}{\sqrt{\sum (r_{\text{spx}} - \bar{r}_{\text{spx}})^2 \sum (\Delta\text{vix} - \overline{\Delta\text{vix}})^2}}$$
+### 2. Rolling Pearson Correlation (Stationary Log Returns)
+Computed strictly on stationary log returns $\Delta \ln(S_t)$ vs $\Delta \ln(\text{VIX}_t)$ over rolling window $W$:
+
+$$r_{S, t} = \Delta \ln(S_t) = \ln\left(\frac{S_t}{S_{t-1}}\right), \quad r_{V, t} = \Delta \ln(V_t) = \ln\left(\frac{V_t}{V_{t-1}}\right)$$
+
+$$\rho_t = \frac{\sum_{i=0}^{W-1} (r_{S, t-i} - \bar{r}_S)(r_{V, t-i} - \bar{r}_V)}{\sqrt{\sum_{i=0}^{W-1} (r_{S, t-i} - \bar{r}_S)^2 \sum_{i=0}^{W-1} (r_{V, t-i} - \bar{r}_V)^2}}$$
+
+- **Typical Baseline**: Oscillates in the **$-0.70$ to $-0.85$** equilibrium channel.
+- **Regime Shift Threshold**: A break above **$-0.50$** signals vol-of-vol stress, call-buying frenzies, or dealer repositioning.
+- **Role**: Non-linear regime indicator, not a hedge ratio.
 
 ---
 
