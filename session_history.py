@@ -117,6 +117,16 @@ def load_cached_session(date_str: str) -> Optional[Dict[str, Any]]:
                     ov["is_overvixed"] = bool(res_pts >= 2.5)
                     ov["status"] = "OVER-VXN" if ov["is_overvixed"] else "NORMAL"
 
+            # Auto-map 1D multi-timeframe keys for term_structure & tech_vol
+            if data and isinstance(data.get("term_structure"), dict):
+                ts = data["term_structure"]
+                if "1D" not in ts and "intraday_1d" in ts:
+                    ts["1D"] = ts["intraday_1d"]
+            if data and isinstance(data.get("tech_vol"), dict):
+                tv = data["tech_vol"]
+                if "1D" not in tv and "intraday_1d" in tv:
+                    tv["1D"] = tv["intraday_1d"]
+
                 try:
                     with open(filepath, 'w', encoding='utf-8') as f_out:
                         json.dump(data, f_out, indent=2)

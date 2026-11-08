@@ -31,32 +31,194 @@ let cachedIsRthActive = null;
 let cachedHistVersion = 0;
 let activeSocket = null;
 
+// Multi-Timeframe Configuration Suite across 8 stepped horizons
+const TF_STEPS = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', 'MAX'];
+
+const TF_CONFIG = {
+  '1D': {
+    step: 0,
+    label: '1D',
+    badgeText: '1D &bull; Intraday (1m)',
+    pillText: 'Intraday 1m',
+    pillClass: 'bg-amber-950/80 text-amber-300 border-amber-800/60',
+    granularity: '1m',
+    tsSub: '30-Day vs. 90-Day Volatility Ratio & Inversion Monitor (1-min bars)',
+    corrSub: 'Minute-by-Minute Normalized Overlay (Upper) & Rolling 30-Minute Pearson Correlation ρ(ΔSPX, ΔVIX) (Lower)',
+    corrTraceName: 'Rolling 30m Correlation (ρ)',
+    corrHoverLabel: 'Rolling 30m ρ',
+    liveLabel: 'Current 30m ρ:',
+    xTitle: 'Today Intraday Time (US/Eastern)',
+    tickformat: '%H:%M',
+    timeHoverFmt: '%b %d, %H:%M',
+    rangebreaks: [{ pattern: 'hour', bounds: [16.25, 9.5] }]
+  },
+  '5D': {
+    step: 1,
+    label: '5D',
+    badgeText: '5D &bull; 1-Week (15m)',
+    pillText: '1-Week 15m',
+    pillClass: 'bg-blue-950/80 text-blue-300 border-blue-800/60',
+    granularity: '15m',
+    tsSub: '5-Day Term Structure Progression & Ratio Shifts (15-min bars)',
+    corrSub: '15-Minute Normalized Overlay (Upper) & Rolling 1-Day Pearson Correlation ρ (Lower)',
+    corrTraceName: 'Rolling 1D Correlation (ρ)',
+    corrHoverLabel: 'Rolling 1D ρ',
+    liveLabel: 'Current 1D ρ:',
+    xTitle: '5-Day Timeline (US/Eastern)',
+    tickformat: '%b %d %H:%M',
+    timeHoverFmt: '%b %d, %H:%M',
+    rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
+  },
+  '1M': {
+    step: 2,
+    label: '1M',
+    badgeText: '1M &bull; 1-Month (30m)',
+    pillText: '1-Month 30m',
+    pillClass: 'bg-indigo-950/80 text-indigo-300 border-indigo-800/60',
+    granularity: '30m',
+    tsSub: 'Monthly OPEX Cycle & Term Structure Inversions (30-min bars)',
+    corrSub: '30-Minute Normalized Overlay (Upper) & Rolling 3-Day Pearson Correlation ρ (Lower)',
+    corrTraceName: 'Rolling 3D Correlation (ρ)',
+    corrHoverLabel: 'Rolling 3D ρ',
+    liveLabel: 'Current 3D ρ:',
+    xTitle: '1-Month Timeline (US/Eastern)',
+    tickformat: '%b %d %H:%M',
+    timeHoverFmt: '%b %d, %H:%M',
+    rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
+  },
+  '3M': {
+    step: 3,
+    label: '3M',
+    badgeText: '3M &bull; Quarterly (4h)',
+    pillText: 'Quarterly 4h',
+    pillClass: 'bg-purple-950/80 text-purple-300 border-purple-800/60',
+    granularity: '4h',
+    tsSub: 'Quarterly Term Structure & Native VIX3M Tenor Match (4-hour bars)',
+    corrSub: '4-Hour Normalized Overlay (Upper) & Rolling 10-Day Pearson Correlation ρ (Lower)',
+    corrTraceName: 'Rolling 10D Correlation (ρ)',
+    corrHoverLabel: 'Rolling 10D ρ',
+    liveLabel: 'Current 10D ρ:',
+    xTitle: '3-Month Timeline (US/Eastern)',
+    tickformat: '%b %d',
+    timeHoverFmt: '%b %d, %H:%M',
+    rangebreaks: [{ bounds: ['sat', 'mon'] }]
+  },
+  '6M': {
+    step: 4,
+    label: '6M',
+    badgeText: '6M &bull; Semi-Annual (4h)',
+    pillText: 'Semi-Annual 4h',
+    pillClass: 'bg-pink-950/80 text-pink-300 border-pink-800/60',
+    granularity: '4h',
+    tsSub: 'Semi-Annual Volatility Cycle & Macro Term Structure (4-hour bars)',
+    corrSub: '4-Hour Normalized Overlay (Upper) & Rolling 15-Day Pearson Correlation ρ (Lower)',
+    corrTraceName: 'Rolling 15D Correlation (ρ)',
+    corrHoverLabel: 'Rolling 15D ρ',
+    liveLabel: 'Current 15D ρ:',
+    xTitle: '6-Month Timeline (US/Eastern)',
+    tickformat: '%b %d',
+    timeHoverFmt: '%b %d, %H:%M',
+    rangebreaks: [{ bounds: ['sat', 'mon'] }]
+  },
+  'YTD': {
+    step: 5,
+    label: 'YTD',
+    badgeText: 'YTD &bull; Year-to-Date (1d)',
+    pillText: 'YTD Daily',
+    pillClass: 'bg-teal-950/80 text-teal-300 border-teal-800/60',
+    granularity: '1d',
+    tsSub: 'Year-to-Date Term Structure & Benchmark Performance (Daily Close)',
+    corrSub: 'Daily Close Normalized Overlay (Upper) & Rolling 20-Day Pearson Correlation ρ (Lower)',
+    corrTraceName: 'Rolling 20D Correlation (ρ)',
+    corrHoverLabel: 'Rolling 20D ρ',
+    liveLabel: 'Current 20D ρ:',
+    xTitle: 'Year-to-Date Timeline',
+    tickformat: '%b %d',
+    timeHoverFmt: '%b %d, %Y',
+    rangebreaks: [{ bounds: ['sat', 'mon'] }]
+  },
+  '1Y': {
+    step: 6,
+    label: '1Y',
+    badgeText: '1Y &bull; 1-Year Macro (1d)',
+    pillText: '1-Year Daily',
+    pillClass: 'bg-slate-800 text-slate-300 border-slate-700',
+    granularity: '1d',
+    tsSub: '1-Year Macro Volatility Regime & Historical Seasonality (Daily Close)',
+    corrSub: 'Daily Close Normalized Overlay (Upper) & Rolling 20-Day Pearson Correlation ρ (Lower)',
+    corrTraceName: 'Rolling 20D Correlation (ρ)',
+    corrHoverLabel: 'Rolling 20D ρ',
+    liveLabel: 'Current 20D ρ:',
+    xTitle: '1-Year Macro Date',
+    tickformat: '%b %Y',
+    timeHoverFmt: '%b %d, %Y',
+    rangebreaks: [{ bounds: ['sat', 'mon'] }]
+  },
+  'MAX': {
+    step: 7,
+    label: 'MAX',
+    badgeText: 'MAX &bull; 2-Year Multi-Year (1d)',
+    pillText: 'MAX 2-Year',
+    pillClass: 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60',
+    granularity: '1d',
+    tsSub: 'Multi-Year Historical Regime & Volatility Crisis Comparison (Daily Close)',
+    corrSub: 'Daily Close Normalized Overlay (Upper) & Rolling 30-Day Pearson Correlation ρ (Lower)',
+    corrTraceName: 'Rolling 30D Correlation (ρ)',
+    corrHoverLabel: 'Rolling 30D ρ',
+    liveLabel: 'Current 30D ρ:',
+    xTitle: 'Multi-Year Timeline (2Y)',
+    tickformat: '%b %Y',
+    timeHoverFmt: '%b %d, %Y',
+    rangebreaks: [{ bounds: ['sat', 'mon'] }]
+  }
+};
+
 // Cached Datasets (SPX & Term Structure)
 let cachedBootstrap = null;
 let cachedTs = {
   '1D': { times: [], vix: [], vix3m: [], ratio: [] },
   '5D': { times: [], vix: [], vix3m: [], ratio: [] },
-  '1Y': { times: [], vix: [], vix3m: [], ratio: [] }
+  '1M': { times: [], vix: [], vix3m: [], ratio: [] },
+  '3M': { times: [], vix: [], vix3m: [], ratio: [] },
+  '6M': { times: [], vix: [], vix3m: [], ratio: [] },
+  'YTD': { times: [], vix: [], vix3m: [], ratio: [] },
+  '1Y': { times: [], vix: [], vix3m: [], ratio: [] },
+  'MAX': { times: [], vix: [], vix3m: [], ratio: [] }
 };
 let cachedTrail = { x: [], y: [], times: [] };
 let cachedCorr = {
   '1D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '5D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  '1M': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  '3M': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  '6M': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  'YTD': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '1Y': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
-  metrics: { '1D': -0.75, '5D': -0.75, '1Y': -0.75 }
+  'MAX': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  metrics: { '1D': -0.75, '5D': -0.75, '1M': -0.75, '3M': -0.75, '6M': -0.75, 'YTD': -0.75, '1Y': -0.75, 'MAX': -0.75 }
 };
 
 // Cached Datasets (NDX & Tech Vol Spread)
 let cachedTechVol = {
   '1D': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
   '5D': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
-  '1Y': { times: [], spread: [], ratio: [], vxn: [], vix: [] }
+  '1M': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
+  '3M': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
+  '6M': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
+  'YTD': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
+  '1Y': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
+  'MAX': { times: [], spread: [], ratio: [], vxn: [], vix: [] }
 };
 let cachedCorrNdx = {
   '1D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '5D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  '1M': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  '3M': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  '6M': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  'YTD': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '1Y': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
-  metrics: { '1D': -0.75, '5D': -0.75, '1Y': -0.75 }
+  'MAX': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  metrics: { '1D': -0.75, '5D': -0.75, '1M': -0.75, '3M': -0.75, '6M': -0.75, 'YTD': -0.75, '1Y': -0.75, 'MAX': -0.75 }
 };
 let currentCorrTf = '1D';
 
@@ -305,37 +467,150 @@ function switchAssetPair(pair) {
 }
 
 // Timeframe Selector Buttons
-const btnTf1D = document.getElementById('btn-tf-1d');
-const btnTf5D = document.getElementById('btn-tf-5d');
-const btnTf1Y = document.getElementById('btn-tf-1y');
+// Timeframe Stepped Slider Elements (Card 2 & Card 3)
+const sliderTsTimeframe = document.getElementById('slider-ts-timeframe');
+const tsSliderBadge = document.getElementById('ts-slider-badge');
+const tsTickLabels = document.getElementById('ts-tick-labels');
+const chkSyncTimeframe = document.getElementById('chk-sync-timeframe');
 const tsLivePill = document.getElementById('ts-live-pill');
 
-function setupTimeframeButtons() {
-  btnTf1D.addEventListener('click', () => switchTimeframe('1D'));
-  btnTf5D.addEventListener('click', () => switchTimeframe('5D'));
-  btnTf1Y.addEventListener('click', () => switchTimeframe('1Y'));
+const sliderCorrTimeframe = document.getElementById('slider-corr-timeframe');
+const corrSliderBadge = document.getElementById('corr-slider-badge');
+const corrTickLabels = document.getElementById('corr-tick-labels');
+
+function setupTimeframeSliders() {
+  if (sliderTsTimeframe) {
+    sliderTsTimeframe.addEventListener('input', (e) => {
+      const idx = parseInt(e.target.value, 10);
+      const tf = TF_STEPS[idx] || '1D';
+      updateTsSliderUI(tf);
+      if (chkSyncTimeframe && chkSyncTimeframe.checked) {
+        if (sliderCorrTimeframe) sliderCorrTimeframe.value = idx;
+        updateCorrSliderUI(tf);
+      }
+    });
+
+    sliderTsTimeframe.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.value, 10);
+      const tf = TF_STEPS[idx] || '1D';
+      switchTimeframe(tf, true);
+    });
+  }
+
+  if (tsTickLabels) {
+    tsTickLabels.querySelectorAll('span[data-step]').forEach(span => {
+      span.addEventListener('click', () => {
+        const step = parseInt(span.getAttribute('data-step'), 10);
+        const tf = TF_STEPS[step] || '1D';
+        if (sliderTsTimeframe) sliderTsTimeframe.value = step;
+        switchTimeframe(tf, true);
+      });
+    });
+  }
+
+  if (sliderCorrTimeframe) {
+    sliderCorrTimeframe.addEventListener('input', (e) => {
+      const idx = parseInt(e.target.value, 10);
+      const tf = TF_STEPS[idx] || '1D';
+      updateCorrSliderUI(tf);
+      if (chkSyncTimeframe && chkSyncTimeframe.checked) {
+        if (sliderTsTimeframe) sliderTsTimeframe.value = idx;
+        updateTsSliderUI(tf);
+      }
+    });
+
+    sliderCorrTimeframe.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.value, 10);
+      const tf = TF_STEPS[idx] || '1D';
+      switchCorrTf(tf, true);
+    });
+  }
+
+  if (corrTickLabels) {
+    corrTickLabels.querySelectorAll('span[data-step]').forEach(span => {
+      span.addEventListener('click', () => {
+        const step = parseInt(span.getAttribute('data-step'), 10);
+        const tf = TF_STEPS[step] || '1D';
+        if (sliderCorrTimeframe) sliderCorrTimeframe.value = step;
+        switchCorrTf(tf, true);
+      });
+    });
+  }
 }
 
-function switchTimeframe(tf) {
+// Backward-compatible alias
+function setupTimeframeButtons() {
+  setupTimeframeSliders();
+}
+
+function updateTsSliderUI(tf) {
+  const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
+  if (tsSliderBadge) {
+    tsSliderBadge.innerHTML = conf.badgeText;
+  }
+  if (tsLivePill) {
+    tsLivePill.textContent = conf.pillText;
+    tsLivePill.className = `text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border ${conf.pillClass}`;
+  }
+  const tsSub = document.getElementById('ts-sub');
+  if (tsSub && conf.tsSub) {
+    tsSub.textContent = conf.tsSub;
+  }
+  if (tsTickLabels) {
+    tsTickLabels.querySelectorAll('span[data-step]').forEach(span => {
+      const s = parseInt(span.getAttribute('data-step'), 10);
+      if (s === conf.step) {
+        span.className = "cursor-pointer font-bold text-cyan-400 transition";
+      } else {
+        span.className = "cursor-pointer text-slate-400 hover:text-cyan-300 transition";
+      }
+    });
+  }
+}
+
+function updateCorrSliderUI(tf) {
+  const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
+  if (corrSliderBadge) {
+    corrSliderBadge.innerHTML = conf.badgeText;
+  }
+  if (corrTfPill) {
+    corrTfPill.textContent = conf.pillText;
+    corrTfPill.className = `text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border ${conf.pillClass}`;
+  }
+  if (corrSubtitle && conf.corrSub) {
+    corrSubtitle.textContent = conf.corrSub;
+  }
+  if (corrLiveLabel && conf.liveLabel) {
+    corrLiveLabel.textContent = conf.liveLabel;
+  }
+  if (corrTickLabels) {
+    corrTickLabels.querySelectorAll('span[data-step]').forEach(span => {
+      const s = parseInt(span.getAttribute('data-step'), 10);
+      if (s === conf.step) {
+        span.className = "cursor-pointer font-bold text-cyan-400 transition";
+      } else {
+        span.className = "cursor-pointer text-slate-400 hover:text-cyan-300 transition";
+      }
+    });
+  }
+}
+
+function switchTimeframe(tf, triggeredBySlider = false) {
   currentTimeframe = tf;
+  const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
+  if (sliderTsTimeframe && sliderTsTimeframe.value != conf.step) {
+    sliderTsTimeframe.value = conf.step;
+  }
+  updateTsSliderUI(tf);
 
-  const allBtns = [btnTf1D, btnTf5D, btnTf1Y];
-  allBtns.forEach(btn => {
-    btn.className = "px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition";
-  });
-
-  if (tf === '1D') {
-    btnTf1D.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
-    tsLivePill.textContent = "Intraday 1m";
-    tsLivePill.className = "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60";
-  } else if (tf === '5D') {
-    btnTf5D.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
-    tsLivePill.textContent = "Recent 15m";
-    tsLivePill.className = "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60";
-  } else if (tf === '1Y') {
-    btnTf1Y.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
-    tsLivePill.textContent = "Daily Close";
-    tsLivePill.className = "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700";
+  if (chkSyncTimeframe && chkSyncTimeframe.checked) {
+    currentCorrTf = tf;
+    if (sliderCorrTimeframe && sliderCorrTimeframe.value != conf.step) {
+      sliderCorrTimeframe.value = conf.step;
+    }
+    updateCorrSliderUI(tf);
+    renderCorrelationChart(currentCorrMode, tf);
+    updateCorrMetricDisplay();
   }
 
   renderTermStructureChart(tf);
@@ -381,9 +656,6 @@ const btnCorrOnly = document.getElementById('btn-corr-only');
 const btnCorrInvert = document.getElementById('btn-corr-invert');
 const corrInvertGroup = document.getElementById('corr-invert-group');
 const corrInvertIcon = document.getElementById('corr-invert-icon');
-const btnCorrTf1D = document.getElementById('btn-corr-tf-1d');
-const btnCorrTf5D = document.getElementById('btn-corr-tf-5d');
-const btnCorrTf1Y = document.getElementById('btn-corr-tf-1y');
 const corrTfPill = document.getElementById('corr-tf-pill');
 const corrSubtitle = document.getElementById('corr-subtitle');
 const corrLiveLabel = document.getElementById('corr-live-label');
@@ -392,10 +664,6 @@ function setupCorrButtons() {
   btnCorrDual.addEventListener('click', () => switchCorrMode('dual'));
   btnCorrOnly.addEventListener('click', () => switchCorrMode('corr_only'));
   if (btnCorrInvert) btnCorrInvert.addEventListener('click', () => toggleCorrVolInvert());
-
-  if (btnCorrTf1D) btnCorrTf1D.addEventListener('click', () => switchCorrTf('1D'));
-  if (btnCorrTf5D) btnCorrTf5D.addEventListener('click', () => switchCorrTf('5D'));
-  if (btnCorrTf1Y) btnCorrTf1Y.addEventListener('click', () => switchCorrTf('1Y'));
 
   setupAnchorButtons();
 }
@@ -480,37 +748,21 @@ function switchCorrMode(mode) {
   renderCorrelationChart(mode, currentCorrTf);
 }
 
-function switchCorrTf(tf) {
+function switchCorrTf(tf, triggeredBySlider = false) {
   currentCorrTf = tf;
-  const allBtns = [btnCorrTf1D, btnCorrTf5D, btnCorrTf1Y];
-  allBtns.forEach(btn => {
-    if (btn) btn.className = "px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition";
-  });
+  const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
+  if (sliderCorrTimeframe && sliderCorrTimeframe.value != conf.step) {
+    sliderCorrTimeframe.value = conf.step;
+  }
+  updateCorrSliderUI(tf);
 
-  if (tf === '1D') {
-    if (btnCorrTf1D) btnCorrTf1D.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
-    if (corrTfPill) {
-      corrTfPill.textContent = "Intraday 1M";
-      corrTfPill.className = "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60";
+  if (chkSyncTimeframe && chkSyncTimeframe.checked) {
+    currentTimeframe = tf;
+    if (sliderTsTimeframe && sliderTsTimeframe.value != conf.step) {
+      sliderTsTimeframe.value = conf.step;
     }
-    if (corrSubtitle) corrSubtitle.textContent = "Minute-by-Minute Normalized Overlay (Upper) & Rolling 30-Minute Pearson Correlation ρ(ΔSPX, ΔVIX) (Lower)";
-    if (corrLiveLabel) corrLiveLabel.textContent = "Current 30m ρ:";
-  } else if (tf === '5D') {
-    if (btnCorrTf5D) btnCorrTf5D.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
-    if (corrTfPill) {
-      corrTfPill.textContent = "Recent 15M";
-      corrTfPill.className = "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60";
-    }
-    if (corrSubtitle) corrSubtitle.textContent = "5-Day 15-Minute Normalized Overlay (Upper) & Rolling 1-Day Pearson Correlation ρ(ΔSPX, ΔVIX) (Lower)";
-    if (corrLiveLabel) corrLiveLabel.textContent = "Current 1D ρ:";
-  } else if (tf === '1Y') {
-    if (btnCorrTf1Y) btnCorrTf1Y.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
-    if (corrTfPill) {
-      corrTfPill.textContent = "Daily Macro";
-      corrTfPill.className = "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700";
-    }
-    if (corrSubtitle) corrSubtitle.textContent = "1-Year Daily Normalized Overlay (Upper) & Rolling 20-Day Pearson Correlation ρ(ΔSPX, ΔVIX) (Lower)";
-    if (corrLiveLabel) corrLiveLabel.textContent = "Current 20D ρ:";
+    updateTsSliderUI(tf);
+    renderTermStructureChart(tf);
   }
 
   updateCorrMetricDisplay();
@@ -702,6 +954,7 @@ function renderOvervixChart(bootstrap) {
 }
 
 function renderTechVolChart(tf = currentTimeframe) {
+  const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
   const data = cachedTechVol[tf] || cachedTechVol['1D'] || {};
   const times = data.times || [];
   const vxn = data.vxn || [];
@@ -712,7 +965,7 @@ function renderTechVolChart(tf = currentTimeframe) {
   const dStart = times.length > 0 ? times[0] : null;
   const dEnd = times.length > 0 ? times[times.length - 1] : null;
   const hasValidDates = Boolean(dStart && dEnd);
-  const timeHoverFmt = (tf === '1Y') ? '%b %d, %Y' : '%b %d, %H:%M';
+  const timeHoverFmt = conf.timeHoverFmt;
 
   const traceVXN = {
     x: times,
@@ -769,15 +1022,8 @@ function renderTechVolChart(tf = currentTimeframe) {
     hoverinfo: 'none'
   };
 
-  const xTitle = (tf === '1D') ? 'Today Intraday Time (US/Eastern)' : ((tf === '5D') ? '5-Day Timeline' : '1-Year Daily Date');
-  let rangebreaks = [];
-  if (tf === '1D') {
-    rangebreaks = [{ pattern: 'hour', bounds: [16.25, 9.5] }];
-  } else if (tf === '5D') {
-    rangebreaks = [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }];
-  } else if (tf === '1Y') {
-    rangebreaks = [{ bounds: ['sat', 'mon'] }];
-  }
+  const xTitle = conf.xTitle;
+  const rangebreaks = conf.rangebreaks || [];
 
   const layout = {
     paper_bgcolor: 'transparent',
@@ -788,7 +1034,7 @@ function renderTechVolChart(tf = currentTimeframe) {
       anchor: 'y2',
       type: 'date',
       rangebreaks: rangebreaks,
-      tickformat: (tf === '1D') ? '%H:%M' : ((tf === '5D') ? '%b %d %H:%M' : '%b %Y'),
+      tickformat: conf.tickformat,
       title: { text: xTitle, font: { color: '#94A3B8', size: 10 } },
       gridcolor: '#1e293b',
       tickfont: { color: '#94A3B8', size: 10 },
@@ -827,6 +1073,7 @@ function renderTermStructureChart(tf = '1D') {
     renderTechVolChart(tf);
     return;
   }
+  const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
   const data = cachedTs[tf] || cachedTs['1D'];
   const times = data.times || [];
   const vix = data.vix || [];
@@ -837,7 +1084,7 @@ function renderTermStructureChart(tf = '1D') {
   const dEnd = times.length > 0 ? times[times.length - 1] : null;
   const hasValidDates = Boolean(dStart && dEnd);
 
-  const timeHoverFmt = (tf === '1Y') ? '%b %d, %Y' : '%b %d, %H:%M';
+  const timeHoverFmt = conf.timeHoverFmt;
 
   const traceVIX = {
     x: times,
@@ -894,23 +1141,8 @@ function renderTermStructureChart(tf = '1D') {
     hoverinfo: 'none'
   };
 
-  const xTitle = (tf === '1D') ? 'Today Intraday Time (US/Eastern)' : ((tf === '5D') ? '5-Day Timeline' : '1-Year Daily Date');
-
-  let rangebreaks = [];
-  if (tf === '1D') {
-    rangebreaks = [
-      { pattern: 'hour', bounds: [16.25, 9.5] }
-    ];
-  } else if (tf === '5D') {
-    rangebreaks = [
-      { bounds: ['sat', 'mon'] },
-      { pattern: 'hour', bounds: [16.25, 9.5] }
-    ];
-  } else if (tf === '1Y') {
-    rangebreaks = [
-      { bounds: ['sat', 'mon'] }
-    ];
-  }
+  const xTitle = conf.xTitle;
+  const rangebreaks = conf.rangebreaks || [];
 
   const layout = {
     paper_bgcolor: 'transparent',
@@ -921,7 +1153,7 @@ function renderTermStructureChart(tf = '1D') {
       anchor: 'y2',
       type: 'date',
       rangebreaks: rangebreaks,
-      tickformat: (tf === '1D') ? '%H:%M' : ((tf === '5D') ? '%b %d %H:%M' : '%b %Y'),
+      tickformat: conf.tickformat,
       title: { text: xTitle, font: { color: '#94A3B8', size: 10 } },
       gridcolor: '#1e293b',
       tickfont: { color: '#94A3B8', size: 10 },
@@ -1482,40 +1714,13 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
   const maxCorrVal = validCorrs.length > 0 ? Math.max(...validCorrs) : -0.7;
   const upperY = maxCorrVal > 0 ? Math.min(1.05, Math.ceil((maxCorrVal + 0.05) * 10) / 10) : 0.05;
 
-  let xTitle = 'Today Intraday Time (US/Eastern)';
-  let tickformat = '%H:%M';
-  let rangebreaks = [];
-  let corrTraceName = `Rolling 30m Correlation (ρ)`;
-  let corrHoverLabel = `Rolling 30m ρ`;
-
-  if (tf === '1D') {
-    xTitle = 'Today Intraday Time (US/Eastern)';
-    tickformat = '%H:%M';
-    rangebreaks = [
-      { pattern: 'hour', bounds: [16.25, 9.5] }
-    ];
-    corrTraceName = `Rolling 30m Correlation (ρ)`;
-    corrHoverLabel = `Rolling 30m ρ`;
-  } else if (tf === '5D') {
-    xTitle = '5-Day Timeline (US/Eastern)';
-    tickformat = '%b %d %H:%M';
-    rangebreaks = [
-      { bounds: ['sat', 'mon'] },
-      { pattern: 'hour', bounds: [16.25, 9.5] }
-    ];
-    corrTraceName = `Rolling 1D Correlation (ρ)`;
-    corrHoverLabel = `Rolling 1D ρ`;
-  } else if (tf === '1Y') {
-    xTitle = '1-Year Daily Date';
-    tickformat = '%b %Y';
-    rangebreaks = [
-      { bounds: ['sat', 'mon'] }
-    ];
-    corrTraceName = `Rolling 20D Correlation (ρ)`;
-    corrHoverLabel = `Rolling 20D ρ`;
-  }
-
-  const timeHoverFmt = (tf === '1Y') ? '%b %d, %Y' : '%b %d, %H:%M';
+  const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
+  const xTitle = conf.xTitle;
+  const tickformat = conf.tickformat;
+  const rangebreaks = conf.rangebreaks || [];
+  const corrTraceName = conf.corrTraceName;
+  const corrHoverLabel = conf.corrHoverLabel;
+  const timeHoverFmt = conf.timeHoverFmt;
   let assetHoverLabel = isAnchored ? `${assetLabel} from Anchor` : ((tf === '1D') ? `${assetLabel} Day Move` : ((tf === '5D') ? `${assetLabel} 5D Move` : `${assetLabel} 1Y Move`));
   let volHoverLabel = isAnchored ? `${volLabel} from Anchor` : ((tf === '1D') ? `${volLabel} Day Move` : ((tf === '5D') ? `${volLabel} 5D Move` : `${volLabel} 1Y Move`));
 
@@ -2568,51 +2773,43 @@ async function bootstrapData() {
     const inputWin = document.getElementById('input-window');
     if (inputWin && data.model) inputWin.value = data.model.window_days;
 
-    // Cache SPX Term Structure datasets
-    if (data.term_structure.intraday_1d) {
+    // Cache multi-timeframe datasets across all 8 horizons (1D, 5D, 1M, 3M, 6M, YTD, 1Y, MAX)
+    TF_STEPS.forEach(tf => {
+      if (data.term_structure && data.term_structure[tf]) {
+        cachedTs[tf] = data.term_structure[tf];
+      }
+      if (data.intraday_correlation && data.intraday_correlation[tf]) {
+        cachedCorr[tf] = data.intraday_correlation[tf];
+      }
+      if (data.tech_vol && data.tech_vol[tf]) {
+        cachedTechVol[tf] = data.tech_vol[tf];
+      }
+      if (data.ndx && data.ndx.correlation && data.ndx.correlation[tf]) {
+        cachedCorrNdx[tf] = data.ndx.correlation[tf];
+      }
+    });
+
+    // Fallbacks for legacy payload structures if present
+    if (data.term_structure && data.term_structure.intraday_1d && (!cachedTs['1D'].times || !cachedTs['1D'].times.length)) {
       cachedTs['1D'] = data.term_structure.intraday_1d;
     }
-    if (data.term_structure.intraday_5d) {
+    if (data.term_structure && data.term_structure.intraday_5d && (!cachedTs['5D'].times || !cachedTs['5D'].times.length)) {
       cachedTs['5D'] = data.term_structure.intraday_5d;
     }
-    if (data.term_structure.history_1y) {
+    if (data.term_structure && data.term_structure.history_1y && (!cachedTs['1Y'].times || !cachedTs['1Y'].times.length)) {
       cachedTs['1Y'] = {
-        times: data.term_structure.history_1y.dates,
-        vix: data.term_structure.history_1y.vix,
-        vix3m: data.term_structure.history_1y.vix3m,
-        ratio: data.term_structure.history_1y.ratio
+        times: data.term_structure.history_1y.dates || data.term_structure.history_1y.times || [],
+        vix: data.term_structure.history_1y.vix || [],
+        vix3m: data.term_structure.history_1y.vix3m || [],
+        ratio: data.term_structure.history_1y.ratio || []
       };
     }
 
-    // Cache SPX Dynamic Correlation datasets
-    if (data.intraday_correlation) {
-      if (data.intraday_correlation['1D']) {
-        cachedCorr['1D'] = data.intraday_correlation['1D'];
-        cachedCorr['5D'] = data.intraday_correlation['5D'] || { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
-        cachedCorr['1Y'] = data.intraday_correlation['1Y'] || { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
-        cachedCorr.metrics = data.intraday_correlation.metrics || {};
-      } else {
-        cachedCorr['1D'] = data.intraday_correlation;
-        cachedCorr['5D'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
-        cachedCorr['1Y'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
-      }
+    if (data.intraday_correlation && data.intraday_correlation.metrics) {
+      cachedCorr.metrics = data.intraday_correlation.metrics;
     }
-
-    // Cache Tech Vol Premium datasets (Spread & Ratio across 1D, 5D, 1Y)
-    if (data.tech_vol) {
-      if (data.tech_vol.intraday_1d) cachedTechVol['1D'] = data.tech_vol.intraday_1d;
-      if (data.tech_vol.intraday_5d) cachedTechVol['5D'] = data.tech_vol.intraday_5d;
-      if (data.tech_vol.history_1y) cachedTechVol['1Y'] = data.tech_vol.history_1y;
-    }
-
-    // Cache NDX / VXN Dynamic Correlation datasets
-    if (data.ndx && data.ndx.correlation) {
-      if (data.ndx.correlation['1D']) {
-        cachedCorrNdx['1D'] = data.ndx.correlation['1D'];
-        cachedCorrNdx['5D'] = data.ndx.correlation['5D'] || { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
-        cachedCorrNdx['1Y'] = data.ndx.correlation['1Y'] || { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
-        cachedCorrNdx.metrics = data.ndx.correlation.metrics || {};
-      }
+    if (data.ndx && data.ndx.correlation && data.ndx.correlation.metrics) {
+      cachedCorrNdx.metrics = data.ndx.correlation.metrics;
     }
 
     renderOvervixChart(data);
@@ -2864,6 +3061,10 @@ async function loadHistoricalSession(dateStr) {
     // Force timeframe to 1D to inspect that day's intraday bars
     currentTimeframe = '1D';
     currentCorrTf = '1D';
+    if (sliderTsTimeframe) sliderTsTimeframe.value = 0;
+    if (sliderCorrTimeframe) sliderCorrTimeframe.value = 0;
+    updateTsSliderUI('1D');
+    updateCorrSliderUI('1D');
 
     if (tsLivePill) {
       tsLivePill.textContent = `${dateStr} 1m`;
@@ -2930,14 +3131,8 @@ function returnToLiveMode() {
   if (inputDate) inputDate.value = '';
   if (selectNotable) selectNotable.value = '';
 
-  if (tsLivePill) {
-    tsLivePill.textContent = (currentTimeframe === '1D') ? "Intraday 1m" : ((currentTimeframe === '5D') ? "Recent 15m" : "Daily Close");
-    tsLivePill.className = (currentTimeframe === '1D') ? "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60" : "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60";
-  }
-  if (corrTfPill) {
-    corrTfPill.textContent = (currentCorrTf === '1D') ? "Intraday 1M" : ((currentCorrTf === '5D') ? "Recent 15M" : "Daily Macro");
-    corrTfPill.className = (currentCorrTf === '1D') ? "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60" : "text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60";
-  }
+  updateTsSliderUI(currentTimeframe);
+  updateCorrSliderUI(currentCorrTf);
 
   // Restore live datasets
   if (cachedLiveBootstrap) {

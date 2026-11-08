@@ -35,14 +35,24 @@ The **Overvix Terminal** monitors the real-time pricing relationship between spo
 - **Capitulation Threshold**: When $\text{Residual} \ge +2.0\text{ pts}$ (SPX) or $+2.5\text{ pts}$ (NDX), implied volatility is statistically overpriced relative to market moves, signalling acute hedging panic and prime mean-reversion long setups.
 - **Intraday Breadcrumb Trail**: Visualizes the path of the current trading session from the 09:30 ET opening bell to the current live price (or 16:00 ET close), with a high-visibility glowing beacon marker.
 
-### 2. Volatility Term Structure Monitor (VIX / VIX3M)
+### 2. Volatility Term Structure Monitor (VIX / VIX3M) & Dynamic Stepped Timeframe Slider
 - Tracks the ratio between 30-day front-month volatility (**VIX**) and 90-day medium-term volatility (**VIX3M**):
   $$\text{Term Structure Ratio} = \frac{\text{VIX}}{\text{VIX3M}}$$
 - **Regimes**:
   - **Normal Contango ($\text{Ratio} < 0.90$)**: Standard upward-sloping volatility curve.
   - **Pre-Panic Flattening ($0.90 \le \text{Ratio} < 1.00$)**: Front-month hedging demand rising rapidly.
   - **Backwardation / Inversion ($\text{Ratio} \ge 1.00$)**: Systemic panic; front-month volatility trades at a premium to longer duration protection.
-- Multi-timeframe view: **1D** (1-minute intraday bars), **5D** (15-minute weekly bars), and **1Y** (daily macro bars).
+- **Dynamic Stepped Timeframe Slider (8 Granular Horizons)**:
+  Both Card 2 (Term Structure) and Card 3 (Dynamic Correlation) feature an interactive stepped slider (`0` to `7`) supporting 8 distinct multi-timeframe horizons with tailor-made bar granularities:
+  1. **`1D`**: Intraday 1-minute RTH bars (390 bars) with rolling 30-min Pearson correlation.
+  2. **`5D`**: 1-Week 15-minute bars (~130 bars) with rolling 1-day Pearson correlation.
+  3. **`1M`**: 1-Month 30-minute bars (~286 bars) for granular monthly OPEX and swing cycle analysis.
+  4. **`3M`**: Quarterly 4-hour bars (~133 bars) **natively matched to the 90-day VIX3M contract tenor**.
+  5. **`6M`**: Semi-Annual 4-hour bars (~257 bars) for multi-quarter volatility cycles.
+  6. **`YTD`**: Year-to-Date daily bars from Jan 1 of active year for institutional benchmark performance.
+  7. **`1Y`**: 1-Year macro daily bars (252 trading sessions) for annual baseline seasonality.
+  8. **`MAX`**: Multi-Year 2-Year daily bars (500 trading sessions) for macro regime shifts and crisis comparisons.
+- **🔗 Timeframe Synchronization Toggle**: Link sliders between Term Structure and Dynamic Correlation with a single click. Clickable tick labels, drag slider, or keyboard arrow keys for rapid inspection.
 
 ### 3. Dynamic Spot-Vol Correlation & Divergence Monitor
 - Calculates rolling 30-minute Pearson correlation $\rho(\Delta\text{Spot}, \Delta\text{Vol})$.

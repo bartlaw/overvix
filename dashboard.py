@@ -115,19 +115,41 @@ class DashboardState:
         self.df_spotvol = pd.DataFrame()
         self.df_ts_1d = pd.DataFrame()       # Intraday 1-min bars for VIX/VIX3M
         self.df_ts_5d = pd.DataFrame()       # Recent 5-day 15-min bars for VIX/VIX3M
+        self.df_ts_1m = pd.DataFrame()       # 1-Month 30-min bars for VIX/VIX3M
+        self.df_ts_3m = pd.DataFrame()       # 3-Month 4-hour bars for VIX/VIX3M
+        self.df_ts_6m = pd.DataFrame()       # 6-Month 4-hour bars for VIX/VIX3M
+        self.df_ts_ytd = pd.DataFrame()      # YTD daily bars for VIX/VIX3M
         self.df_ts_1y = pd.DataFrame()       # Macro 1-year daily bars for VIX/VIX3M
+        self.df_ts_max = pd.DataFrame()      # 2-Year daily bars for VIX/VIX3M
+
         self.df_spx_vix_1d = pd.DataFrame()  # Intraday 1-min bars for SPX & VIX
         self.df_spx_vix_5d = pd.DataFrame()  # 5-day 15-min bars for SPX & VIX
+        self.df_spx_vix_1m = pd.DataFrame()  # 1-Month 30-min bars for SPX & VIX
+        self.df_spx_vix_3m = pd.DataFrame()  # 3-Month 4-hour bars for SPX & VIX
+        self.df_spx_vix_6m = pd.DataFrame()  # 6-Month 4-hour bars for SPX & VIX
+        self.df_spx_vix_ytd = pd.DataFrame() # YTD daily bars for SPX & VIX
         self.df_spx_vix_1y = pd.DataFrame()  # Macro 1-year daily bars for SPX & VIX
+        self.df_spx_vix_max = pd.DataFrame() # 2-Year daily bars for SPX & VIX
 
         # Historical datasets (NDX & VXN & Tech Vol Spread)
         self.df_spotvol_ndx = pd.DataFrame()
         self.df_ndx_vxn_1d = pd.DataFrame()  # Intraday 1-min bars for NDX & VXN
         self.df_ndx_vxn_5d = pd.DataFrame()  # 5-day 15-min bars for NDX & VXN
+        self.df_ndx_vxn_1m = pd.DataFrame()  # 1-Month 30-min bars for NDX & VXN
+        self.df_ndx_vxn_3m = pd.DataFrame()  # 3-Month 4-hour bars for NDX & VXN
+        self.df_ndx_vxn_6m = pd.DataFrame()  # 6-Month 4-hour bars for NDX & VXN
+        self.df_ndx_vxn_ytd = pd.DataFrame() # YTD daily bars for NDX & VXN
         self.df_ndx_vxn_1y = pd.DataFrame()  # Macro 1-year daily bars for NDX & VXN
+        self.df_ndx_vxn_max = pd.DataFrame() # 2-Year daily bars for NDX & VXN
+
         self.df_tech_vol_1d = pd.DataFrame() # 1-min bars for VXN - VIX & VXN / VIX
         self.df_tech_vol_5d = pd.DataFrame()
+        self.df_tech_vol_1m = pd.DataFrame()
+        self.df_tech_vol_3m = pd.DataFrame()
+        self.df_tech_vol_6m = pd.DataFrame()
+        self.df_tech_vol_ytd = pd.DataFrame()
         self.df_tech_vol_1y = pd.DataFrame()
+        self.df_tech_vol_max = pd.DataFrame()
 
         # Combined daily dataset for historical slicing (SPX, VIX, VIX3M, NDX, VXN)
         self.df_daily = pd.DataFrame()
@@ -171,12 +193,22 @@ class DashboardState:
         self.intraday_open_ratio: float = 0.0
         self.current_rolling_corr: float = -0.75
         self.corr_5d: float = -0.75
+        self.corr_1m: float = -0.75
+        self.corr_3m: float = -0.75
+        self.corr_6m: float = -0.75
+        self.corr_ytd: float = -0.75
         self.corr_1y: float = -0.75
+        self.corr_max: float = -0.75
 
         # Intraday stats (NDX / VXN)
         self.current_rolling_corr_ndx: float = -0.75
         self.corr_5d_ndx: float = -0.75
+        self.corr_1m_ndx: float = -0.75
+        self.corr_3m_ndx: float = -0.75
+        self.corr_6m_ndx: float = -0.75
+        self.corr_ytd_ndx: float = -0.75
         self.corr_1y_ndx: float = -0.75
+        self.corr_max_ndx: float = -0.75
 
         # Intraday stats (Tech Vol Spread & Ratio)
         self.active_session_date: Optional[str] = None
@@ -300,64 +332,56 @@ def safe_to_series(bars, col_name: str) -> pd.Series:
     if not bars:
         return pd.Series(dtype=float, name=col_name)
     try:
-        df = util.df(bars)
-        if df is None or df.empty or 'date' not in df.columns or 'close' not in df.columns:
-            return pd.Series(dtype=float, name=col_name)
-        return df.set_index('date')['close'].rename(col_name)
-    except Exception:
+        records = []
+        for b in bars:
+            dt = b.date
+            if hasattr(dt, 'hour'):
+                # Intraday datetime: normalize across CBOE and NASDAQ to US/Eastern
+                dt_obj = pd.to_datetime(dt)
+                if dt_obj.tz is None:
+                    dt_obj = dt_obj.tz_localize('UTC')
+                dt_ny = dt_obj.tz_convert('America/New_York')
+                t_str = dt_ny.strftime('%Y-%m-%d %H:%M')
+            else:
+                # Daily date string
+                t_str = str(dt)[:10]
+            records.append({'date': t_str, col_name: float(b.close)})
+        df = pd.DataFrame(records).drop_duplicates(subset=['date']).set_index('date')
+        return df[col_name]
+    except Exception as e:
+        print(f"[safe_to_series] Error parsing {col_name}: {e}")
         return pd.Series(dtype=float, name=col_name)
 
 
 async def refresh_historical_data():
     """
-    Fetch historical daily and intraday bars directly from IBKR for SPX, VIX, VIX3M, NDX, VXN:
-      - Spot-Vol: 120 D daily bars (for 60-day baseline OLS for SPX and NDX)
-      - Term Structure 1D: 1-minute intraday bars for today's session
-      - Term Structure 5D: 15-minute bars for recent 5 days
-      - Term Structure 1Y: 252-day daily bars for macro history
-      - Dynamic Correlation 1D: 1-minute intraday bars for SPX & NDX
-      - Tech Vol Spread: VXN - VIX and VXN / VIX
+    Fetch historical daily and intraday bars directly from IBKR for SPX, VIX, VIX3M, NDX, VXN
+    across all 8 supported multi-timeframe horizons:
+      - 1D: 1-minute intraday bars (today's active session)
+      - 5D: 15-minute weekly bars (~130 bars)
+      - 1M: 30-minute monthly bars (~286 bars)
+      - 3M: 4-hour quarterly bars (~133 bars, native VIX3M contract match)
+      - 6M: 4-hour semi-annual bars (~257 bars)
+      - YTD: Daily bars from Jan 1 of active session year
+      - 1Y: Macro daily bars (252 trading days)
+      - MAX: Multi-year daily bars (500 trading days / 2Y)
     """
-    print("[IBKR] Fetching historical baseline & intraday datasets from IBKR (SPX, VIX, VIX3M, NDX, VXN)...")
+    print("[IBKR] Fetching historical baseline & multi-timeframe datasets from IBKR (SPX, VIX, VIX3M, NDX, VXN)...")
     try:
-        # A. Spot-Vol Daily Bars (120 D)
-        spx_bars = await state.ib.reqHistoricalDataAsync(
-            state.spx_contract, endDateTime='', durationStr='120 D',
-            barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
-        )
-        vix_bars = await state.ib.reqHistoricalDataAsync(
-            state.vix_contract, endDateTime='', durationStr='120 D',
-            barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
-        )
-        ndx_bars = await state.ib.reqHistoricalDataAsync(
-            state.ndx_contract, endDateTime='', durationStr='120 D',
-            barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
-        )
-        vxn_bars = await state.ib.reqHistoricalDataAsync(
-            state.vxn_contract, endDateTime='', durationStr='120 D',
-            barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
-        )
+        # 1. Fetch Intraday 1D (1-min) & 5D (15-min) bars in parallel
+        (b1_spx, b1_vix, b1_vix3m, b1_ndx, b1_vxn,
+         b5_spx, b5_vix, b5_vix3m, b5_ndx, b5_vxn) = await asyncio.gather(
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '1 D', '1 min', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '1 D', '1 min', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '1 D', '1 min', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '1 D', '1 min', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '1 D', '1 min', 'TRADES', True, 1),
 
-        # B. Intraday 1D Bars (1-min)
-        b1_spx = await state.ib.reqHistoricalDataAsync(
-            state.spx_contract, endDateTime='', durationStr='1 D',
-            barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
-        )
-        b1_vix = await state.ib.reqHistoricalDataAsync(
-            state.vix_contract, endDateTime='', durationStr='1 D',
-            barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
-        )
-        b1_vix3m = await state.ib.reqHistoricalDataAsync(
-            state.vix3m_contract, endDateTime='', durationStr='1 D',
-            barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
-        )
-        b1_ndx = await state.ib.reqHistoricalDataAsync(
-            state.ndx_contract, endDateTime='', durationStr='1 D',
-            barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
-        )
-        b1_vxn = await state.ib.reqHistoricalDataAsync(
-            state.vxn_contract, endDateTime='', durationStr='1 D',
-            barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '5 D', '15 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '5 D', '15 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '5 D', '15 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '5 D', '15 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '5 D', '15 mins', 'TRADES', True, 1),
         )
 
         # Pre-market / GTH Session Synchronization:
@@ -395,15 +419,40 @@ async def refresh_historical_data():
                         barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
                     )
 
-        # Slicing Daily Bars strictly prior to active_sess_date:
-        # Every intraday session move must be measured against the close of the trading day
-        # strictly preceding active_sess_date (e.g. for 2026-11-05 session, reference is 2026-11-04 close).
-        # Furthermore, the 60-day baseline regression must strictly reflect the 60 completed sessions prior to active_sess_date.
+        # 2. Fetch Multi-Timeframe Bars (1M 30m, 3M 4h, 6M 4h, 2Y 1d) in parallel
+        (b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn,
+         b3m_spx, b3m_vix, b3m_vix3m, b3m_ndx, b3m_vxn,
+         b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn,
+         spx_bars_2y, vix_bars_2y, vix3m_bars_2y, ndx_bars_2y, vxn_bars_2y) = await asyncio.gather(
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '1 M', '30 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '1 M', '30 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '1 M', '30 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '1 M', '30 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '1 M', '30 mins', 'TRADES', True, 1),
 
-        # SPX / VIX Spot-Vol Baseline
-        df_spx = safe_to_series(spx_bars, 'spx_close')
-        df_vix = safe_to_series(vix_bars, 'vix_close')
-        df_sv = pd.concat([df_spx, df_vix], axis=1).dropna()
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '3 M', '4 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '3 M', '4 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '3 M', '4 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '3 M', '4 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '3 M', '4 hours', 'TRADES', True, 1),
+
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '6 M', '4 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '6 M', '4 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '6 M', '4 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '6 M', '4 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '6 M', '4 hours', 'TRADES', True, 1),
+
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
+        )
+
+        # Slicing Daily Bars strictly prior to active_sess_date for 60-day Spot-Vol Baseline
+        df_spx_daily = safe_to_series(spx_bars_2y, 'spx_close')
+        df_vix_daily = safe_to_series(vix_bars_2y, 'vix_close')
+        df_sv = pd.concat([df_spx_daily, df_vix_daily], axis=1).dropna()
 
         if active_sess_date:
             df_prior_sv = df_sv.loc[[str(d)[:10] < active_sess_date for d in df_sv.index]]
@@ -437,9 +486,9 @@ async def refresh_historical_data():
         state.last_sess_y = float(state.df_spotvol['vix_pt'].iloc[-1])
 
         # NDX / VXN Spot-Vol Baseline
-        df_ndx = safe_to_series(ndx_bars, 'ndx_close')
-        df_vxn = safe_to_series(vxn_bars, 'vxn_close')
-        df_sv_ndx = pd.concat([df_ndx, df_vxn], axis=1).dropna()
+        df_ndx_daily = safe_to_series(ndx_bars_2y, 'ndx_close')
+        df_vxn_daily = safe_to_series(vxn_bars_2y, 'vxn_close')
+        df_sv_ndx = pd.concat([df_ndx_daily, df_vxn_daily], axis=1).dropna()
 
         if active_sess_date:
             df_prior_ndx = df_sv_ndx.loc[[str(d)[:10] < active_sess_date for d in df_sv_ndx.index]]
@@ -476,7 +525,7 @@ async def refresh_historical_data():
         print(f" SPX Spot-Vol Baseline ({len(state.df_spotvol)} bars): R²={state.r_squared:.4f}, Slope={state.slope:.4f}")
         print(f" NDX Spot-Vol Baseline ({len(state.df_spotvol_ndx)} bars): R²={state.ndx_r_squared:.4f}, Slope={state.ndx_slope:.4f}")
 
-        # Term Structure 1D
+        # 3. Process Intraday 1D Bars (1-min)
         df_v1 = safe_to_series(b1_vix, 'vix')
         df_v3 = safe_to_series(b1_vix3m, 'vix3m')
         df_1d = pd.concat([df_v1, df_v3], axis=1).dropna()
@@ -489,7 +538,6 @@ async def refresh_historical_data():
         else:
             state.df_ts_1d = pd.DataFrame(columns=['vix', 'vix3m', 'ratio'])
 
-        # SPX & VIX Intraday Correlation 1D
         df_s1 = safe_to_series(b1_spx, 'spx')
         df_sv_1d = pd.concat([df_s1, df_v1], axis=1).dropna()
         if not df_sv_1d.empty:
@@ -505,7 +553,6 @@ async def refresh_historical_data():
         else:
             state.df_spx_vix_1d = pd.DataFrame()
 
-        # NDX & VXN Intraday Correlation 1D
         df_n1 = safe_to_series(b1_ndx, 'ndx')
         df_vx1 = safe_to_series(b1_vxn, 'vxn')
         df_nv_1d = pd.concat([df_n1, df_vx1], axis=1).dropna()
@@ -522,7 +569,6 @@ async def refresh_historical_data():
         else:
             state.df_ndx_vxn_1d = pd.DataFrame()
 
-        # Tech Vol Spread & Ratio 1D (VXN - VIX & VXN / VIX)
         df_tech_1d = pd.concat([df_vx1, df_v1], axis=1).dropna()
         if not df_tech_1d.empty:
             df_tech_1d['spread'] = df_tech_1d['vxn'] - df_tech_1d['vix']
@@ -535,159 +581,163 @@ async def refresh_historical_data():
             state.tech_ratio_high = float(df_tech_1d['ratio'].max())
         else:
             state.df_tech_vol_1d = pd.DataFrame()
-            state.tech_spread_low = 0.0
-            state.tech_spread_high = 0.0
-            state.tech_spread_open = 0.0
-            state.tech_ratio_low = 1.0
-            state.tech_ratio_high = 1.0
 
-        # C. Recent 5D Bars (15-min)
-        b5_spx = await state.ib.reqHistoricalDataAsync(
-            state.spx_contract, endDateTime='', durationStr='5 D',
-            barSizeSetting='15 mins', whatToShow='TRADES', useRTH=True, formatDate=1
+        # Helper to process multi-timeframe bar sets (5D, 1M, 3M, 6M)
+        def build_horizon_pack(s_bars, v_bars, v3_bars, n_bars, vx_bars, roll_win=20, min_p=5):
+            df_s = safe_to_series(s_bars, 'spx')
+            df_v = safe_to_series(v_bars, 'vix')
+            df_v3 = safe_to_series(v3_bars, 'vix3m')
+            df_n = safe_to_series(n_bars, 'ndx')
+            df_vx = safe_to_series(vx_bars, 'vxn')
+
+            # Term Structure
+            df_ts = pd.concat([df_v, df_v3], axis=1).dropna()
+            if not df_ts.empty:
+                df_ts['ratio'] = df_ts['vix'] / df_ts['vix3m']
+
+            # SPX / VIX Corr
+            df_sv = pd.concat([df_s, df_v], axis=1).dropna()
+            corr_val = -0.75
+            if not df_sv.empty:
+                ref_s = float(df_sv['spx'].iloc[0])
+                ref_v = float(df_sv['vix'].iloc[0])
+                df_sv['spx_pct'] = (df_sv['spx'] - ref_s) / ref_s * 100.0
+                df_sv['vix_pt'] = df_sv['vix'] - ref_v
+                df_sv['spx_ret'] = df_sv['spx'].pct_change()
+                df_sv['vix_diff'] = df_sv['vix'].diff()
+                df_sv['rolling_corr'] = df_sv['spx_ret'].rolling(roll_win, min_periods=min_p).corr(df_sv['vix_diff']).fillna(-0.75)
+                corr_val = float(df_sv['rolling_corr'].iloc[-1])
+
+            # NDX / VXN Corr
+            df_nv = pd.concat([df_n, df_vx], axis=1).dropna()
+            corr_ndx_val = -0.75
+            if not df_nv.empty:
+                ref_n = float(df_nv['ndx'].iloc[0])
+                ref_vx = float(df_nv['vxn'].iloc[0])
+                df_nv['ndx_pct'] = (df_nv['ndx'] - ref_n) / ref_n * 100.0
+                df_nv['vxn_pt'] = df_nv['vxn'] - ref_vx
+                df_nv['ndx_ret'] = df_nv['ndx'].pct_change()
+                df_nv['vxn_diff'] = df_nv['vxn'].diff()
+                df_nv['rolling_corr'] = df_nv['ndx_ret'].rolling(roll_win, min_periods=min_p).corr(df_nv['vxn_diff']).fillna(-0.75)
+                corr_ndx_val = float(df_nv['rolling_corr'].iloc[-1])
+
+            # Tech Vol Spread & Ratio
+            df_tv = pd.concat([df_vx, df_v], axis=1).dropna()
+            if not df_tv.empty:
+                df_tv['spread'] = df_tv['vxn'] - df_tv['vix']
+                df_tv['ratio'] = df_tv['vxn'] / df_tv['vix']
+
+            return df_ts, df_sv, df_nv, df_tv, corr_val, corr_ndx_val
+
+        # 4. Process 5D Bars (15-min)
+        (state.df_ts_5d, state.df_spx_vix_5d, state.df_ndx_vxn_5d,
+         state.df_tech_vol_5d, state.corr_5d, state.corr_5d_ndx) = build_horizon_pack(
+            b5_spx, b5_vix, b5_vix3m, b5_ndx, b5_vxn, roll_win=26, min_p=10
         )
-        b5_vix = await state.ib.reqHistoricalDataAsync(
-            state.vix_contract, endDateTime='', durationStr='5 D',
-            barSizeSetting='15 mins', whatToShow='TRADES', useRTH=True, formatDate=1
+
+        # 5. Process 1M Bars (30-min)
+        (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
+         state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_horizon_pack(
+            b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn, roll_win=39, min_p=10
         )
-        b5_vix3m = await state.ib.reqHistoricalDataAsync(
-            state.vix3m_contract, endDateTime='', durationStr='5 D',
-            barSizeSetting='15 mins', whatToShow='TRADES', useRTH=True, formatDate=1
+
+        # 6. Process 3M Bars (4-hour)
+        (state.df_ts_3m, state.df_spx_vix_3m, state.df_ndx_vxn_3m,
+         state.df_tech_vol_3m, state.corr_3m, state.corr_3m_ndx) = build_horizon_pack(
+            b3m_spx, b3m_vix, b3m_vix3m, b3m_ndx, b3m_vxn, roll_win=20, min_p=5
         )
-        b5_ndx = await state.ib.reqHistoricalDataAsync(
-            state.ndx_contract, endDateTime='', durationStr='5 D',
-            barSizeSetting='15 mins', whatToShow='TRADES', useRTH=True, formatDate=1
+
+        # 7. Process 6M Bars (4-hour)
+        (state.df_ts_6m, state.df_spx_vix_6m, state.df_ndx_vxn_6m,
+         state.df_tech_vol_6m, state.corr_6m, state.corr_6m_ndx) = build_horizon_pack(
+            b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn, roll_win=30, min_p=5
         )
-        b5_vxn = await state.ib.reqHistoricalDataAsync(
-            state.vxn_contract, endDateTime='', durationStr='5 D',
-            barSizeSetting='15 mins', whatToShow='TRADES', useRTH=True, formatDate=1
+
+        # 8. Combined Daily Dataset (2Y pool) for YTD, 1Y, and MAX
+        df_s2y = safe_to_series(spx_bars_2y, 'spx')
+        df_v2y = safe_to_series(vix_bars_2y, 'vix')
+        df_v32y = safe_to_series(vix3m_bars_2y, 'vix3m')
+        df_n2y = safe_to_series(ndx_bars_2y, 'ndx')
+        df_vx2y = safe_to_series(vxn_bars_2y, 'vxn')
+        state.df_daily = pd.concat([df_s2y, df_v2y, df_v32y, df_n2y, df_vx2y], axis=1).dropna()
+
+        def build_from_daily_df(df_pool, roll_win=20, min_p=5):
+            if df_pool.empty:
+                return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), -0.75, -0.75
+            # Term Structure
+            df_ts = df_pool[['vix', 'vix3m']].copy()
+            df_ts['ratio'] = df_ts['vix'] / df_ts['vix3m']
+
+            # SPX / VIX Corr
+            df_sv = df_pool[['spx', 'vix']].copy()
+            ref_s = float(df_sv['spx'].iloc[0])
+            ref_v = float(df_sv['vix'].iloc[0])
+            df_sv['spx_pct'] = (df_sv['spx'] - ref_s) / ref_s * 100.0
+            df_sv['vix_pt'] = df_sv['vix'] - ref_v
+            df_sv['spx_ret'] = df_sv['spx'].pct_change()
+            df_sv['vix_diff'] = df_sv['vix'].diff()
+            df_sv['rolling_corr'] = df_sv['spx_ret'].rolling(roll_win, min_periods=min_p).corr(df_sv['vix_diff']).fillna(-0.75)
+            corr_val = float(df_sv['rolling_corr'].iloc[-1])
+
+            # NDX / VXN Corr
+            df_nv = df_pool[['ndx', 'vxn']].copy()
+            ref_n = float(df_nv['ndx'].iloc[0])
+            ref_vx = float(df_nv['vxn'].iloc[0])
+            df_nv['ndx_pct'] = (df_nv['ndx'] - ref_n) / ref_n * 100.0
+            df_nv['vxn_pt'] = df_nv['vxn'] - ref_vx
+            df_nv['ndx_ret'] = df_nv['ndx'].pct_change()
+            df_nv['vxn_diff'] = df_nv['vxn'].diff()
+            df_nv['rolling_corr'] = df_nv['ndx_ret'].rolling(roll_win, min_periods=min_p).corr(df_nv['vxn_diff']).fillna(-0.75)
+            corr_ndx_val = float(df_nv['rolling_corr'].iloc[-1])
+
+            # Tech Vol Spread & Ratio
+            df_tv = df_pool[['vxn', 'vix']].copy()
+            df_tv['spread'] = df_tv['vxn'] - df_tv['vix']
+            df_tv['ratio'] = df_tv['vxn'] / df_tv['vix']
+
+            return df_ts, df_sv, df_nv, df_tv, corr_val, corr_ndx_val
+
+        # A. MAX Horizon (all 500 bars / 2Y)
+        (state.df_ts_max, state.df_spx_vix_max, state.df_ndx_vxn_max,
+         state.df_tech_vol_max, state.corr_max, state.corr_max_ndx) = build_from_daily_df(
+            state.df_daily, roll_win=30, min_p=10
         )
-        df_s1_5 = safe_to_series(b5_spx, 'spx')
-        df_v1_5 = safe_to_series(b5_vix, 'vix')
-        df_v3_5 = safe_to_series(b5_vix3m, 'vix3m')
-        df_n1_5 = safe_to_series(b5_ndx, 'ndx')
-        df_vx1_5 = safe_to_series(b5_vxn, 'vxn')
 
-        # 5D Term Structure
-        df_5d = pd.concat([df_v1_5, df_v3_5], axis=1).dropna()
-        df_5d['ratio'] = df_5d['vix'] / df_5d['vix3m']
-        state.df_ts_5d = df_5d.copy()
-
-        # 5D SPX Correlation
-        df_sv_5d = pd.concat([df_s1_5, df_v1_5], axis=1).dropna()
-        if not df_sv_5d.empty:
-            ref_spx_5d = float(df_sv_5d['spx'].iloc[0])
-            ref_vix_5d = float(df_sv_5d['vix'].iloc[0])
-            df_sv_5d['spx_pct'] = (df_sv_5d['spx'] - ref_spx_5d) / ref_spx_5d * 100.0
-            df_sv_5d['vix_pt'] = df_sv_5d['vix'] - ref_vix_5d
-            df_sv_5d['spx_ret'] = df_sv_5d['spx'].pct_change()
-            df_sv_5d['vix_diff'] = df_sv_5d['vix'].diff()
-            df_sv_5d['rolling_corr'] = df_sv_5d['spx_ret'].rolling(27, min_periods=10).corr(df_sv_5d['vix_diff']).fillna(-0.75)
-            state.df_spx_vix_5d = df_sv_5d.copy()
-            state.corr_5d = float(df_sv_5d['rolling_corr'].iloc[-1])
-
-        # 5D NDX Correlation
-        df_nv_5d = pd.concat([df_n1_5, df_vx1_5], axis=1).dropna()
-        if not df_nv_5d.empty:
-            ref_ndx_5d = float(df_nv_5d['ndx'].iloc[0])
-            ref_vxn_5d = float(df_nv_5d['vxn'].iloc[0])
-            df_nv_5d['ndx_pct'] = (df_nv_5d['ndx'] - ref_ndx_5d) / ref_ndx_5d * 100.0
-            df_nv_5d['vxn_pt'] = df_nv_5d['vxn'] - ref_vxn_5d
-            df_nv_5d['ndx_ret'] = df_nv_5d['ndx'].pct_change()
-            df_nv_5d['vxn_diff'] = df_nv_5d['vxn'].diff()
-            df_nv_5d['rolling_corr'] = df_nv_5d['ndx_ret'].rolling(27, min_periods=10).corr(df_nv_5d['vxn_diff']).fillna(-0.75)
-            state.df_ndx_vxn_5d = df_nv_5d.copy()
-            state.corr_5d_ndx = float(df_nv_5d['rolling_corr'].iloc[-1])
-
-        # 5D Tech Vol Spread
-        df_tech_5d = pd.concat([df_vx1_5, df_v1_5], axis=1).dropna()
-        if not df_tech_5d.empty:
-            df_tech_5d['spread'] = df_tech_5d['vxn'] - df_tech_5d['vix']
-            df_tech_5d['ratio'] = df_tech_5d['vxn'] / df_tech_5d['vix']
-            state.df_tech_vol_5d = df_tech_5d.copy()
-
-        # D. Macro 1Y Bars (Daily bars)
-        spx_bars_1y = await state.ib.reqHistoricalDataAsync(
-            state.spx_contract, endDateTime='', durationStr='252 D',
-            barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
+        # B. 1Y Horizon (last 252 bars)
+        df_1y_pool = state.df_daily.iloc[-252:] if len(state.df_daily) >= 252 else state.df_daily
+        (state.df_ts_1y, state.df_spx_vix_1y, state.df_ndx_vxn_1y,
+         state.df_tech_vol_1y, state.corr_1y, state.corr_1y_ndx) = build_from_daily_df(
+            df_1y_pool, roll_win=20, min_p=10
         )
-        vix_bars_1y = await state.ib.reqHistoricalDataAsync(
-            state.vix_contract, endDateTime='', durationStr='252 D',
-            barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
+
+        # C. YTD Horizon (from Jan 1 of active year)
+        active_year = str(state.active_session_date)[:4] if state.active_session_date else datetime.now().strftime('%Y')
+        df_ytd_pool = state.df_daily.loc[[str(d)[:4] == active_year for d in state.df_daily.index]]
+        if df_ytd_pool.empty:
+            df_ytd_pool = state.df_daily.iloc[-60:]
+        (state.df_ts_ytd, state.df_spx_vix_ytd, state.df_ndx_vxn_ytd,
+         state.df_tech_vol_ytd, state.corr_ytd, state.corr_ytd_ndx) = build_from_daily_df(
+            df_ytd_pool, roll_win=20, min_p=5
         )
-        vix3m_bars_1y = await state.ib.reqHistoricalDataAsync(
-            state.vix3m_contract, endDateTime='', durationStr='252 D',
-            barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
-        )
-        ndx_bars_1y = await state.ib.reqHistoricalDataAsync(
-            state.ndx_contract, endDateTime='', durationStr='252 D',
-            barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
-        )
-        vxn_bars_1y = await state.ib.reqHistoricalDataAsync(
-            state.vxn_contract, endDateTime='', durationStr='252 D',
-            barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
-        )
-        df_s1y = safe_to_series(spx_bars_1y, 'spx')
-        df_v1y = safe_to_series(vix_bars_1y, 'vix')
-        df_v3y = safe_to_series(vix3m_bars_1y, 'vix3m')
-        df_n1y = safe_to_series(ndx_bars_1y, 'ndx')
-        df_vx1y = safe_to_series(vxn_bars_1y, 'vxn')
-
-        # Combined daily dataset for historical baseline slicing
-        state.df_daily = pd.concat([df_s1y, df_v1y, df_v3y, df_n1y, df_vx1y], axis=1).dropna()
-
-        # 1Y Term Structure
-        df_1y = pd.concat([df_v1y, df_v3y], axis=1).dropna()
-        df_1y['ratio'] = df_1y['vix'] / df_1y['vix3m']
-        state.df_ts_1y = df_1y.copy()
-
-        # 1Y SPX Correlation
-        df_sv_1y = pd.concat([df_s1y, df_v1y], axis=1).dropna()
-        if not df_sv_1y.empty:
-            ref_spx_1y = float(df_sv_1y['spx'].iloc[0])
-            ref_vix_1y = float(df_sv_1y['vix'].iloc[0])
-            df_sv_1y['spx_pct'] = (df_sv_1y['spx'] - ref_spx_1y) / ref_spx_1y * 100.0
-            df_sv_1y['vix_pt'] = df_sv_1y['vix'] - ref_vix_1y
-            df_sv_1y['spx_ret'] = df_sv_1y['spx'].pct_change()
-            df_sv_1y['vix_diff'] = df_sv_1y['vix'].diff()
-            df_sv_1y['rolling_corr'] = df_sv_1y['spx_ret'].rolling(20, min_periods=10).corr(df_sv_1y['vix_diff']).fillna(-0.75)
-            state.df_spx_vix_1y = df_sv_1y.copy()
-            state.corr_1y = float(df_sv_1y['rolling_corr'].iloc[-1])
-
-        # 1Y NDX Correlation
-        df_nv_1y = pd.concat([df_n1y, df_vx1y], axis=1).dropna()
-        if not df_nv_1y.empty:
-            ref_ndx_1y = float(df_nv_1y['ndx'].iloc[0])
-            ref_vxn_1y = float(df_nv_1y['vxn'].iloc[0])
-            df_nv_1y['ndx_pct'] = (df_nv_1y['ndx'] - ref_ndx_1y) / ref_ndx_1y * 100.0
-            df_nv_1y['vxn_pt'] = df_nv_1y['vxn'] - ref_vxn_1y
-            df_nv_1y['ndx_ret'] = df_nv_1y['ndx'].pct_change()
-            df_nv_1y['vxn_diff'] = df_nv_1y['vxn'].diff()
-            df_nv_1y['rolling_corr'] = df_nv_1y['ndx_ret'].rolling(20, min_periods=10).corr(df_nv_1y['vxn_diff']).fillna(-0.75)
-            state.df_ndx_vxn_1y = df_nv_1y.copy()
-            state.corr_1y_ndx = float(df_nv_1y['rolling_corr'].iloc[-1])
-
-        # 1Y Tech Vol Spread
-        df_tech_1y = pd.concat([df_vx1y, df_v1y], axis=1).dropna()
-        if not df_tech_1y.empty:
-            df_tech_1y['spread'] = df_tech_1y['vxn'] - df_tech_1y['vix']
-            df_tech_1y['ratio'] = df_tech_1y['vxn'] / df_tech_1y['vix']
-            state.df_tech_vol_1y = df_tech_1y.copy()
 
         if active_sess_date:
-            df_1y_comp = df_1y.loc[[str(d)[:10] < active_sess_date for d in df_1y.index]]
+            df_1y_comp = state.df_ts_1y.loc[[str(d)[:10] < active_sess_date for d in state.df_ts_1y.index]]
             if df_1y_comp.empty:
-                df_1y_comp = df_1y.iloc[:-1] if len(df_1y) > 1 else df_1y
+                df_1y_comp = state.df_ts_1y.iloc[:-1] if len(state.df_ts_1y) > 1 else state.df_ts_1y
         else:
-            is_today_in_1y = (str(df_1y.index[-1])[:10] == today_et) if not df_1y.empty else False
-            df_1y_comp = df_1y.iloc[:-1] if is_today_in_1y and len(df_1y) > 1 else df_1y
+            is_today_in_1y = (str(state.df_ts_1y.index[-1])[:10] == today_et) if not state.df_ts_1y.empty else False
+            df_1y_comp = state.df_ts_1y.iloc[:-1] if is_today_in_1y and len(state.df_ts_1y) > 1 else state.df_ts_1y
 
         if not df_1y_comp.empty:
             state.latest_vix3m_close = float(df_1y_comp['vix3m'].iloc[-1])
             state.prior_vix3m_close = float(df_1y_comp['vix3m'].iloc[-2]) if len(df_1y_comp) > 1 else state.latest_vix3m_close
-            state.prior_ratio_close = float(df_1y_comp['ratio'].iloc[-1])
+            state.prior_ratio_close = (state.latest_vix_close / state.latest_vix3m_close) if state.latest_vix3m_close > 0 else 1.0
+
         state.hist_version += 1
-        print(f" Macro 1Y Datasets: {len(state.df_daily)} daily bars across SPX, VIX, VIX3M, NDX, VXN (Sync Version: {state.hist_version}).\n")
+        print(f"[IBKR] Baseline & multi-timeframe datasets successfully loaded (Version {state.hist_version}):")
+        print(f"       1D={len(state.df_ts_1d)} bars, 5D={len(state.df_ts_5d)} bars, 1M={len(state.df_ts_1m)} bars (30m), "
+              f"3M={len(state.df_ts_3m)} bars (4h), 6M={len(state.df_ts_6m)} bars (4h), YTD={len(state.df_ts_ytd)} bars, "
+              f"1Y={len(state.df_ts_1y)} bars, MAX={len(state.df_ts_max)} bars.")
 
     except Exception as ex:
         print(f"[IBKR Error] Historical data refresh failed: {ex}")
@@ -1175,10 +1225,10 @@ async def get_bootstrap():
         except Exception:
             return [str(t)[:16] for t in idx]
 
-    # Format Dynamic Correlation across 1D, 5D, 1Y
+    # Format Dynamic Correlation across all 8 multi-timeframe horizons
     def format_corr_df(df, col_x='spx_pct', col_y='vix_pt', is_daily=False):
         if df.empty or col_x not in df.columns or col_y not in df.columns:
-            return {"times": [], "spx_pct": [], "vix_pt": [], "ndx_pct": [], "vxn_pt": [], "spot_raw": [], "vol_raw": [], "rolling_corr": []}
+            return {"times": [], "dates": [], "spx_pct": [], "vix_pt": [], "ndx_pct": [], "vxn_pt": [], "spot_raw": [], "vol_raw": [], "rolling_corr": []}
         if is_daily:
             times = [str(d)[:10] for d in df.index]
         else:
@@ -1189,6 +1239,7 @@ async def get_bootstrap():
         vol_raw = [round(float(v), 2) for v in df['vix'].tolist()] if 'vix' in df.columns else ([round(float(v), 2) for v in df['vxn'].tolist()] if 'vxn' in df.columns else [])
         res = {
             "times": times,
+            "dates": times,
             "spx_pct": x_vals,
             "vix_pt": y_vals,
             "ndx_pct": x_vals,
@@ -1207,51 +1258,62 @@ async def get_bootstrap():
             res["vxn_raw"] = vol_raw
         return res
 
+    # Format SPX & VIX Correlation across 8 horizons
     corr_1d = format_corr_df(state.df_spx_vix_1d, 'spx_pct', 'vix_pt')
     corr_5d = format_corr_df(state.df_spx_vix_5d, 'spx_pct', 'vix_pt')
+    corr_1m = format_corr_df(state.df_spx_vix_1m, 'spx_pct', 'vix_pt')
+    corr_3m = format_corr_df(state.df_spx_vix_3m, 'spx_pct', 'vix_pt')
+    corr_6m = format_corr_df(state.df_spx_vix_6m, 'spx_pct', 'vix_pt')
+    corr_ytd = format_corr_df(state.df_spx_vix_ytd, 'spx_pct', 'vix_pt', is_daily=True)
     corr_1y = format_corr_df(state.df_spx_vix_1y, 'spx_pct', 'vix_pt', is_daily=True)
+    corr_max = format_corr_df(state.df_spx_vix_max, 'spx_pct', 'vix_pt', is_daily=True)
 
+    # Format NDX & VXN Correlation across 8 horizons
     corr_ndx_1d = format_corr_df(state.df_ndx_vxn_1d, 'ndx_pct', 'vxn_pt')
     corr_ndx_5d = format_corr_df(state.df_ndx_vxn_5d, 'ndx_pct', 'vxn_pt')
+    corr_ndx_1m = format_corr_df(state.df_ndx_vxn_1m, 'ndx_pct', 'vxn_pt')
+    corr_ndx_3m = format_corr_df(state.df_ndx_vxn_3m, 'ndx_pct', 'vxn_pt')
+    corr_ndx_6m = format_corr_df(state.df_ndx_vxn_6m, 'ndx_pct', 'vxn_pt')
+    corr_ndx_ytd = format_corr_df(state.df_ndx_vxn_ytd, 'ndx_pct', 'vxn_pt', is_daily=True)
     corr_ndx_1y = format_corr_df(state.df_ndx_vxn_1y, 'ndx_pct', 'vxn_pt', is_daily=True)
+    corr_ndx_max = format_corr_df(state.df_ndx_vxn_max, 'ndx_pct', 'vxn_pt', is_daily=True)
 
-    # Format Intraday 1D Term Structure (VIX / VIX3M)
-    if not state.df_ts_1d.empty:
-        t1d = to_eastern_dt_list(state.df_ts_1d.index)
-        v1d_vix = [round(float(v), 2) for v in state.df_ts_1d['vix'].tolist()]
-        v1d_vix3m = [round(float(v), 2) for v in state.df_ts_1d['vix3m'].tolist()]
-        v1d_ratio = [round(float(v), 4) for v in state.df_ts_1d['ratio'].tolist()]
-    else:
-        t1d, v1d_vix, v1d_vix3m, v1d_ratio = [], [], [], []
-
-    # Format 5D Term Structure
-    if not state.df_ts_5d.empty:
-        t5d = to_eastern_dt_list(state.df_ts_5d.index)
-        v5d_vix = [round(float(v), 2) for v in state.df_ts_5d['vix'].tolist()]
-        v5d_vix3m = [round(float(v), 2) for v in state.df_ts_5d['vix3m'].tolist()]
-        v5d_ratio = [round(float(v), 4) for v in state.df_ts_5d['ratio'].tolist()]
-    else:
-        t5d, v5d_vix, v5d_vix3m, v5d_ratio = [], [], [], []
-
-    # Format 1Y Term Structure
-    if not state.df_ts_1y.empty:
-        t1y = [str(d)[:10] for d in state.df_ts_1y.index]
-        v1y_vix = [round(float(v), 2) for v in state.df_ts_1y['vix'].tolist()]
-        v1y_vix3m = [round(float(v), 2) for v in state.df_ts_1y['vix3m'].tolist()]
-        v1y_ratio = [round(float(v), 4) for v in state.df_ts_1y['ratio'].tolist()]
-    else:
-        t1y, v1y_vix, v1y_vix3m, v1y_ratio = [], [], [], []
-
-    # Format Tech Vol Spread (VXN - VIX) across 1D, 5D, 1Y
-    def format_tech_vol_df(df, is_daily=False):
-        if df.empty or 'spread' not in df.columns or 'ratio' not in df.columns:
-            return {"times": [], "spread": [], "ratio": [], "vxn": [], "vix": []}
+    # Format Term Structure across 8 horizons
+    def format_ts_df(df, is_daily=False):
+        if df.empty or 'vix' not in df.columns or 'vix3m' not in df.columns:
+            return {"times": [], "dates": [], "vix": [], "vix3m": [], "ratio": []}
         if is_daily:
             times = [str(d)[:10] for d in df.index]
         else:
             times = to_eastern_dt_list(df.index)
         return {
             "times": times,
+            "dates": times,
+            "vix": [round(float(v), 2) for v in df['vix'].tolist()],
+            "vix3m": [round(float(v), 2) for v in df['vix3m'].tolist()],
+            "ratio": [round(float(v), 4) for v in df['ratio'].tolist()] if 'ratio' in df.columns else []
+        }
+
+    ts_1d = format_ts_df(state.df_ts_1d)
+    ts_5d = format_ts_df(state.df_ts_5d)
+    ts_1m = format_ts_df(state.df_ts_1m)
+    ts_3m = format_ts_df(state.df_ts_3m)
+    ts_6m = format_ts_df(state.df_ts_6m)
+    ts_ytd = format_ts_df(state.df_ts_ytd, is_daily=True)
+    ts_1y = format_ts_df(state.df_ts_1y, is_daily=True)
+    ts_max = format_ts_df(state.df_ts_max, is_daily=True)
+
+    # Format Tech Vol Spread & Ratio across 8 horizons
+    def format_tech_vol_df(df, is_daily=False):
+        if df.empty or 'spread' not in df.columns or 'ratio' not in df.columns:
+            return {"times": [], "dates": [], "spread": [], "ratio": [], "vxn": [], "vix": []}
+        if is_daily:
+            times = [str(d)[:10] for d in df.index]
+        else:
+            times = to_eastern_dt_list(df.index)
+        return {
+            "times": times,
+            "dates": times,
             "spread": [round(float(v), 2) for v in df['spread'].tolist()],
             "ratio": [round(float(v), 4) for v in df['ratio'].tolist()],
             "vxn": [round(float(v), 2) for v in df['vxn'].tolist()] if 'vxn' in df.columns else [],
@@ -1260,7 +1322,12 @@ async def get_bootstrap():
 
     tech_vol_1d = format_tech_vol_df(state.df_tech_vol_1d)
     tech_vol_5d = format_tech_vol_df(state.df_tech_vol_5d)
+    tech_vol_1m = format_tech_vol_df(state.df_tech_vol_1m)
+    tech_vol_3m = format_tech_vol_df(state.df_tech_vol_3m)
+    tech_vol_6m = format_tech_vol_df(state.df_tech_vol_6m)
+    tech_vol_ytd = format_tech_vol_df(state.df_tech_vol_ytd, is_daily=True)
     tech_vol_1y = format_tech_vol_df(state.df_tech_vol_1y, is_daily=True)
+    tech_vol_max = format_tech_vol_df(state.df_tech_vol_max, is_daily=True)
 
     # Attach datasets to live NDX and Tech Vol sub-objects
     ndx_bootstrap = {
@@ -1281,11 +1348,21 @@ async def get_bootstrap():
             "current_corr": round(state.current_rolling_corr_ndx, 3),
             "1D": corr_ndx_1d,
             "5D": corr_ndx_5d,
+            "1M": corr_ndx_1m,
+            "3M": corr_ndx_3m,
+            "6M": corr_ndx_6m,
+            "YTD": corr_ndx_ytd,
             "1Y": corr_ndx_1y,
+            "MAX": corr_ndx_max,
             "metrics": {
                 "1D": round(state.current_rolling_corr_ndx, 3),
                 "5D": round(state.corr_5d_ndx, 3),
-                "1Y": round(state.corr_1y_ndx, 3)
+                "1M": round(state.corr_1m_ndx, 3),
+                "3M": round(state.corr_3m_ndx, 3),
+                "6M": round(state.corr_6m_ndx, 3),
+                "YTD": round(state.corr_ytd_ndx, 3),
+                "1Y": round(state.corr_1y_ndx, 3),
+                "MAX": round(state.corr_max_ndx, 3)
             }
         },
         "intraday_correlation": {
@@ -1296,17 +1373,36 @@ async def get_bootstrap():
             "current_corr": round(state.current_rolling_corr_ndx, 3),
             "1D": corr_ndx_1d,
             "5D": corr_ndx_5d,
+            "1M": corr_ndx_1m,
+            "3M": corr_ndx_3m,
+            "6M": corr_ndx_6m,
+            "YTD": corr_ndx_ytd,
             "1Y": corr_ndx_1y,
+            "MAX": corr_ndx_max,
             "metrics": {
                 "1D": round(state.current_rolling_corr_ndx, 3),
                 "5D": round(state.corr_5d_ndx, 3),
-                "1Y": round(state.corr_1y_ndx, 3)
+                "1M": round(state.corr_1m_ndx, 3),
+                "3M": round(state.corr_3m_ndx, 3),
+                "6M": round(state.corr_6m_ndx, 3),
+                "YTD": round(state.corr_ytd_ndx, 3),
+                "1Y": round(state.corr_1y_ndx, 3),
+                "MAX": round(state.corr_max_ndx, 3)
             }
         }
     }
 
     tech_vol_bootstrap = {
         **live["tech_vol"],
+        "1D": tech_vol_1d,
+        "5D": tech_vol_5d,
+        "1M": tech_vol_1m,
+        "3M": tech_vol_3m,
+        "6M": tech_vol_6m,
+        "YTD": tech_vol_ytd,
+        "1Y": tech_vol_1y,
+        "MAX": tech_vol_max,
+        # Legacy aliases
         "intraday_1d": tech_vol_1d,
         "intraday_5d": tech_vol_5d,
         "history_1y": tech_vol_1y
@@ -1327,24 +1423,18 @@ async def get_bootstrap():
         },
         "term_structure": {
             **live["term_structure"],
-            "intraday_1d": {
-                "times": t1d,
-                "vix": v1d_vix,
-                "vix3m": v1d_vix3m,
-                "ratio": v1d_ratio
-            },
-            "intraday_5d": {
-                "times": t5d,
-                "vix": v5d_vix,
-                "vix3m": v5d_vix3m,
-                "ratio": v5d_ratio
-            },
-            "history_1y": {
-                "dates": t1y,
-                "vix": v1y_vix,
-                "vix3m": v1y_vix3m,
-                "ratio": v1y_ratio
-            }
+            "1D": ts_1d,
+            "5D": ts_5d,
+            "1M": ts_1m,
+            "3M": ts_3m,
+            "6M": ts_6m,
+            "YTD": ts_ytd,
+            "1Y": ts_1y,
+            "MAX": ts_max,
+            # Legacy aliases
+            "intraday_1d": ts_1d,
+            "intraday_5d": ts_5d,
+            "history_1y": ts_1y
         },
         "intraday_correlation": {
             "times": corr_1d["times"],
@@ -1354,11 +1444,21 @@ async def get_bootstrap():
             "current_corr": round(state.current_rolling_corr, 3),
             "1D": corr_1d,
             "5D": corr_5d,
+            "1M": corr_1m,
+            "3M": corr_3m,
+            "6M": corr_6m,
+            "YTD": corr_ytd,
             "1Y": corr_1y,
+            "MAX": corr_max,
             "metrics": {
                 "1D": round(state.current_rolling_corr, 3),
                 "5D": round(state.corr_5d, 3),
-                "1Y": round(state.corr_1y, 3)
+                "1M": round(state.corr_1m, 3),
+                "3M": round(state.corr_3m, 3),
+                "6M": round(state.corr_6m, 3),
+                "YTD": round(state.corr_ytd, 3),
+                "1Y": round(state.corr_1y, 3),
+                "MAX": round(state.corr_max, 3)
             }
         },
         "ndx": ndx_bootstrap,
