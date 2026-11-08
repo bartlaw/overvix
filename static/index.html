@@ -414,6 +414,13 @@
           </div>
 
 
+          <!-- Scale Mode Switcher (Beta Locked vs Auto Fit) -->
+          <div id="corr-scale-group" class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium">
+            <button id="btn-corr-scale" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition flex items-center space-x-1" title="Lock dual axes to Spot-Vol Slope (1% Spot = |Slope| pts Vol) so visual separation equals Overvix residual">
+              <span id="corr-scale-label">Beta Scaled</span>
+            </button>
+          </div>
+
           <!-- Volatility Axis Invert Toggle -->
           <div id="corr-invert-group" class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium">
             <button id="btn-corr-invert" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1" title="Invert Volatility scale so VIX tracks Spot in lockstep">

@@ -14,6 +14,7 @@ let currentTimeframe = '1D'; // '1D', '5D', '1Y'
 let currentTrailMode = 'both'; // 'both', 'today', '60d'
 let currentCorrMode = 'dual'; // 'dual', 'corr_only'
 let isVolInverted = true; // Invert volatility axis on correlation overlay for lockstep tracking
+let isBetaScaled = true;  // Beta-locked scale mode (1% Spot = |Slope| pts Vol)
 let currentAssetPair = 'SPX'; // 'SPX' | 'NDX'
 
 // Historical Mode State
@@ -652,6 +653,8 @@ function switchTrailMode(mode) {
 }
 
 // Correlation Timeframe & Display Controls
+const btnCorrScale = document.getElementById('btn-corr-scale');
+const corrScaleLabel = document.getElementById('corr-scale-label');
 const btnCorrInvert = document.getElementById('btn-corr-invert');
 const corrInvertGroup = document.getElementById('corr-invert-group');
 const corrInvertIcon = document.getElementById('corr-invert-icon');
@@ -660,6 +663,7 @@ const corrSubtitle = document.getElementById('corr-subtitle');
 const corrLiveLabel = document.getElementById('corr-live-label');
 
 function setupCorrButtons() {
+  if (btnCorrScale) btnCorrScale.addEventListener('click', () => toggleCorrScaleMode());
   if (btnCorrInvert) btnCorrInvert.addEventListener('click', () => toggleCorrVolInvert());
   setupAnchorButtons();
 }
@@ -714,6 +718,22 @@ function setupAnchorButtons() {
   if (btnReset) {
     btnReset.addEventListener('click', () => setCorrAnchor('open'));
   }
+}
+
+function toggleCorrScaleMode() {
+  isBetaScaled = !isBetaScaled;
+  if (btnCorrScale && corrScaleLabel) {
+    if (isBetaScaled) {
+      btnCorrScale.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition flex items-center space-x-1";
+      corrScaleLabel.textContent = "Beta Scaled";
+      btnCorrScale.title = "Lock dual axes to Spot-Vol Slope (1% Spot = |Slope| pts Vol). Click to switch to Auto Fit.";
+    } else {
+      btnCorrScale.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 transition flex items-center space-x-1";
+      corrScaleLabel.textContent = "Auto Fit";
+      btnCorrScale.title = "Independent min-max scale auto-fit. Click to lock dual axes to Spot-Vol Slope.";
+    }
+  }
+  renderCorrelationChart('dual', currentCorrTf);
 }
 
 function toggleCorrVolInvert() {
@@ -1794,7 +1814,7 @@ function updateAnchorUI() {
   }
 }
 
-function computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted) {
+function computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted, isBeta = isBetaScaled, beta = 1.98) {
   let y1Min = 0, y1Max = 0;
   for (let i = 0; i < assetPct.length; i++) {
     const v = assetPct[i];
@@ -1830,8 +1850,15 @@ function computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted) {
   alpha = Math.max(0.15, Math.min(0.85, alpha));
 
   // Determine total span for each axis to ensure neither clips data
-  const R1 = Math.max(e1Up / (1.0 - alpha), e1Dn / alpha);
-  const R2 = Math.max(e2Up / (1.0 - alpha), e2Dn / alpha);
+  let R1 = Math.max(e1Up / (1.0 - alpha), e1Dn / alpha);
+  let R2 = Math.max(e2Up / (1.0 - alpha), e2Dn / alpha);
+
+  // If Beta Scaled: couple the spans so 1% Spot equals beta points of Vol
+  if (isBeta && typeof beta === 'number' && beta > 0.1) {
+    const R_master = Math.max(R1, R2 / beta);
+    R1 = R_master;
+    R2 = R_master * beta;
+  }
 
   // Left axis (Spot %): bottom is negative, top is positive
   let range1 = [-R1 * alpha, R1 * (1.0 - alpha)];
@@ -1966,38 +1993,87 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     }
   ] : [];
 
-  const dualRanges = computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted);
+  // 60-Day Macro Baseline Spot-Vol Slope from Overvix model
+  let rawSlope = -1.9796;
+  if (cachedBootstrap) {
+    if (isNdx && cachedBootstrap.ndx && cachedBootstrap.ndx.model && cachedBootstrap.ndx.model.slope) {
+      rawSlope = cachedBootstrap.ndx.model.slope;
+    } else if (cachedBootstrap.model && cachedBootstrap.model.slope) {
+      rawSlope = cachedBootstrap.model.slope;
+    }
+  } else if (isNdx) {
+    rawSlope = -1.3712;
+  }
+  const beta = Math.abs(rawSlope) > 0.05 ? Math.abs(rawSlope) : 1.98;
 
-    // Subplot 1: Asset % Move (left axis) vs Vol pt move (right axis)
-    const traceAsset = {
-      x: times,
-      y: assetPct,
-      customdata: anchoredSeries.spotRaw ? anchoredSeries.spotRaw.map(v => typeof v === 'number' ? v.toFixed(2) : v) : [],
-      name: isAnchored ? `${assetLabel} % (Anchored)` : `${assetLabel} % Move`,
-      mode: 'lines',
-      line: { color: assetColor, width: 1.8 },
-      xaxis: 'x',
-      yaxis: 'y',
-      hovertemplate: isAnchored 
-        ? `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{y:+.2f}%<br>Price: %{customdata}<extra></extra>`
-        : `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{y:+.2f}%<extra></extra>`
-    };
+  // Sync button label with active beta
+  if (corrScaleLabel && isBetaScaled) {
+    corrScaleLabel.textContent = `Beta Scale (1:${beta.toFixed(2)})`;
+  }
 
-    const traceVol = {
-      x: times,
-      y: volPt,
-      customdata: anchoredSeries.volRaw ? anchoredSeries.volRaw.map(v => typeof v === 'number' ? v.toFixed(2) : v) : [],
-      name: isVolInverted 
-        ? (isAnchored ? `${volLabel} Pt (Anchored Inv)` : `${volLabel} Point Move (Inv)`) 
-        : (isAnchored ? `${volLabel} Pt (Anchored)` : `${volLabel} Point Move`),
-      mode: 'lines',
-      line: { color: volColor, width: 1.8 },
-      xaxis: 'x',
-      yaxis: 'y2',
-      hovertemplate: isAnchored 
-        ? `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<br>Level: %{customdata}<extra></extra>`
-        : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<extra></extra>`
-    };
+  const dualRanges = computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted, isBetaScaled, beta);
+
+  // Subplot 1: Asset % Move (left axis) vs Vol pt move (right axis)
+  const traceAsset = {
+    x: times,
+    y: assetPct,
+    customdata: anchoredSeries.spotRaw ? anchoredSeries.spotRaw.map(v => typeof v === 'number' ? v.toFixed(2) : v) : [],
+    name: isAnchored ? `${assetLabel} % (Anchored)` : `${assetLabel} % Move`,
+    mode: 'lines',
+    line: { color: assetColor, width: 1.8 },
+    xaxis: 'x',
+    yaxis: 'y',
+    hovertemplate: isAnchored 
+      ? `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{y:+.2f}%<br>Price: %{customdata}<extra></extra>`
+      : `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{y:+.2f}%<extra></extra>`
+  };
+
+  // Shaded Divergence Ribbon: fill area between Spot % and Vol (in % units) when Beta Scaled and Invert Vol are active
+  const traceDivergenceRibbon = (isBetaScaled && isVolInverted) ? {
+    x: times,
+    y: volPt.map(v => (typeof v === 'number' && !isNaN(v)) ? (-v / beta) : null),
+    mode: 'lines',
+    line: { color: 'transparent', width: 0 },
+    fill: 'tonexty',
+    fillcolor: 'rgba(244, 63, 94, 0.16)', // Subtle rose shading highlighting Overvix residual divergence
+    xaxis: 'x',
+    yaxis: 'y',
+    hoverinfo: 'none',
+    showlegend: false
+  } : null;
+
+  // Vol Customdata: [volRaw, instantaneous Overvix residual]
+  const volCustomdata = times.map((t, i) => {
+    const raw = (anchoredSeries.volRaw && anchoredSeries.volRaw[i] !== undefined) 
+      ? (typeof anchoredSeries.volRaw[i] === 'number' ? anchoredSeries.volRaw[i].toFixed(2) : anchoredSeries.volRaw[i]) 
+      : '-';
+    const sPct = assetPct[i] || 0;
+    const vPt = volPt[i] || 0;
+    // Expected VIX move = -beta * SPX %
+    // Overvix residual = vPt - (-beta * sPct) = vPt + beta * sPct
+    const resid = vPt + beta * sPct;
+    return [raw, resid.toFixed(2)];
+  });
+
+  const traceVol = {
+    x: times,
+    y: volPt,
+    customdata: volCustomdata,
+    name: isVolInverted 
+      ? (isAnchored ? `${volLabel} Pt (Anchored Inv)` : `${volLabel} Point Move (Inv)`) 
+      : (isAnchored ? `${volLabel} Pt (Anchored)` : `${volLabel} Point Move`),
+    mode: 'lines',
+    line: { color: volColor, width: 1.8 },
+    xaxis: 'x',
+    yaxis: 'y2',
+    hovertemplate: isBetaScaled
+      ? (isAnchored 
+          ? `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<br>Level: %{customdata[0]}<br>Overvix Residual: %{customdata[1]:+s} pts<extra></extra>`
+          : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<br>Overvix Residual: %{customdata[1]:+s} pts<extra></extra>`)
+      : (isAnchored 
+          ? `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<br>Level: %{customdata[0]}<extra></extra>`
+          : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<extra></extra>`)
+  };
 
     // Subplot 2: Rolling Pearson Correlation (Background context when anchored)
     const traceCorr = {
@@ -2083,7 +2159,11 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       showlegend: false
     } : null;
 
-    const plotTraces = [traceAsset, traceVol, traceCorr];
+    const plotTraces = [traceAsset];
+    if (traceDivergenceRibbon) {
+      plotTraces.push(traceDivergenceRibbon);
+    }
+    plotTraces.push(traceVol, traceCorr);
     if (traceAnchoredCorr) {
       plotTraces.push(traceAnchoredCorr);
     }
@@ -2139,8 +2219,12 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         domain: [0.48, 1.0],
         title: { 
           text: isAnchored 
-            ? (isVolInverted ? `${volLabel} Pt Since Anchor (Inv ▼)` : `${volLabel} Pt Since Anchor`)
-            : (isVolInverted ? `${volLabel} Point Move (Inverted ▼)` : `${volLabel} Point Move`), 
+            ? (isVolInverted 
+                ? `${volLabel} Pt Since Anchor (Inv ▼)${isBetaScaled ? ` [β=${beta.toFixed(2)}]` : ''}` 
+                : `${volLabel} Pt Since Anchor${isBetaScaled ? ` [β=${beta.toFixed(2)}]` : ''}`)
+            : (isVolInverted 
+                ? `${volLabel} Point Move (Inv ▼)${isBetaScaled ? ` [β=${beta.toFixed(2)}]` : ''}` 
+                : `${volLabel} Point Move${isBetaScaled ? ` [β=${beta.toFixed(2)}]` : ''}`), 
           font: { color: volColor, size: 10 } 
         },
         overlaying: 'y',
