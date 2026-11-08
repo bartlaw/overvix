@@ -369,22 +369,22 @@
       <div class="flex flex-wrap items-center justify-between pb-3 border-b border-slate-800/80 mb-2 gap-2">
         <div>
           <div class="flex items-center space-x-2">
-            <h2 id="corr-title" class="text-sm font-bold text-white uppercase tracking-tight">SPX &amp; VIX Dynamic Correlation &amp; Divergence Monitor</h2>
+            <h2 id="corr-title" class="text-sm font-bold text-white uppercase tracking-tight">SPX &amp; VIX Spot-Vol &amp; Overvix Residual Monitor</h2>
             <span id="corr-tf-pill" class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60">Intraday 1M</span>
-            <span id="corr-status-pill" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">Normal Inverse (&rho; &le; -0.50)</span>
+            <span id="corr-status-pill" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">Normal Residual (&plusmn;2.0 pts)</span>
             <button id="btn-corr-guide" title="View 4-Regime Spot-Vol Playbook" class="text-slate-400 hover:text-cyan-400 text-xs px-2 py-0.5 rounded border border-slate-800 hover:border-cyan-800 bg-slate-950/60 transition flex items-center space-x-1">
               <span>📖</span>
               <span class="text-[10px] font-semibold uppercase tracking-wider">Playbook</span>
             </button>
           </div>
-          <p id="corr-subtitle" class="text-xs text-slate-400">Minute-by-Minute Normalized Overlay (Upper) &amp; Rolling Pearson Correlation &rho;(&Delta;ln S, &Delta;ln Vol) (Lower)</p>
+          <p id="corr-subtitle" class="text-xs text-slate-400">Minute-by-Minute Normalized Overlay (Upper) &amp; Instantaneous Overvix Residual (Lower)</p>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
-          <!-- Real-Time Rolling Correlation Badge -->
+          <!-- Real-Time Overvix Residual Badge -->
           <div class="flex items-center space-x-2 bg-slate-950/90 px-3 py-1.5 rounded-lg border border-slate-800 text-xs font-mono">
-            <span id="corr-live-label" class="text-slate-400 text-[11px]">Current 30m &rho;:</span>
-            <strong id="corr-live-val" class="text-cyan-400 font-bold">-.---</strong>
+            <span id="corr-live-label" class="text-slate-400 text-[11px]">Latest Residual:</span>
+            <strong id="corr-live-val" class="text-cyan-400 font-bold">--.-- pts</strong>
           </div>
 
           <!-- Timeframe Stepped Slider (Card 3: Dynamic Correlation) -->
@@ -464,7 +464,7 @@
 
           <button id="btn-anchor-reset" class="px-2 py-1 rounded text-[11px] text-slate-400 hover:text-red-400 transition" title="Reset anchor back to session baseline">✕ Reset</button>
 
-          <span class="text-[10px] text-slate-500 italic hidden xl:inline ml-2" title="Click any point on chart to anchor dual curves and calculate post-anchor recovery correlation">(Click any point on chart to anchor)</span>
+          <span class="text-[10px] text-slate-500 italic hidden xl:inline ml-2" title="Click any point on chart to anchor dual curves and calculate post-anchor Overvix residual">(Click any point on chart to anchor)</span>
         </div>
 
         <!-- Right: Recovery Leader Diagnostic Strip -->

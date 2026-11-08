@@ -44,10 +44,10 @@ const TF_CONFIG = {
     pillClass: 'bg-amber-950/80 text-amber-300 border-amber-800/60',
     granularity: '1m',
     tsSub: '30-Day vs. 90-Day Volatility Ratio & Inversion Monitor (1-min bars)',
-    corrSub: 'Minute-by-Minute Normalized Overlay (Upper) & Rolling 30-Minute Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
-    corrTraceName: 'Rolling 30m Correlation (ρ)',
-    corrHoverLabel: 'Rolling 30m ρ',
-    liveLabel: 'Current 30m ρ:',
+    corrSub: 'Minute-by-Minute Normalized Overlay (Upper) & Instantaneous Overvix Residual (Lower)',
+    corrTraceName: 'Overvix Residual',
+    corrHoverLabel: 'Overvix Residual',
+    liveLabel: 'Latest Residual:',
     xTitle: 'Today Intraday Time (US/Eastern)',
     tickformat: '%H:%M',
     timeHoverFmt: '%b %d, %H:%M',
@@ -61,10 +61,10 @@ const TF_CONFIG = {
     pillClass: 'bg-blue-950/80 text-blue-300 border-blue-800/60',
     granularity: '5m',
     tsSub: '5-Day Term Structure Progression & Ratio Shifts (5-min bars)',
-    corrSub: '5-Minute Normalized Overlay (Upper) & Rolling 1-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
-    corrTraceName: 'Rolling 1D Correlation (ρ)',
-    corrHoverLabel: 'Rolling 1D ρ',
-    liveLabel: 'Current 1D ρ:',
+    corrSub: '5-Minute Normalized Overlay (Upper) & Instantaneous Overvix Residual (Lower)',
+    corrTraceName: 'Overvix Residual',
+    corrHoverLabel: 'Overvix Residual',
+    liveLabel: 'Latest Residual:',
     xTitle: '5-Day Timeline (US/Eastern)',
     tickformat: '%b %d %H:%M',
     timeHoverFmt: '%b %d, %H:%M',
@@ -78,10 +78,10 @@ const TF_CONFIG = {
     pillClass: 'bg-indigo-950/80 text-indigo-300 border-indigo-800/60',
     granularity: '30m',
     tsSub: 'Monthly OPEX Cycle & Term Structure Inversions (30-min bars)',
-    corrSub: '30-Minute Normalized Overlay (Upper) & Rolling 3-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
-    corrTraceName: 'Rolling 3D Correlation (ρ)',
-    corrHoverLabel: 'Rolling 3D ρ',
-    liveLabel: 'Current 3D ρ:',
+    corrSub: '30-Minute Normalized Overlay (Upper) & Instantaneous Overvix Residual (Lower)',
+    corrTraceName: 'Overvix Residual',
+    corrHoverLabel: 'Overvix Residual',
+    liveLabel: 'Latest Residual:',
     xTitle: '1-Month Timeline (US/Eastern)',
     tickformat: '%b %d %H:%M',
     timeHoverFmt: '%b %d, %H:%M',
@@ -95,10 +95,10 @@ const TF_CONFIG = {
     pillClass: 'bg-purple-950/80 text-purple-300 border-purple-800/60',
     granularity: '30m',
     tsSub: 'Quarterly Term Structure & Native VIX3M Tenor Match (30-min bars)',
-    corrSub: '30-Minute Normalized Overlay (Upper) & Rolling 10-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
-    corrTraceName: 'Rolling 10D Correlation (ρ)',
-    corrHoverLabel: 'Rolling 10D ρ',
-    liveLabel: 'Current 10D ρ:',
+    corrSub: '30-Minute Normalized Overlay (Upper) & Instantaneous Overvix Residual (Lower)',
+    corrTraceName: 'Overvix Residual',
+    corrHoverLabel: 'Overvix Residual',
+    liveLabel: 'Latest Residual:',
     xTitle: '3-Month Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
@@ -112,10 +112,10 @@ const TF_CONFIG = {
     pillClass: 'bg-pink-950/80 text-pink-300 border-pink-800/60',
     granularity: '30m',
     tsSub: 'Semi-Annual Volatility Cycle & Macro Term Structure (30-min bars)',
-    corrSub: '30-Minute Normalized Overlay (Upper) & Rolling 15-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
-    corrTraceName: 'Rolling 15D Correlation (ρ)',
-    corrHoverLabel: 'Rolling 15D ρ',
-    liveLabel: 'Current 15D ρ:',
+    corrSub: '30-Minute Normalized Overlay (Upper) & Instantaneous Overvix Residual (Lower)',
+    corrTraceName: 'Overvix Residual',
+    corrHoverLabel: 'Overvix Residual',
+    liveLabel: 'Latest Residual:',
     xTitle: '6-Month Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
@@ -129,10 +129,10 @@ const TF_CONFIG = {
     pillClass: 'bg-teal-950/80 text-teal-300 border-teal-800/60',
     granularity: '1d',
     tsSub: 'Year-to-Date Term Structure & Benchmark Performance (Daily Close)',
-    corrSub: 'Daily Close Normalized Overlay (Upper) & Rolling 20-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
-    corrTraceName: 'Rolling 20D Correlation (ρ)',
-    corrHoverLabel: 'Rolling 20D ρ',
-    liveLabel: 'Current 20D ρ:',
+    corrSub: 'Daily Close Normalized Overlay (Upper) & Instantaneous Overvix Residual (Lower)',
+    corrTraceName: 'Overvix Residual',
+    corrHoverLabel: 'Overvix Residual',
+    liveLabel: 'Latest Residual:',
     xTitle: 'Year-to-Date Timeline',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %Y',
@@ -146,10 +146,10 @@ const TF_CONFIG = {
     pillClass: 'bg-slate-800 text-slate-300 border-slate-700',
     granularity: '1d',
     tsSub: '1-Year Macro Volatility Regime & Historical Seasonality (Daily Close)',
-    corrSub: 'Daily Close Normalized Overlay (Upper) & Rolling 60-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
-    corrTraceName: 'Rolling 60D Correlation (ρ)',
-    corrHoverLabel: 'Rolling 60D ρ',
-    liveLabel: 'Current 60D ρ:',
+    corrSub: 'Daily Close Normalized Overlay (Upper) & Instantaneous Overvix Residual (Lower)',
+    corrTraceName: 'Overvix Residual',
+    corrHoverLabel: 'Overvix Residual',
+    liveLabel: 'Latest Residual:',
     xTitle: '1-Year Macro Date',
     tickformat: '%b %Y',
     timeHoverFmt: '%b %d, %Y',
@@ -163,10 +163,10 @@ const TF_CONFIG = {
     pillClass: 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60',
     granularity: '1d',
     tsSub: 'Multi-Year Historical Regime & Volatility Crisis Comparison (Daily Close)',
-    corrSub: 'Daily Close Normalized Overlay (Upper) & Rolling 60-Day Pearson Correlation ρ(Δln S, Δln Vol) (Lower)',
-    corrTraceName: 'Rolling 60D Correlation (ρ)',
-    corrHoverLabel: 'Rolling 60D ρ',
-    liveLabel: 'Current 60D ρ:',
+    corrSub: 'Daily Close Normalized Overlay (Upper) & Instantaneous Overvix Residual (Lower)',
+    corrTraceName: 'Overvix Residual',
+    corrHoverLabel: 'Overvix Residual',
+    liveLabel: 'Latest Residual:',
     xTitle: 'Multi-Year Timeline (2Y)',
     tickformat: '%b %Y',
     timeHoverFmt: '%b %d, %Y',
@@ -427,9 +427,9 @@ function switchAssetPair(pair) {
     if (tsSub) tsSub.textContent = "30-Day vs. 90-Day Volatility Ratio & Inversion Monitor";
 
     const corrTitle = document.getElementById('corr-title');
-    if (corrTitle) corrTitle.textContent = "SPX & VIX Dynamic Correlation & Divergence Monitor";
+    if (corrTitle) corrTitle.textContent = "SPX & VIX Spot-Vol & Overvix Residual Monitor";
     const corrSub = document.getElementById('corr-subtitle');
-    if (corrSub) corrSub.textContent = "Minute-by-Minute Normalized Overlay (Upper) & Rolling 30-Minute Pearson Correlation ρ(ΔSPX, ΔVIX) (Lower)";
+    if (corrSub) corrSub.textContent = "Minute-by-Minute Normalized Overlay (Upper) & Instantaneous Overvix Residual (Lower)";
   } else {
     currentThreshold = currentNdxThreshold;
     if (btnAssetNdx) btnAssetNdx.className = "px-2.5 py-1 rounded text-xs font-bold bg-purple-500 text-white shadow-sm transition flex items-center space-x-1.5";
@@ -446,9 +446,9 @@ function switchAssetPair(pair) {
     if (tsSub) tsSub.textContent = "Tech Vol Spread (VXN - VIX) & Skew Ratio Monitor";
 
     const corrTitle = document.getElementById('corr-title');
-    if (corrTitle) corrTitle.textContent = "NDX & VXN Dynamic Correlation & Divergence Monitor";
+    if (corrTitle) corrTitle.textContent = "NDX & VXN Spot-Vol & Over-VXN Residual Monitor";
     const corrSub = document.getElementById('corr-subtitle');
-    if (corrSub) corrSub.textContent = "Minute-by-Minute Normalized Overlay (Upper) & Rolling 30-Minute Pearson Correlation ρ(ΔNDX, ΔVXN) (Lower)";
+    if (corrSub) corrSub.textContent = "Minute-by-Minute Normalized Overlay (Upper) & Instantaneous Over-VXN Residual (Lower)";
   }
 
   const dispEl = document.getElementById('disp-thresh-pts');
@@ -579,7 +579,9 @@ function updateCorrSliderUI(tf) {
     corrTfPill.className = `text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border ${conf.pillClass}`;
   }
   if (corrSubtitle && conf.corrSub) {
-    corrSubtitle.textContent = conf.corrSub;
+    corrSubtitle.textContent = (currentAssetPair === 'NDX') 
+      ? conf.corrSub.replace('Overvix', 'Over-VXN') 
+      : conf.corrSub;
   }
   if (corrLiveLabel && conf.liveLabel) {
     corrLiveLabel.textContent = conf.liveLabel;
@@ -777,20 +779,75 @@ function switchCorrTf(tf, triggeredBySlider = false) {
   renderCorrelationChart(currentCorrMode, tf);
 }
 
+function getActiveBetaAndIntercept(isNdx) {
+  let rawSlope = -1.9796;
+  let rawIntercept = 0.0622;
+  if (cachedBootstrap) {
+    if (isNdx && cachedBootstrap.ndx && cachedBootstrap.ndx.model) {
+      if (typeof cachedBootstrap.ndx.model.slope === 'number') rawSlope = cachedBootstrap.ndx.model.slope;
+      if (typeof cachedBootstrap.ndx.model.intercept === 'number') rawIntercept = cachedBootstrap.ndx.model.intercept;
+    } else if (cachedBootstrap.model) {
+      if (typeof cachedBootstrap.model.slope === 'number') rawSlope = cachedBootstrap.model.slope;
+      if (typeof cachedBootstrap.model.intercept === 'number') rawIntercept = cachedBootstrap.model.intercept;
+    }
+  } else if (isNdx) {
+    rawSlope = -1.3712;
+    rawIntercept = 0.0;
+  }
+  const beta = Math.abs(rawSlope) > 0.05 ? Math.abs(rawSlope) : 1.98;
+  return { beta, rawSlope, rawIntercept };
+}
+
 function updateCorrMetricDisplay() {
   const isNdx = (currentAssetPair === 'NDX');
-  const c = isNdx ? cachedCorrNdx : cachedCorr;
-  const metrics = c.metrics || {};
-  let val = metrics[currentCorrTf];
-  if (val === undefined || val === null) {
-    const ds = c[currentCorrTf];
-    if (ds && ds.rolling_corr && ds.rolling_corr.length > 0) {
-      val = ds.rolling_corr[ds.rolling_corr.length - 1];
+  const targetTf = currentCorrTf;
+  const c = isNdx ? (cachedCorrNdx[targetTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[targetTf] || cachedCorr['1D'] || cachedCorr);
+  if (!c) return;
+  const anchoredSeries = computeAnchoredSeries(c, isNdx);
+  const times = anchoredSeries.times || [];
+  const thresh = isNdx ? currentNdxThreshold : currentThreshold;
+  const el = document.getElementById('corr-live-val');
+  const lbl = document.getElementById('corr-live-label');
+  const corrPill = document.getElementById('corr-status-pill');
+
+  if (lbl) lbl.textContent = "Latest Residual:";
+
+  if (times && times.length > 0) {
+    const lastIdx = times.length - 1;
+    const sPct = anchoredSeries.spotPct[lastIdx] || 0;
+    const vPt = anchoredSeries.volPt[lastIdx] || 0;
+    const { beta, rawIntercept } = getActiveBetaAndIntercept(isNdx);
+    const alpha = (!anchoredSeries.isAnchored && targetTf === '1D') ? rawIntercept : 0;
+    const resid = vPt - alpha + beta * sPct;
+    const residSign = resid >= 0 ? '+' : '';
+    const residStr = `${residSign}${resid.toFixed(2)} pts`;
+
+    if (el) {
+      el.textContent = residStr;
+      if (resid >= thresh) {
+        el.className = "text-rose-400 font-bold";
+      } else if (resid <= -thresh) {
+        el.className = "text-cyan-400 font-bold";
+      } else {
+        el.className = "text-emerald-400 font-bold";
+      }
     }
-  }
-  if (val !== undefined && val !== null) {
-    const el = document.getElementById('corr-live-val');
-    if (el) el.textContent = fmtNum(val, 3);
+
+    if (corrPill) {
+      if (resid >= thresh) {
+        corrPill.textContent = `🚨 ${isNdx ? 'Over-VXN' : 'Overvix'} Alert (+${resid.toFixed(2)} pts)`;
+        corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-800 animate-pulse";
+        corrPill.title = `Residual exceeds +${thresh.toFixed(1)} pts alert threshold: Volatility elevated relative to spot moves`;
+      } else if (resid <= -thresh) {
+        corrPill.textContent = `📉 Vol Crush (${resid.toFixed(2)} pts)`;
+        corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800";
+        corrPill.title = `Residual below -${thresh.toFixed(1)} pts floor: Volatility crushed relative to spot moves`;
+      } else {
+        corrPill.textContent = `Normal Residual (${residSign}${resid.toFixed(2)} pts)`;
+        corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800";
+        corrPill.title = `Residual within ±${thresh.toFixed(1)} pts equilibrium band`;
+      }
+    }
   }
 }
 
@@ -1628,11 +1685,11 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
       spotNetPct: 0,
       spotNetPts: 0,
       volNetPt: 0,
-      corrStr: '---',
-      corrRegime: 'AT ANCHOR',
-      corrBadgeClass: 'bg-slate-800 text-slate-400 border-slate-700',
-      corrColor: 'text-slate-400',
-      corrVal: null,
+      netResid: 0,
+      residSign: '',
+      residStatus: 'AT ANCHOR',
+      residBadgeClass: 'bg-slate-800 text-slate-400 border-slate-700',
+      residColor: 'text-slate-400',
       badgeClass: 'bg-slate-800 text-slate-300 border-slate-700',
       tag: 'ANCHOR AT LATEST BAR',
       summary: 'Anchor set at the latest bar. Monitoring incoming recovery ticks...'
@@ -1708,46 +1765,34 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
     summary = `Mild fluctuations since anchor: ${assetLabel} ${spotNetPct >= 0 ? '+' : ''}${spotNetPct.toFixed(2)}%, ${volLabel} ${volNetPt >= 0 ? '+' : ''}${volNetPt.toFixed(2)} pts.`;
   }
 
-  // Evaluate Post-Anchor Expanding Pearson Correlation Diagnostic strictly from anchorIdx to latest
-  let corrStr = "---";
-  let corrRegime = "N/A";
-  let corrBadgeClass = "bg-slate-800 text-slate-400 border-slate-700";
-  let corrColor = "text-slate-400";
-  let corrSummaryPart = "";
-  const corrVal = anchoredSeries.latestAnchoredCorr;
+  // Evaluate Post-Anchor Instantaneous Overvix Residual strictly from anchor point to latest bar
+  const { beta } = getActiveBetaAndIntercept(isNdx);
+  // Post-anchor residual has alpha = 0 (relative to anchor baseline)
+  const netResid = volNetPt + beta * spotNetPct;
+  const thresh = isNdx ? currentNdxThreshold : currentThreshold;
+  let residStatus = "NORMAL";
+  let residBadgeClass = "bg-emerald-950 text-emerald-300 border border-emerald-800";
+  let residColor = "text-emerald-400";
+  let residSummaryPart = "";
 
-  if (corrVal !== null && corrVal !== undefined) {
-    corrStr = fmtNum(corrVal, 3);
-    if (corrVal <= -0.70) {
-      corrRegime = "HEALTHY INVERSE";
-      corrBadgeClass = "bg-emerald-950 text-emerald-400 border border-emerald-800";
-      corrColor = "text-emerald-400";
-      corrSummaryPart = ` Post-anchor recovery correlation is strongly inverse (ρ = ${corrStr}), confirming healthy institutional volatility unwinding.`;
-    } else if (corrVal <= -0.50) {
-      corrRegime = "NORMAL INVERSE";
-      corrBadgeClass = "bg-teal-950 text-teal-300 border border-teal-800";
-      corrColor = "text-teal-300";
-      corrSummaryPart = ` Post-anchor recovery correlation is normal (ρ = ${corrStr}).`;
-    } else if (corrVal < 0.0) {
-      corrRegime = "VOL STICKY / STRESS";
-      corrBadgeClass = "bg-amber-950 text-amber-300 border border-amber-800";
-      corrColor = "text-amber-400";
-      corrSummaryPart = ` Post-anchor recovery correlation broke above -0.50 (ρ = ${corrStr}), indicating lingering tail hedging or vol-of-vol stress.`;
-    } else {
-      corrRegime = "POSITIVE DECOUPLING";
-      corrBadgeClass = "bg-rose-950 text-rose-300 border border-rose-800 animate-pulse";
-      corrColor = "text-rose-400";
-      corrSummaryPart = ` Post-anchor correlation turned positive (ρ = ${corrStr})! Spot and volatility are moving in tandem.`;
-    }
-  } else if (anchoredSeries.returnCount <= 10) {
-    corrStr = "Calibrating (≤ 10 bars)";
-    corrRegime = "CALIBRATING";
-    corrBadgeClass = "bg-slate-800 text-slate-400 border border-slate-700";
-    corrColor = "text-slate-400";
-    corrSummaryPart = ` Post-anchor correlation is calibrating (first 10 bars post-anchor suppressed for statistical confidence).`;
+  if (netResid >= thresh) {
+    residStatus = "OVERVIX ALERT";
+    residBadgeClass = "bg-rose-950 text-rose-300 border border-rose-800 animate-pulse";
+    residColor = "text-rose-400";
+    residSummaryPart = ` Overvix residual is elevated (+${netResid.toFixed(2)} pts), signaling persistent hedging pressure despite spot recovery.`;
+  } else if (netResid <= -thresh) {
+    residStatus = "VOL CRUSH";
+    residBadgeClass = "bg-cyan-950 text-cyan-300 border border-cyan-800";
+    residColor = "text-cyan-400";
+    residSummaryPart = ` Volatility experienced an outsized crush (${netResid.toFixed(2)} pts below expectation), signaling aggressive call buying or short covering.`;
+  } else {
+    residStatus = "NORMAL";
+    residBadgeClass = "bg-emerald-950 text-emerald-300 border border-emerald-800";
+    residColor = "text-emerald-400";
+    residSummaryPart = ` Overvix residual (${netResid >= 0 ? '+' : ''}${netResid.toFixed(2)} pts) remains within spot-vol equilibrium.`;
   }
 
-  summary += corrSummaryPart;
+  summary += residSummaryPart;
 
   return {
     isLatest: false,
@@ -1755,15 +1800,15 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
     spotNetPct: spotNetPct,
     spotNetPts: spotNetPts,
     volNetPt: volNetPt,
+    netResid: netResid,
+    residSign: netResid >= 0 ? '+' : '',
+    residStatus: residStatus,
+    residBadgeClass: residBadgeClass,
+    residColor: residColor,
     tag: tag,
     badgeClass: badgeClass,
     summary: summary,
-    anchorTime: times[anchorIdx],
-    corrStr: corrStr,
-    corrRegime: corrRegime,
-    corrBadgeClass: corrBadgeClass,
-    corrColor: corrColor,
-    corrVal: corrVal
+    anchorTime: times[anchorIdx]
   };
 }
 
@@ -1942,48 +1987,31 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
           <span class="text-slate-700">|</span>
           <span>${volLabel}: <strong class="${volColor}">${volSign}${diag.volNetPt.toFixed(2)} pts</strong></span>
           <span class="text-slate-700">|</span>
-          <span title="Post-anchor cumulative Pearson correlation on log returns strictly since anchor point">⚓ Recovery ρ: <strong class="${diag.corrColor}">${diag.corrStr}</strong> <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${diag.corrBadgeClass}">${diag.corrRegime}</span></span>
+          <span title="Net Overvix residual calculated strictly relative to anchor point">${isNdx ? 'Over-VXN' : 'Overvix'} Residual: <strong class="${diag.residColor}">${diag.residSign}${diag.netResid.toFixed(2)} pts</strong> <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${diag.residBadgeClass}">${diag.residStatus}</span></span>
           <span class="text-slate-700">|</span>
           <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${diag.badgeClass}">${diag.tag}</span>
           <span class="text-[10px] text-slate-300 font-sans hidden lg:inline font-normal">(${diag.summary})</span>
         </div>
       `;
     } else {
-      banner.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from open. Select <strong>[${assetLabel} Low]</strong> or <strong>[${volLabel} High]</strong>, or click chart to analyze recovery leader &amp; post-anchor correlation.</span>`;
+      banner.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from open. Select <strong>[${assetLabel} Low]</strong> or <strong>[${volLabel} High]</strong>, or click chart to set anchor point and evaluate post-anchor Overvix residual.</span>`;
     }
   }
 
   const dStart = times.length > 0 ? times[0] : '';
   const dEnd = times.length > 0 ? times[times.length - 1] : '';
 
-  // Dynamic Pearson upper bound: 0.05 by default (framing 0.0 Decoupling line at top), expanding only if ρ > 0
-  let maxCorrVal = -0.7;
-  for (let i = 0; i < rollingCorr.length; i++) {
-    const v = rollingCorr[i];
-    if (typeof v === 'number' && !isNaN(v) && v > maxCorrVal) maxCorrVal = v;
-  }
-  if (isAnchored && anchoredSeries.anchoredCorr) {
-    const ac = anchoredSeries.anchoredCorr;
-    for (let i = 0; i < ac.length; i++) {
-      const v = ac[i];
-      if (typeof v === 'number' && !isNaN(v) && v > maxCorrVal) maxCorrVal = v;
-    }
-  }
-  const upperY = maxCorrVal > 0 ? Math.min(1.05, Math.ceil((maxCorrVal + 0.05) * 10) / 10) : 0.05;
-
   const conf = TF_CONFIG[targetTf] || TF_CONFIG['1D'];
   const xTitle = conf.xTitle;
   const tickformat = conf.tickformat;
   const rangebreaks = conf.rangebreaks || [];
-  const corrTraceName = conf.corrTraceName;
-  const corrHoverLabel = conf.corrHoverLabel;
   const timeHoverFmt = conf.timeHoverFmt;
   let assetHoverLabel = isAnchored ? `${assetLabel} from Anchor` : `${assetLabel} Move (${conf.label})`;
   let volHoverLabel = isAnchored ? `${volLabel} from Anchor` : `${volLabel} Move (${conf.label})`;
 
   const assetColor = isNdx ? '#C084FC' : '#10B981';
   const volColor = '#F59E0B';
-  const corrColor = isNdx ? '#A855F7' : '#00E5FF';
+  const residColor = isNdx ? '#C084FC' : '#00E5FF';
 
   // Common anchor shapes & annotations
   const anchorShapes = isAnchored && anchoredSeries.anchorTime ? [
@@ -2026,21 +2054,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   ] : [];
 
   // 60-Day Macro Baseline Spot-Vol Slope & Intercept from Overvix model
-  let rawSlope = -1.9796;
-  let rawIntercept = 0.0622;
-  if (cachedBootstrap) {
-    if (isNdx && cachedBootstrap.ndx && cachedBootstrap.ndx.model) {
-      if (typeof cachedBootstrap.ndx.model.slope === 'number') rawSlope = cachedBootstrap.ndx.model.slope;
-      if (typeof cachedBootstrap.ndx.model.intercept === 'number') rawIntercept = cachedBootstrap.ndx.model.intercept;
-    } else if (cachedBootstrap.model) {
-      if (typeof cachedBootstrap.model.slope === 'number') rawSlope = cachedBootstrap.model.slope;
-      if (typeof cachedBootstrap.model.intercept === 'number') rawIntercept = cachedBootstrap.model.intercept;
-    }
-  } else if (isNdx) {
-    rawSlope = -1.3712;
-    rawIntercept = 0.0;
-  }
-  const beta = Math.abs(rawSlope) > 0.05 ? Math.abs(rawSlope) : 1.98;
+  const { beta, rawSlope, rawIntercept } = getActiveBetaAndIntercept(isNdx);
 
   // Sync button label with active beta
   if (corrScaleLabel && isBetaScaled) {
@@ -2166,66 +2180,93 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
           : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<extra></extra>`)
   };
 
-    // Subplot 2: Rolling Pearson Correlation (Background context when anchored)
-    const traceCorr = {
+    // Subplot 2: Instantaneous Overvix Residual Monitor
+    const thresh = isNdx ? currentNdxThreshold : currentThreshold;
+    const alpha = (!isAnchored && targetTf === '1D') ? rawIntercept : 0;
+
+    // Calculate instantaneous Overvix residual series:
+    // r(t) = volPt(t) - alpha + beta * assetPct(t)
+    const residSeries = times.map((t, i) => {
+      const sPct = assetPct[i] || 0;
+      const vPt = volPt[i] || 0;
+      const r = vPt - alpha + beta * sPct;
+      return Math.round(r * 10000) / 10000;
+    });
+
+    const posResid = residSeries.map(v => Math.max(0, v));
+    const negResid = residSeries.map(v => Math.min(0, v));
+    const residCustomdata = residSeries.map(v => (v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2)));
+
+    // Emerald Green shading to zero when Residual > 0
+    const tracePosFill = {
       x: times,
-      y: rollingCorr,
-      name: isAnchored ? `Rolling Context (${corrTraceName})` : corrTraceName,
+      y: posResid,
       mode: 'lines',
-      line: { 
-        color: isAnchored ? (isNdx ? 'rgba(168, 85, 247, 0.40)' : 'rgba(0, 229, 255, 0.40)') : corrColor, 
-        width: isAnchored ? 1.5 : 2,
-        dash: isAnchored ? 'dot' : 'solid'
-      },
+      line: { color: 'transparent', width: 0 },
+      fill: 'tozeroy',
+      fillcolor: 'rgba(16, 185, 129, 0.22)',
       xaxis: 'x',
       yaxis: 'y3',
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${corrHoverLabel}: %{y:.3f}<extra></extra>`
+      showlegend: false,
+      hoverinfo: 'none'
     };
 
-    // Anchored Recovery Correlation (Foreground recovery trajectory strictly since anchor)
-    // Suppressed during first 10 bars post-anchor where statistical confidence is low
-    const hasAnchoredCorr = isAnchored && anchoredSeries.anchoredCorr && (anchoredSeries.latestAnchoredCorr !== null);
-    const traceAnchoredCorr = hasAnchoredCorr ? {
+    // Rose Red shading to zero when Residual < 0
+    const traceNegFill = {
       x: times,
-      y: anchoredSeries.anchoredCorr,
-      name: `Anchored Recovery ρ (${assetLabel}, ${volLabel})`,
+      y: negResid,
       mode: 'lines',
-      line: { color: '#F59E0B', width: 2.8 },
+      line: { color: 'transparent', width: 0 },
+      fill: 'tozeroy',
+      fillcolor: 'rgba(244, 63, 94, 0.22)',
       xaxis: 'x',
       yaxis: 'y3',
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>⚓ Anchored Recovery ρ: %{y:.3f}<extra></extra>`
-    } : null;
+      showlegend: false,
+      hoverinfo: 'none'
+    };
 
-    const traceZero = {
+    const traceResidual = {
+      x: times,
+      y: residSeries,
+      customdata: residCustomdata,
+      name: isNdx ? 'Over-VXN Residual' : 'Overvix Residual',
+      mode: 'lines',
+      line: { color: isNdx ? '#C084FC' : '#00E5FF', width: 1.8 },
+      xaxis: 'x',
+      yaxis: 'y3',
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${isNdx ? 'Over-VXN' : 'Overvix'} Residual: %{customdata} pts<extra></extra>`
+    };
+
+    const traceZeroLine = {
       x: [dStart, dEnd],
       y: [0.0, 0.0],
       mode: 'lines',
-      name: 'Decoupling Line (0.0)',
-      line: { color: '#EF4444', width: 1.5, dash: 'dash' },
+      name: 'Zero Baseline (0.0 pts)',
+      line: { color: 'rgba(148, 163, 184, 0.5)', width: 1.2, dash: 'dash' },
       xaxis: 'x',
       yaxis: 'y3',
       showlegend: false,
       hoverinfo: 'none'
     };
 
-    const traceStress = {
+    const traceOvervixAlert = {
       x: [dStart, dEnd],
-      y: [-0.50, -0.50],
+      y: [thresh, thresh],
       mode: 'lines',
-      name: 'Regime Shift (-0.50)',
-      line: { color: '#F59E0B', width: 1.5, dash: 'dot' },
+      name: `${isNdx ? 'Over-VXN' : 'Overvix'} Alert (+${thresh.toFixed(1)} pts)`,
+      line: { color: '#F43F5E', width: 1.5, dash: 'dash' },
       xaxis: 'x',
       yaxis: 'y3',
       showlegend: false,
       hoverinfo: 'none'
     };
 
-    const traceBaseline = {
+    const traceVolCrush = {
       x: [dStart, dEnd],
-      y: [-0.75, -0.75],
+      y: [-thresh, -thresh],
       mode: 'lines',
-      name: 'Normal Band (-0.70 to -0.85)',
-      line: { color: '#10B981', width: 1, dash: 'dot' },
+      name: `Vol Crush (-${thresh.toFixed(1)} pts)`,
+      line: { color: '#06B6D4', width: 1.2, dash: 'dot' },
       xaxis: 'x',
       yaxis: 'y3',
       showlegend: false,
@@ -2250,17 +2291,45 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       showlegend: false
     } : null;
 
+    // Anchor Origin Marker on lower subplot: cyan glowing dot at (anchorTime, 0.0)
+    const traceAnchorOriginY3 = (isAnchored && anchoredSeries.anchorTime) ? {
+      x: [anchoredSeries.anchorTime],
+      y: [0.0],
+      mode: 'markers',
+      name: '⚓ Anchor (0, 0)',
+      marker: {
+        color: '#00E5FF',
+        size: 8,
+        symbol: 'circle',
+        line: { color: '#FFFFFF', width: 1.8 }
+      },
+      xaxis: 'x',
+      yaxis: 'y3',
+      hovertemplate: `<b>⚓ Anchor Origin Point</b><br>Time: %{x|${timeHoverFmt}}<br>Residual: 0.00 pts<extra></extra>`,
+      showlegend: false
+    } : null;
+
+    let maxAbsResid = thresh;
+    for (let i = 0; i < residSeries.length; i++) {
+      const absVal = Math.abs(residSeries[i]);
+      if (!isNaN(absVal) && absVal > maxAbsResid) {
+        maxAbsResid = absVal;
+      }
+    }
+    const y3Limit = Math.ceil((maxAbsResid * 1.18) * 10) / 10;
+    const y3Range = [-y3Limit, y3Limit];
+
     const plotTraces = [];
     if (dualRibbonTraces && dualRibbonTraces.length > 0) {
       plotTraces.push(...dualRibbonTraces);
     }
-    plotTraces.push(traceAsset, traceVol, traceCorr);
-    if (traceAnchoredCorr) {
-      plotTraces.push(traceAnchoredCorr);
-    }
-    plotTraces.push(traceZero, traceStress, traceBaseline);
+    plotTraces.push(traceAsset, traceVol);
+    plotTraces.push(tracePosFill, traceNegFill, traceResidual, traceZeroLine, traceOvervixAlert, traceVolCrush);
     if (traceAnchorOrigin) {
       plotTraces.push(traceAnchorOrigin);
+    }
+    if (traceAnchorOriginY3) {
+      plotTraces.push(traceAnchorOriginY3);
     }
 
     const layout = {
@@ -2329,10 +2398,11 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       },
       yaxis3: {
         domain: [0.0, 0.40],
-        title: { text: 'Rolling ρ', font: { color: corrColor, size: 10 } },
+        title: { text: isNdx ? 'Over-VXN Residual (pts)' : 'Residual (pts)', font: { color: isNdx ? '#C084FC' : '#00E5FF', size: 10 } },
         gridcolor: '#1e293b',
-        tickfont: { color: '#94A3B8', size: 10 },
-        range: [-1.05, upperY],
+        tickfont: { color: isNdx ? '#C084FC' : '#00E5FF', size: 10 },
+        range: y3Range,
+        zeroline: false,
         fixedrange: true
       },
       legend: {
@@ -2775,41 +2845,8 @@ function updateUI(data) {
     if (ndx.correlation.corr_5d !== undefined) cachedCorrNdx.metrics['5D'] = ndx.correlation.corr_5d;
     if (ndx.correlation.corr_1y !== undefined) cachedCorrNdx.metrics['1Y'] = ndx.correlation.corr_1y;
   }
+  // Update Overvix Residual Metric & Status Pill
   updateCorrMetricDisplay();
-
-  const activeCorrObj = (isNdx && ndx && ndx.correlation) ? ndx.correlation : corr;
-  if (activeCorrObj) {
-    let corrVal = null;
-    const m = (isNdx && cachedCorrNdx.metrics) ? cachedCorrNdx.metrics : (cachedCorr.metrics || {});
-    if (m[currentCorrTf] !== undefined && m[currentCorrTf] !== null) {
-      corrVal = m[currentCorrTf];
-    } else {
-      const c = isNdx ? cachedCorrNdx : cachedCorr;
-      const ds = c[currentCorrTf];
-      if (ds && ds.rolling_corr && ds.rolling_corr.length > 0) {
-        corrVal = ds.rolling_corr[ds.rolling_corr.length - 1];
-      }
-    }
-    if (corrVal === null || corrVal === undefined) {
-      corrVal = (currentCorrTf === '1D') ? activeCorrObj.rolling_corr : ((currentCorrTf === '5D') ? (activeCorrObj.corr_5d || activeCorrObj.rolling_corr) : (activeCorrObj.corr_1y || activeCorrObj.rolling_corr));
-    }
-    const corrPill = document.getElementById('corr-status-pill');
-    if (corrPill) {
-      if (corrVal <= -0.50) {
-        corrPill.textContent = `Normal Inverse (ρ = ${fmtNum(corrVal, 3)})`;
-        corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800";
-        corrPill.title = "Typical baseline oscillating between -0.70 and -0.85 (Regime Indicator)";
-      } else if (corrVal < 0.0) {
-        corrPill.textContent = `Stress / Shift (ρ = ${fmtNum(corrVal, 3)})`;
-        corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 animate-pulse";
-        corrPill.title = "Broke above -0.50: Vol-of-vol stress, call-buying frenzy, or dealer repositioning";
-      } else {
-        corrPill.textContent = `Positive Decoupling (ρ = ${fmtNum(corrVal, 3)})`;
-        corrPill.className = "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 animate-pulse";
-        corrPill.title = "Positive correlation: Spot and Vol moving in tandem (extreme stress / frenzy)";
-      }
-    }
-  }
 
   // Time & Tags
   const now = new Date();
