@@ -116,7 +116,7 @@ class DashboardState:
         self.df_ts_1d = pd.DataFrame()       # Intraday 1-min bars for VIX/VIX3M
         self.df_ts_5d = pd.DataFrame()       # Recent 5-day 5-min bars for VIX/VIX3M
         self.df_ts_1m = pd.DataFrame()       # 1-Month 30-min bars for VIX/VIX3M
-        self.df_ts_3m = pd.DataFrame()       # 3-Month 4-hour bars for VIX/VIX3M
+        self.df_ts_3m = pd.DataFrame()       # 3-Month 2-hour bars for VIX/VIX3M
         self.df_ts_6m = pd.DataFrame()       # 6-Month 4-hour bars for VIX/VIX3M
         self.df_ts_ytd = pd.DataFrame()      # YTD daily bars for VIX/VIX3M
         self.df_ts_1y = pd.DataFrame()       # Macro 1-year daily bars for VIX/VIX3M
@@ -125,7 +125,7 @@ class DashboardState:
         self.df_spx_vix_1d = pd.DataFrame()  # Intraday 1-min bars for SPX & VIX
         self.df_spx_vix_5d = pd.DataFrame()  # 5-day 5-min bars for SPX & VIX
         self.df_spx_vix_1m = pd.DataFrame()  # 1-Month 30-min bars for SPX & VIX
-        self.df_spx_vix_3m = pd.DataFrame()  # 3-Month 4-hour bars for SPX & VIX
+        self.df_spx_vix_3m = pd.DataFrame()  # 3-Month 2-hour bars for SPX & VIX
         self.df_spx_vix_6m = pd.DataFrame()  # 6-Month 4-hour bars for SPX & VIX
         self.df_spx_vix_ytd = pd.DataFrame() # YTD daily bars for SPX & VIX
         self.df_spx_vix_1y = pd.DataFrame()  # Macro 1-year daily bars for SPX & VIX
@@ -136,7 +136,7 @@ class DashboardState:
         self.df_ndx_vxn_1d = pd.DataFrame()  # Intraday 1-min bars for NDX & VXN
         self.df_ndx_vxn_5d = pd.DataFrame()  # 5-day 5-min bars for NDX & VXN
         self.df_ndx_vxn_1m = pd.DataFrame()  # 1-Month 30-min bars for NDX & VXN
-        self.df_ndx_vxn_3m = pd.DataFrame()  # 3-Month 4-hour bars for NDX & VXN
+        self.df_ndx_vxn_3m = pd.DataFrame()  # 3-Month 2-hour bars for NDX & VXN
         self.df_ndx_vxn_6m = pd.DataFrame()  # 6-Month 4-hour bars for NDX & VXN
         self.df_ndx_vxn_ytd = pd.DataFrame() # YTD daily bars for NDX & VXN
         self.df_ndx_vxn_1y = pd.DataFrame()  # Macro 1-year daily bars for NDX & VXN
@@ -360,7 +360,7 @@ async def refresh_historical_data():
       - 1D: 1-minute intraday bars (today's active session)
       - 5D: 5-minute weekly bars (~390 bars)
       - 1M: 30-minute monthly bars (~286 bars)
-      - 3M: 4-hour quarterly bars (~133 bars, native VIX3M contract match)
+      - 3M: 2-hour quarterly bars (~256 bars, native VIX3M contract match)
       - 6M: 4-hour semi-annual bars (~257 bars)
       - YTD: Daily bars from Jan 1 of active session year
       - 1Y: Macro daily bars (252 trading days)
@@ -419,7 +419,7 @@ async def refresh_historical_data():
                         barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
                     )
 
-        # 2. Fetch Multi-Timeframe Bars (1M 30m, 3M 4h, 6M 4h, 2Y 1d) in parallel
+        # 2. Fetch Multi-Timeframe Bars (1M 30m, 3M 2h, 6M 4h, 2Y 1d) in parallel
         (b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn,
          b3m_spx, b3m_vix, b3m_vix3m, b3m_ndx, b3m_vxn,
          b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn,
@@ -430,11 +430,11 @@ async def refresh_historical_data():
             state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '1 M', '30 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '1 M', '30 mins', 'TRADES', True, 1),
 
-            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '3 M', '4 hours', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '3 M', '4 hours', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '3 M', '4 hours', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '3 M', '4 hours', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '3 M', '4 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '3 M', '2 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '3 M', '2 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '3 M', '2 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '3 M', '2 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '3 M', '2 hours', 'TRADES', True, 1),
 
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '6 M', '4 hours', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix_contract, '', '6 M', '4 hours', 'TRADES', True, 1),
@@ -641,10 +641,10 @@ async def refresh_historical_data():
             b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn, roll_win=39, min_p=10
         )
 
-        # 6. Process 3M Bars (4-hour)
+        # 6. Process 3M Bars (2-hour)
         (state.df_ts_3m, state.df_spx_vix_3m, state.df_ndx_vxn_3m,
          state.df_tech_vol_3m, state.corr_3m, state.corr_3m_ndx) = build_horizon_pack(
-            b3m_spx, b3m_vix, b3m_vix3m, b3m_ndx, b3m_vxn, roll_win=20, min_p=5
+            b3m_spx, b3m_vix, b3m_vix3m, b3m_ndx, b3m_vxn, roll_win=35, min_p=10
         )
 
         # 7. Process 6M Bars (4-hour)
@@ -736,7 +736,7 @@ async def refresh_historical_data():
         state.hist_version += 1
         print(f"[IBKR] Baseline & multi-timeframe datasets successfully loaded (Version {state.hist_version}):")
         print(f"       1D={len(state.df_ts_1d)} bars, 5D={len(state.df_ts_5d)} bars, 1M={len(state.df_ts_1m)} bars (30m), "
-              f"3M={len(state.df_ts_3m)} bars (4h), 6M={len(state.df_ts_6m)} bars (4h), YTD={len(state.df_ts_ytd)} bars, "
+              f"3M={len(state.df_ts_3m)} bars (2h), 6M={len(state.df_ts_6m)} bars (4h), YTD={len(state.df_ts_ytd)} bars, "
               f"1Y={len(state.df_ts_1y)} bars, MAX={len(state.df_ts_max)} bars.")
 
     except Exception as ex:

@@ -47,7 +47,7 @@ The **Overvix Terminal** monitors the real-time pricing relationship between spo
   1. **`1D`**: Intraday 1-minute RTH bars (390 bars) with rolling 30-min Pearson correlation.
   2. **`5D`**: 1-Week 5-minute bars (~390 bars) with rolling 1-day Pearson correlation.
   3. **`1M`**: 1-Month 30-minute bars (~286 bars) for granular monthly OPEX and swing cycle analysis.
-  4. **`3M`**: Quarterly 4-hour bars (~133 bars) **natively matched to the 90-day VIX3M contract tenor**.
+  4. **`3M`**: Quarterly 2-hour bars (~256 bars) **natively matched to the 90-day VIX3M contract tenor**.
   5. **`6M`**: Semi-Annual 4-hour bars (~257 bars) for multi-quarter volatility cycles.
   6. **`YTD`**: Year-to-Date daily bars from Jan 1 of active year for institutional benchmark performance.
   7. **`1Y`**: 1-Year macro daily bars (252 trading sessions) for annual baseline seasonality.
