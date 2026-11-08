@@ -651,9 +651,7 @@ function switchTrailMode(mode) {
   }
 }
 
-// Correlation Mode & Timeframe Selector
-const btnCorrDual = document.getElementById('btn-corr-dual');
-const btnCorrOnly = document.getElementById('btn-corr-only');
+// Correlation Timeframe & Display Controls
 const btnCorrInvert = document.getElementById('btn-corr-invert');
 const corrInvertGroup = document.getElementById('corr-invert-group');
 const corrInvertIcon = document.getElementById('corr-invert-icon');
@@ -662,10 +660,7 @@ const corrSubtitle = document.getElementById('corr-subtitle');
 const corrLiveLabel = document.getElementById('corr-live-label');
 
 function setupCorrButtons() {
-  btnCorrDual.addEventListener('click', () => switchCorrMode('dual'));
-  btnCorrOnly.addEventListener('click', () => switchCorrMode('corr_only'));
   if (btnCorrInvert) btnCorrInvert.addEventListener('click', () => toggleCorrVolInvert());
-
   setupAnchorButtons();
 }
 
@@ -735,18 +730,9 @@ function toggleCorrVolInvert() {
   renderCorrelationChart(currentCorrMode, currentCorrTf);
 }
 
-function switchCorrMode(mode) {
-  currentCorrMode = mode;
-  if (mode === 'dual') {
-    btnCorrDual.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
-    btnCorrOnly.className = "px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition";
-    if (corrInvertGroup) corrInvertGroup.style.display = "flex";
-  } else {
-    btnCorrOnly.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
-    btnCorrDual.className = "px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition";
-    if (corrInvertGroup) corrInvertGroup.style.display = "none";
-  }
-  renderCorrelationChart(mode, currentCorrTf);
+function switchCorrMode(mode = 'dual') {
+  currentCorrMode = 'dual';
+  renderCorrelationChart('dual', currentCorrTf);
 }
 
 function switchCorrTf(tf, triggeredBySlider = false) {
@@ -1864,9 +1850,15 @@ function computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted) {
   return { range1, range2, alpha };
 }
 
-function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
+function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
+  let targetTf = currentCorrTf;
+  if (tf) {
+    targetTf = tf;
+  } else if (modeOrTf && TF_CONFIG[modeOrTf]) {
+    targetTf = modeOrTf;
+  }
   const isNdx = (currentAssetPair === 'NDX');
-  const c = isNdx ? (cachedCorrNdx[tf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[tf] || cachedCorr['1D'] || cachedCorr);
+  const c = isNdx ? (cachedCorrNdx[targetTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[targetTf] || cachedCorr['1D'] || cachedCorr);
   const times = c.times || [];
   const rollingCorr = c.rolling_corr || [];
 
@@ -1926,7 +1918,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
   }
   const upperY = maxCorrVal > 0 ? Math.min(1.05, Math.ceil((maxCorrVal + 0.05) * 10) / 10) : 0.05;
 
-  const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
+  const conf = TF_CONFIG[targetTf] || TF_CONFIG['1D'];
   const xTitle = conf.xTitle;
   const tickformat = conf.tickformat;
   const rangebreaks = conf.rangebreaks || [];
@@ -1974,8 +1966,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
     }
   ] : [];
 
-  if (mode === 'dual') {
-    const dualRanges = computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted);
+  const dualRanges = computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted);
 
     // Subplot 1: Asset % Move (left axis) vs Vol pt move (right axis)
     const traceAsset = {
@@ -2180,120 +2171,10 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       showlegend: true
     };
 
-    Plotly.newPlot('correlation-chart', plotTraces, layout, {
-      responsive: true,
-      displayModeBar: false
-    }).then(attachCorrelationChartClickListener);
-  } else {
-    // Correlation Only mode (single large plot)
-    const traceCorr = {
-      x: times,
-      y: rollingCorr,
-      name: isAnchored ? `Rolling Context (${corrTraceName})` : corrTraceName,
-      mode: 'lines',
-      line: { 
-        color: isAnchored ? (isNdx ? 'rgba(168, 85, 247, 0.40)' : 'rgba(0, 229, 255, 0.40)') : corrColor, 
-        width: isAnchored ? 1.5 : 2.2,
-        dash: isAnchored ? 'dot' : 'solid'
-      },
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${corrHoverLabel}: %{y:.3f}<extra></extra>`
-    };
-
-    const hasAnchoredCorr = isAnchored && anchoredSeries.anchoredCorr && (anchoredSeries.latestAnchoredCorr !== null);
-    const traceAnchoredCorr = hasAnchoredCorr ? {
-      x: times,
-      y: anchoredSeries.anchoredCorr,
-      name: `Anchored Recovery ρ (${assetLabel}, ${volLabel})`,
-      mode: 'lines',
-      line: { color: '#F59E0B', width: 3.0 },
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>⚓ Anchored Recovery ρ: %{y:.3f}<extra></extra>`
-    } : null;
-
-    const traceZero = {
-      x: [dStart, dEnd],
-      y: [0.0, 0.0],
-      mode: 'lines',
-      name: 'Decoupling (0.0)',
-      line: { color: '#EF4444', width: 1.5, dash: 'dash' },
-      showlegend: false,
-      hoverinfo: 'none'
-    };
-
-    const traceStress = {
-      x: [dStart, dEnd],
-      y: [-0.50, -0.50],
-      mode: 'lines',
-      name: 'Regime Shift (-0.50)',
-      line: { color: '#F59E0B', width: 1.5, dash: 'dot' },
-      showlegend: false,
-      hoverinfo: 'none'
-    };
-
-    const traceBaseline = {
-      x: [dStart, dEnd],
-      y: [-0.75, -0.75],
-      mode: 'lines',
-      name: 'Normal Band (-0.70 to -0.85)',
-      line: { color: '#10B981', width: 1, dash: 'dot' },
-      showlegend: false,
-      hoverinfo: 'none'
-    };
-
-    const plotTracesOnly = [traceCorr];
-    if (traceAnchoredCorr) {
-      plotTracesOnly.push(traceAnchoredCorr);
-    }
-    plotTracesOnly.push(traceZero, traceStress, traceBaseline);
-
-    const layout = {
-      paper_bgcolor: 'transparent',
-      plot_bgcolor: 'transparent',
-      autosize: true,
-      hovermode: 'x',
-      dragmode: false,
-      clickmode: 'event',
-      hoverdistance: 50,
-      margin: { l: 55, r: 30, t: 25, b: 35 },
-      xaxis: {
-        type: 'date',
-        rangebreaks: rangebreaks,
-        tickformat: tickformat,
-        title: { text: xTitle, font: { color: '#94A3B8', size: 10 } },
-        gridcolor: '#1e293b',
-        tickfont: { color: '#94A3B8', size: 10 },
-        showgrid: true,
-        nticks: 10,
-        fixedrange: true,
-        showspikes: true,
-        spikemode: 'across',
-        spikesnap: 'cursor',
-        spikecolor: '#00E5FF',
-        spikethickness: 1,
-        spikedash: 'dot'
-      },
-      yaxis: {
-        title: { text: `Rolling Pearson ρ(${assetLabel}, ${volLabel})`, font: { color: corrColor, size: 10 } },
-        gridcolor: '#1e293b',
-        tickfont: { color: '#94A3B8', size: 10 },
-        range: [-1.05, upperY],
-        fixedrange: true
-      },
-      legend: {
-        orientation: 'h',
-        x: 0,
-        y: 1.1,
-        font: { color: '#94A3B8', size: 10 }
-      },
-      shapes: anchorShapes,
-      annotations: anchorAnnotations,
-      showlegend: true
-    };
-
-    Plotly.newPlot('correlation-chart', plotTracesOnly, layout, {
-      responsive: true,
-      displayModeBar: false
-    }).then(attachCorrelationChartClickListener);
-  }
+  Plotly.newPlot('correlation-chart', plotTraces, layout, {
+    responsive: true,
+    displayModeBar: false
+  }).then(attachCorrelationChartClickListener);
 }
 
 let lastAnchorClickTimestamp = 0;
@@ -2974,19 +2855,7 @@ function updateUI(data) {
         cr.rolling_corr.push(corrVal);
       }
 
-      if (currentCorrMode === 'dual' || corrAnchor.active) {
-        renderCorrelationChart(currentCorrMode, currentCorrTf);
-      } else {
-        Plotly.restyle('correlation-chart', {
-          x: [cr.times],
-          y: [cr.rolling_corr]
-        }, [0]);
-        if (cr.times.length > 0) {
-          Plotly.restyle('correlation-chart', {
-            x: [[cr.times[0], liveDt], [cr.times[0], liveDt]]
-          }, [1, 2]);
-        }
-      }
+      renderCorrelationChart('dual', currentCorrTf);
     } else {
       let cr = cachedCorr['1D'];
       if (!cr || !cr.times) {
@@ -3021,19 +2890,7 @@ function updateUI(data) {
         if (corr) cr.rolling_corr.push(corr.rolling_corr);
       }
 
-      if (currentCorrMode === 'dual' || corrAnchor.active) {
-        renderCorrelationChart(currentCorrMode, currentCorrTf);
-      } else {
-        Plotly.restyle('correlation-chart', {
-          x: [cr.times],
-          y: [cr.rolling_corr]
-        }, [0]);
-        if (cr.times.length > 0) {
-          Plotly.restyle('correlation-chart', {
-            x: [[cr.times[0], liveDt], [cr.times[0], liveDt]]
-          }, [1, 2]);
-        }
-      }
+      renderCorrelationChart('dual', currentCorrTf);
     }
   }
 }
