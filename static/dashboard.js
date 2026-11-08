@@ -1877,6 +1877,32 @@ function computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted, isBeta = i
   return { range1, range2, alpha };
 }
 
+function computeDualRibbonSeries(times, assetPct, volPt, beta, alpha = 0) {
+  if (!times || times.length === 0 || !assetPct || !volPt) return null;
+
+  const vScaled = volPt.map(v => (typeof v === 'number' && !isNaN(v)) ? ((-v + alpha) / beta) : null);
+
+  const vArr = [];
+  const minArr = [];
+  const maxArr = [];
+
+  for (let i = 0; i < times.length; i++) {
+    const s = assetPct[i];
+    const v = vScaled[i];
+
+    vArr.push(v);
+    if (typeof s === 'number' && !isNaN(s) && typeof v === 'number' && !isNaN(v)) {
+      minArr.push(Math.min(s, v));
+      maxArr.push(Math.max(s, v));
+    } else {
+      minArr.push(null);
+      maxArr.push(null);
+    }
+  }
+
+  return { xArr: times, vArr, minArr, maxArr };
+}
+
 function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   let targetTf = currentCorrTf;
   if (tf) {
@@ -2038,19 +2064,61 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       : `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{y:+.2f}%<extra></extra>`
   };
 
-  // Shaded Divergence Ribbon: fill area between Spot % and Vol (in % units) when Beta Scaled and Invert Vol are active
-  const traceDivergenceRibbon = (isBetaScaled && isVolInverted) ? {
-    x: times,
-    y: volPt.map(v => (typeof v === 'number' && !isNaN(v)) ? (-v / beta) : null),
-    mode: 'lines',
-    line: { color: 'transparent', width: 0 },
-    fill: 'tonexty',
-    fillcolor: 'rgba(244, 63, 94, 0.16)', // Subtle rose shading highlighting Overvix residual divergence
-    xaxis: 'x',
-    yaxis: 'y',
-    hoverinfo: 'none',
-    showlegend: false
-  } : null;
+  // Shaded Divergence Ribbon: dual-color fill area between Spot % and Vol (in % units) when Beta Scaled and Invert Vol are active
+  // Green when Spot > Vol (Positive Overvix Residual: Spot outperformed / Vol crushed)
+  // Red when Spot < Vol (Negative Overvix Residual: Vol spiked / panic)
+  let dualRibbonTraces = null;
+  if (isBetaScaled && isVolInverted && times.length > 0) {
+    const alpha = (!isAnchored && targetTf === '1D') ? rawIntercept : 0;
+    const ribbonData = computeDualRibbonSeries(times, assetPct, volPt, beta, alpha);
+    if (ribbonData && ribbonData.xArr.length > 0) {
+      const traceVolRef1 = {
+        x: ribbonData.xArr,
+        y: ribbonData.vArr,
+        mode: 'lines',
+        line: { color: 'transparent', width: 0 },
+        xaxis: 'x',
+        yaxis: 'y',
+        hoverinfo: 'none',
+        showlegend: false
+      };
+      const traceRedRibbon = {
+        x: ribbonData.xArr,
+        y: ribbonData.minArr,
+        mode: 'lines',
+        line: { color: 'transparent', width: 0 },
+        fill: 'tonexty',
+        fillcolor: 'rgba(244, 63, 94, 0.22)', // Red when Spot < Vol (Negative Overvix residual)
+        xaxis: 'x',
+        yaxis: 'y',
+        hoverinfo: 'none',
+        showlegend: false
+      };
+      const traceVolRef2 = {
+        x: ribbonData.xArr,
+        y: ribbonData.vArr,
+        mode: 'lines',
+        line: { color: 'transparent', width: 0 },
+        xaxis: 'x',
+        yaxis: 'y',
+        hoverinfo: 'none',
+        showlegend: false
+      };
+      const traceGreenRibbon = {
+        x: ribbonData.xArr,
+        y: ribbonData.maxArr,
+        mode: 'lines',
+        line: { color: 'transparent', width: 0 },
+        fill: 'tonexty',
+        fillcolor: 'rgba(16, 185, 129, 0.22)', // Green when Spot > Vol (Positive Overvix residual)
+        xaxis: 'x',
+        yaxis: 'y',
+        hoverinfo: 'none',
+        showlegend: false
+      };
+      dualRibbonTraces = [traceVolRef1, traceRedRibbon, traceVolRef2, traceGreenRibbon];
+    }
+  }
 
   // Vol Customdata: [volRaw, instantaneous Overvix residual]
   const volCustomdata = times.map((t, i) => {
@@ -2171,11 +2239,11 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       showlegend: false
     } : null;
 
-    const plotTraces = [traceAsset];
-    if (traceDivergenceRibbon) {
-      plotTraces.push(traceDivergenceRibbon);
+    const plotTraces = [];
+    if (dualRibbonTraces && dualRibbonTraces.length > 0) {
+      plotTraces.push(...dualRibbonTraces);
     }
-    plotTraces.push(traceVol, traceCorr);
+    plotTraces.push(traceAsset, traceVol, traceCorr);
     if (traceAnchoredCorr) {
       plotTraces.push(traceAnchoredCorr);
     }
