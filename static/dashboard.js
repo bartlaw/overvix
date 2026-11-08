@@ -60,6 +60,17 @@ let cachedCorrNdx = {
 };
 let currentCorrTf = '1D';
 
+// Recovery Anchor State for Dynamic Correlation & Divergence Monitor
+let corrAnchor = {
+  active: false,
+  mode: 'open',       // 'open' (default), 'spot_low', 'vol_high', 'custom'
+  time: null,         // timestamp string or null
+  index: -1,
+  spotBase: null,
+  volBase: null,
+  label: 'Session Baseline'
+};
+
 // Initialize Sound Synthesizer via Web Audio API
 function initAudio() {
   if (!audioCtx) {
@@ -280,6 +291,8 @@ function switchAssetPair(pair) {
   const dispEl = document.getElementById('disp-thresh-pts');
   if (dispEl) dispEl.textContent = currentThreshold.toFixed(1);
 
+  updateAnchorUI();
+
   // Re-render charts and UI immediately from cache
   const activeData = (currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap;
   if (activeData) {
@@ -383,6 +396,60 @@ function setupCorrButtons() {
   if (btnCorrTf1D) btnCorrTf1D.addEventListener('click', () => switchCorrTf('1D'));
   if (btnCorrTf5D) btnCorrTf5D.addEventListener('click', () => switchCorrTf('5D'));
   if (btnCorrTf1Y) btnCorrTf1Y.addEventListener('click', () => switchCorrTf('1Y'));
+
+  setupAnchorButtons();
+}
+
+function setupAnchorButtons() {
+  const btnOpen = document.getElementById('btn-anchor-open');
+  const btnSpotLow = document.getElementById('btn-anchor-spot-low');
+  const btnVolHigh = document.getElementById('btn-anchor-vol-high');
+  const btnCustomToggle = document.getElementById('btn-anchor-custom-toggle');
+  const btnApplyCustom = document.getElementById('btn-apply-custom-time');
+  const btnReset = document.getElementById('btn-anchor-reset');
+  const customWrapper = document.getElementById('anchor-custom-wrapper');
+  const timePicker = document.getElementById('anchor-time-picker');
+
+  if (btnOpen) {
+    btnOpen.addEventListener('click', () => setCorrAnchor('open'));
+  }
+  if (btnSpotLow) {
+    btnSpotLow.addEventListener('click', () => setCorrAnchor('spot_low'));
+  }
+  if (btnVolHigh) {
+    btnVolHigh.addEventListener('click', () => setCorrAnchor('vol_high'));
+  }
+  if (btnCustomToggle) {
+    btnCustomToggle.addEventListener('click', () => {
+      if (customWrapper) {
+        customWrapper.classList.toggle('hidden');
+        customWrapper.classList.toggle('flex');
+        if (!customWrapper.classList.contains('hidden') && timePicker) {
+          timePicker.focus();
+          timePicker.select();
+        }
+      }
+    });
+  }
+  if (btnApplyCustom) {
+    btnApplyCustom.addEventListener('click', () => {
+      if (timePicker && timePicker.value) {
+        setCorrAnchor('custom', timePicker.value.trim());
+      }
+    });
+  }
+  if (timePicker) {
+    timePicker.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        if (timePicker.value) {
+          setCorrAnchor('custom', timePicker.value.trim());
+        }
+      }
+    });
+  }
+  if (btnReset) {
+    btnReset.addEventListener('click', () => setCorrAnchor('open'));
+  }
 }
 
 function toggleCorrVolInvert() {
@@ -888,16 +955,524 @@ function renderTermStructureChart(tf = '1D') {
   });
 }
 
+// ==============================================================================
+// RECOVERY ANCHOR & LEADER DIAGNOSTIC ENGINE (DYNAMIC CORRELATION)
+// ==============================================================================
+
+function getRawSpotVolSeries(c, isNdx) {
+  const times = c.times || [];
+  const len = times.length;
+  let spot = [];
+  let vol = [];
+
+  if (isNdx) {
+    if (c.ndx_raw && c.ndx_raw.length === len) spot = c.ndx_raw.slice();
+    else if (c.spot_raw && c.spot_raw.length === len) spot = c.spot_raw.slice();
+    if (c.vxn_raw && c.vxn_raw.length === len) vol = c.vxn_raw.slice();
+    else if (c.vol_raw && c.vol_raw.length === len) vol = c.vol_raw.slice();
+  } else {
+    if (c.spx_raw && c.spx_raw.length === len) spot = c.spx_raw.slice();
+    else if (c.spot_raw && c.spot_raw.length === len) spot = c.spot_raw.slice();
+    if (c.vix_raw && c.vix_raw.length === len) vol = c.vix_raw.slice();
+    else if (c.vol_raw && c.vol_raw.length === len) vol = c.vol_raw.slice();
+  }
+
+  const spotPcts = isNdx ? (c.ndx_pct || c.spx_pct || []) : (c.spx_pct || []);
+  const volPts = isNdx ? (c.vxn_pt || c.vix_pt || []) : (c.vix_pt || []);
+
+  if (spot.length !== len) {
+    let refSpot = 100.0;
+    if (cachedBootstrap) {
+      if (isNdx && cachedBootstrap.ndx && cachedBootstrap.ndx.market && cachedBootstrap.ndx.market.current) {
+        const curr = cachedBootstrap.ndx.market.current;
+        const lastPct = spotPcts.length > 0 ? spotPcts[spotPcts.length - 1] : 0;
+        refSpot = curr / (1 + (lastPct || 0) / 100);
+      } else if (cachedBootstrap.market && cachedBootstrap.market.spx && cachedBootstrap.market.spx.current) {
+        const curr = cachedBootstrap.market.spx.current;
+        const lastPct = spotPcts.length > 0 ? spotPcts[spotPcts.length - 1] : 0;
+        refSpot = curr / (1 + (lastPct || 0) / 100);
+      }
+    }
+    spot = spotPcts.map(pct => refSpot * (1 + (pct || 0) / 100));
+  }
+
+  if (vol.length !== len) {
+    let refVol = 20.0;
+    if (cachedBootstrap) {
+      if (isNdx && cachedBootstrap.ndx && cachedBootstrap.ndx.market && cachedBootstrap.ndx.market.vxn && cachedBootstrap.ndx.market.vxn.current) {
+        const curr = cachedBootstrap.ndx.market.vxn.current;
+        const lastPt = volPts.length > 0 ? volPts[volPts.length - 1] : 0;
+        refVol = curr - lastPt;
+      } else if (cachedBootstrap.market && cachedBootstrap.market.vix && cachedBootstrap.market.vix.current) {
+        const curr = cachedBootstrap.market.vix.current;
+        const lastPt = volPts.length > 0 ? volPts[volPts.length - 1] : 0;
+        refVol = curr - lastPt;
+      }
+    }
+    vol = volPts.map(pt => refVol + (pt || 0));
+  }
+
+  return { spot, vol };
+}
+
+function findClosestTimeIndex(times, target) {
+  if (!times || times.length === 0 || target === null || target === undefined) return -1;
+  
+  // 1. If target is already a valid index number
+  if (typeof target === 'number' && Number.isInteger(target) && target >= 0 && target < times.length) {
+    return target;
+  }
+
+  const clean = String(target).trim();
+  if (!clean) return -1;
+
+  // 2. Exact match
+  for (let i = 0; i < times.length; i++) {
+    if (times[i] === clean) return i;
+  }
+
+  // 3. Substring match (either way: times[i] inside clean or clean inside times[i])
+  for (let i = 0; i < times.length; i++) {
+    if (clean.includes(times[i]) || times[i].includes(clean)) return i;
+  }
+
+  // 4. Prefix match up to minutes (e.g. '2026-11-06 10:45:00'[:16] === '2026-11-06 10:45')
+  if (clean.length >= 16) {
+    const cleanPrefix = clean.slice(0, 16).replace('T', ' ');
+    for (let i = 0; i < times.length; i++) {
+      const tPrefix = times[i].slice(0, 16).replace('T', ' ');
+      if (tPrefix === cleanPrefix) return i;
+    }
+  }
+
+  // 5. Epoch timestamp comparison (if numeric string or number > 1e9)
+  const num = Number(clean);
+  if (!isNaN(num) && num > 1e9) {
+    const targetMs = (num < 1e11) ? (num * 1000) : num;
+    let closestIdx = 0;
+    let minDiff = Infinity;
+    for (let i = 0; i < times.length; i++) {
+      const tMs = Date.parse(times[i].replace(' ', 'T'));
+      if (!isNaN(tMs)) {
+        const diff = Math.abs(tMs - targetMs);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestIdx = i;
+        }
+      }
+    }
+    return closestIdx;
+  }
+
+  // 6. Time HH:MM comparison (e.g. '10:45' or '10:45:00')
+  let cleanTime = clean;
+  if (clean.includes(' ')) {
+    cleanTime = clean.split(' ')[1];
+  } else if (clean.includes('T')) {
+    cleanTime = clean.split('T')[1];
+  }
+
+  if (cleanTime && cleanTime.includes(':')) {
+    const parts = cleanTime.split(':');
+    const targetMins = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+    if (!isNaN(targetMins)) {
+      let closestIdx = 0;
+      let minDiff = Infinity;
+      for (let i = 0; i < times.length; i++) {
+        const tStr = times[i].includes(' ') ? times[i].split(' ')[1] : times[i];
+        if (tStr && tStr.includes(':')) {
+          const tParts = tStr.split(':');
+          const tMins = parseInt(tParts[0], 10) * 60 + parseInt(tParts[1], 10);
+          if (!isNaN(tMins)) {
+            const diff = Math.abs(tMins - targetMins);
+            if (diff < minDiff) {
+              minDiff = diff;
+              closestIdx = i;
+            }
+          }
+        }
+      }
+      return closestIdx;
+    }
+  }
+
+  // 7. General Date.parse fallback
+  const parsedTarget = Date.parse(clean.replace(' ', 'T'));
+  if (!isNaN(parsedTarget)) {
+    let closestIdx = 0;
+    let minDiff = Infinity;
+    for (let i = 0; i < times.length; i++) {
+      const tMs = Date.parse(times[i].replace(' ', 'T'));
+      if (!isNaN(tMs)) {
+        const diff = Math.abs(tMs - parsedTarget);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestIdx = i;
+        }
+      }
+    }
+    return closestIdx;
+  }
+
+  return times.length - 1;
+}
+
+function setCorrAnchor(mode, targetTime = null) {
+  const isNdx = (currentAssetPair === 'NDX');
+  const c = isNdx ? (cachedCorrNdx[currentCorrTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[currentCorrTf] || cachedCorr['1D'] || cachedCorr);
+  const times = c.times || [];
+  if (!times || times.length === 0) return;
+
+  const assetLabel = isNdx ? 'NDX' : 'SPX';
+  const volLabel = isNdx ? 'VXN' : 'VIX';
+
+  if (mode === 'open') {
+    corrAnchor.active = false;
+    corrAnchor.mode = 'open';
+    corrAnchor.time = null;
+    corrAnchor.index = -1;
+    corrAnchor.spotBase = null;
+    corrAnchor.volBase = null;
+    corrAnchor.label = 'Session Baseline';
+    updateAnchorUI();
+    renderCorrelationChart(currentCorrMode, currentCorrTf);
+    return;
+  }
+
+  const raw = getRawSpotVolSeries(c, isNdx);
+  const spotRaw = raw.spot;
+  const volRaw = raw.vol;
+
+  let chosenIdx = -1;
+
+  if (mode === 'spot_low') {
+    let minVal = Infinity;
+    for (let i = 0; i < spotRaw.length; i++) {
+      if (typeof spotRaw[i] === 'number' && !isNaN(spotRaw[i]) && spotRaw[i] < minVal) {
+        minVal = spotRaw[i];
+        chosenIdx = i;
+      }
+    }
+    if (chosenIdx === -1) chosenIdx = 0;
+  } else if (mode === 'vol_high') {
+    let maxVal = -Infinity;
+    for (let i = 0; i < volRaw.length; i++) {
+      if (typeof volRaw[i] === 'number' && !isNaN(volRaw[i]) && volRaw[i] > maxVal) {
+        maxVal = volRaw[i];
+        chosenIdx = i;
+      }
+    }
+    if (chosenIdx === -1) chosenIdx = 0;
+  } else if (mode === 'custom') {
+    chosenIdx = findClosestTimeIndex(times, targetTime);
+    if (chosenIdx === -1) chosenIdx = 0;
+  }
+
+  if (chosenIdx < 0 || chosenIdx >= times.length) chosenIdx = 0;
+
+  corrAnchor.active = true;
+  corrAnchor.mode = mode;
+  corrAnchor.time = times[chosenIdx];
+  corrAnchor.index = chosenIdx;
+  corrAnchor.spotBase = spotRaw[chosenIdx];
+  corrAnchor.volBase = volRaw[chosenIdx];
+
+  const timeDisplay = (currentCorrTf === '1D') ? (corrAnchor.time.length > 10 ? corrAnchor.time.slice(11) : corrAnchor.time) : corrAnchor.time;
+  corrAnchor.label = `${timeDisplay} (${assetLabel}: ${corrAnchor.spotBase.toFixed(2)}, ${volLabel}: ${corrAnchor.volBase.toFixed(2)})`;
+
+  // Sync custom time input if available
+  const timePicker = document.getElementById('anchor-time-picker');
+  if (timePicker) {
+    const timeVal = (currentCorrTf === '1D') ? (corrAnchor.time.length > 10 ? corrAnchor.time.slice(11, 16) : corrAnchor.time) : corrAnchor.time;
+    timePicker.value = timeVal;
+  }
+
+  updateAnchorUI();
+  renderCorrelationChart(currentCorrMode, currentCorrTf);
+}
+
+function computeAnchoredSeries(c, isNdx) {
+  const times = c.times || [];
+  const raw = getRawSpotVolSeries(c, isNdx);
+  const spotRaw = raw.spot;
+  const volRaw = raw.vol;
+
+  if (!corrAnchor.active || corrAnchor.index < 0 || corrAnchor.index >= times.length) {
+    return {
+      times: times,
+      spotPct: isNdx ? (c.ndx_pct || c.spx_pct || []) : (c.spx_pct || []),
+      volPt: isNdx ? (c.vxn_pt || c.vix_pt || []) : (c.vix_pt || []),
+      spotRaw: spotRaw,
+      volRaw: volRaw,
+      isAnchored: false,
+      anchorIdx: -1,
+      anchorTime: null
+    };
+  }
+
+  const idx = corrAnchor.index;
+  const s0 = spotRaw[idx];
+  const v0 = volRaw[idx];
+
+  const anchoredSpotPct = spotRaw.map(s => (s0 > 0 ? ((s - s0) / s0 * 100.0) : 0));
+  const anchoredVolPt = volRaw.map(v => (v - v0));
+
+  return {
+    times: times,
+    spotPct: anchoredSpotPct,
+    volPt: anchoredVolPt,
+    spotRaw: spotRaw,
+    volRaw: volRaw,
+    isAnchored: true,
+    anchorIdx: idx,
+    anchorTime: times[idx],
+    s0: s0,
+    v0: v0
+  };
+}
+
+function evaluateRecoveryLeader(anchoredSeries, isNdx) {
+  if (!anchoredSeries.isAnchored || anchoredSeries.anchorIdx < 0) {
+    return null;
+  }
+
+  const { times, spotPct, volPt, spotRaw, volRaw, anchorIdx, s0, v0 } = anchoredSeries;
+  const len = times.length;
+  if (anchorIdx >= len - 1) {
+    return {
+      isLatest: true,
+      elapsedStr: '0m',
+      spotNetPct: 0,
+      spotNetPts: 0,
+      volNetPt: 0,
+      badgeClass: 'bg-slate-800 text-slate-300 border-slate-700',
+      tag: 'ANCHOR AT LATEST BAR',
+      summary: 'Anchor set at the latest bar. Monitoring incoming recovery ticks...'
+    };
+  }
+
+  const assetLabel = isNdx ? 'NDX' : 'SPX';
+  const volLabel = isNdx ? 'VXN' : 'VIX';
+
+  const lastIdx = len - 1;
+  const elapsedMinutes = lastIdx - anchorIdx;
+  const hours = Math.floor(elapsedMinutes / 60);
+  const mins = elapsedMinutes % 60;
+  const elapsedStr = (currentCorrTf === '1D') 
+    ? (hours > 0 ? `${hours}h ${mins}m` : `${mins}m`) 
+    : `${elapsedMinutes} bars`;
+
+  const spotNetPct = spotPct[lastIdx];
+  const volNetPt = volPt[lastIdx];
+  const spotNetPts = spotRaw[lastIdx] - s0;
+
+  // Scan post-anchor bars [anchorIdx .. lastIdx] for first meaningful recovery turning points:
+  let spotTurnIdx = -1;
+  let volTurnIdx = -1;
+
+  for (let i = anchorIdx + 1; i <= lastIdx; i++) {
+    if (spotTurnIdx === -1 && spotPct[i] >= 0.25) {
+      spotTurnIdx = i;
+    }
+    if (volTurnIdx === -1 && volPt[i] <= -0.50) {
+      volTurnIdx = i;
+    }
+  }
+
+  let maxSpotPct = -Infinity;
+  let minVolPt = Infinity;
+
+  for (let i = anchorIdx; i <= lastIdx; i++) {
+    if (spotPct[i] > maxSpotPct) maxSpotPct = spotPct[i];
+    if (volPt[i] < minVolPt) minVolPt = volPt[i];
+  }
+
+  let tag = "";
+  let badgeClass = "";
+  let summary = "";
+
+  const spotRecovering = (spotNetPct > 0.15 || maxSpotPct >= 0.35);
+  const volCrushing = (volNetPt < -0.30 || minVolPt <= -0.60);
+
+  if (volTurnIdx !== -1 && (spotTurnIdx === -1 || volTurnIdx < spotTurnIdx)) {
+    const leadMins = (spotTurnIdx !== -1) ? (spotTurnIdx - volTurnIdx) : (lastIdx - volTurnIdx);
+    tag = `${volLabel} CRUSH LEADING RECOVERY`;
+    badgeClass = "bg-emerald-950 text-emerald-400 border border-emerald-800";
+    const leadTimeStr = (currentCorrTf === '1D') ? `${leadMins}m` : `${leadMins} bars`;
+    summary = `${volLabel} crushed first (${volNetPt >= 0 ? '+' : ''}${volNetPt.toFixed(2)} pts) leading by ~${leadTimeStr} before ${assetLabel} rallied (${spotNetPct >= 0 ? '+' : ''}${spotNetPct.toFixed(2)}%).`;
+  } else if (spotTurnIdx !== -1 && (volTurnIdx === -1 || spotTurnIdx < volTurnIdx)) {
+    const leadMins = (volTurnIdx !== -1) ? (volTurnIdx - spotTurnIdx) : (lastIdx - spotTurnIdx);
+    tag = `${assetLabel} LEADING (VOL STICKY)`;
+    badgeClass = "bg-cyan-950 text-cyan-400 border border-cyan-800";
+    const leadTimeStr = (currentCorrTf === '1D') ? `${leadMins}m` : `${leadMins} bars`;
+    summary = `${assetLabel} rebounded first (${spotNetPct >= 0 ? '+' : ''}${spotNetPct.toFixed(2)}%) by ~${leadTimeStr} while ${volLabel} remained sticky (${volNetPt >= 0 ? '+' : ''}${volNetPt.toFixed(2)} pts).`;
+  } else if (spotRecovering && volCrushing) {
+    tag = "SYNCHRONOUS RECOVERY";
+    badgeClass = "bg-purple-950 text-purple-300 border border-purple-800";
+    summary = `${assetLabel} and ${volLabel} recovering concurrently in lockstep (${assetLabel}: ${spotNetPct >= 0 ? '+' : ''}${spotNetPct.toFixed(2)}%, ${volLabel}: ${volNetPt >= 0 ? '+' : ''}${volNetPt.toFixed(2)} pts).`;
+  } else if (spotNetPct < -0.20 && volNetPt > 0.30) {
+    tag = "FLUSH CONTINUATION";
+    badgeClass = "bg-rose-950 text-rose-400 border border-rose-800";
+    summary = `Selling pressure continued post-anchor: ${assetLabel} ${spotNetPct.toFixed(2)}%, ${volLabel} +${volNetPt.toFixed(2)} pts.`;
+  } else {
+    tag = "CONSOLIDATION POST-ANCHOR";
+    badgeClass = "bg-slate-800 text-slate-300 border border-slate-700";
+    summary = `Mild fluctuations since anchor: ${assetLabel} ${spotNetPct >= 0 ? '+' : ''}${spotNetPct.toFixed(2)}%, ${volLabel} ${volNetPt >= 0 ? '+' : ''}${volNetPt.toFixed(2)} pts.`;
+  }
+
+  return {
+    isLatest: false,
+    elapsedStr: elapsedStr,
+    spotNetPct: spotNetPct,
+    spotNetPts: spotNetPts,
+    volNetPt: volNetPt,
+    tag: tag,
+    badgeClass: badgeClass,
+    summary: summary,
+    anchorTime: times[anchorIdx]
+  };
+}
+
+function updateAnchorUI() {
+  const isNdx = (currentAssetPair === 'NDX');
+  const assetLabel = isNdx ? 'NDX' : 'SPX';
+  const volLabel = isNdx ? 'VXN' : 'VIX';
+
+  const spotLowLabel = document.getElementById('anchor-spot-low-label');
+  if (spotLowLabel) spotLowLabel.textContent = `${assetLabel} Low`;
+  const volHighLabel = document.getElementById('anchor-vol-high-label');
+  if (volHighLabel) volHighLabel.textContent = `${volLabel} High`;
+
+  const pill = document.getElementById('anchor-status-pill');
+  const banner = document.getElementById('corr-recovery-banner');
+  const btnOpen = document.getElementById('btn-anchor-open');
+  const btnSpotLow = document.getElementById('btn-anchor-spot-low');
+  const btnVolHigh = document.getElementById('btn-anchor-vol-high');
+  const btnCustom = document.getElementById('btn-anchor-custom-toggle');
+
+  [btnOpen, btnSpotLow, btnVolHigh, btnCustom].forEach(btn => {
+    if (btn) btn.className = "px-2 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1";
+  });
+
+  if (!corrAnchor.active) {
+    if (pill) {
+      pill.textContent = "Session Baseline";
+      pill.className = "text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-medium";
+    }
+    if (btnOpen) btnOpen.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-slate-800 shadow-sm transition hover:text-white";
+    if (banner) {
+      banner.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from open. Select <strong>[${assetLabel} Low]</strong> or <strong>[${volLabel} High]</strong>, or click chart to analyze recovery leader.</span>`;
+    }
+    return;
+  }
+
+  if (pill) {
+    pill.textContent = corrAnchor.label;
+    pill.className = "text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold";
+  }
+
+  if (corrAnchor.mode === 'spot_low' && btnSpotLow) {
+    btnSpotLow.className = "px-2 py-1 rounded text-emerald-400 font-semibold bg-emerald-950/80 border border-emerald-800 shadow-sm transition flex items-center space-x-1";
+  } else if (corrAnchor.mode === 'vol_high' && btnVolHigh) {
+    btnVolHigh.className = "px-2 py-1 rounded text-amber-400 font-semibold bg-amber-950/80 border border-amber-800 shadow-sm transition flex items-center space-x-1";
+  } else if (corrAnchor.mode === 'custom' && btnCustom) {
+    btnCustom.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
+  }
+}
+
+function computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted) {
+  let y1Min = 0, y1Max = 0;
+  for (let i = 0; i < assetPct.length; i++) {
+    const v = assetPct[i];
+    if (typeof v === 'number' && !isNaN(v)) {
+      if (v < y1Min) y1Min = v;
+      if (v > y1Max) y1Max = v;
+    }
+  }
+
+  let y2Min = 0, y2Max = 0;
+  for (let i = 0; i < volPt.length; i++) {
+    const v = volPt[i];
+    if (typeof v === 'number' && !isNaN(v)) {
+      if (v < y2Min) y2Min = v;
+      if (v > y2Max) y2Max = v;
+    }
+  }
+
+  const pad = 1.15;
+  // Extent above and below zero for Axis 1 (Spot %: normal upright orientation)
+  const e1Up = Math.max(y1Max, 0.05) * pad;
+  const e1Dn = Math.max(-y1Min, 0.05) * pad;
+
+  // Extent above and below zero for Axis 2 (Vol pt)
+  // When inverted: negative values (vol crush) go UP, positive values (vol spike) go DOWN
+  const e2Up = isVolInverted ? Math.max(-y2Min, 0.1) * pad : Math.max(y2Max, 0.1) * pad;
+  const e2Dn = isVolInverted ? Math.max(y2Max, 0.1) * pad : Math.max(-y2Min, 0.1) * pad;
+
+  // Determine balanced zero position alpha in (0, 1), representing fraction from bottom of subplot
+  const alpha1 = e1Dn / (e1Dn + e1Up);
+  const alpha2 = e2Dn / (e2Dn + e2Up);
+  let alpha = (alpha1 + alpha2) / 2.0;
+  alpha = Math.max(0.15, Math.min(0.85, alpha));
+
+  // Determine total span for each axis to ensure neither clips data
+  const R1 = Math.max(e1Up / (1.0 - alpha), e1Dn / alpha);
+  const R2 = Math.max(e2Up / (1.0 - alpha), e2Dn / alpha);
+
+  // Left axis (Spot %): bottom is negative, top is positive
+  const range1 = [-R1 * alpha, R1 * (1.0 - alpha)];
+
+  // Right axis (Vol pt):
+  // If inverted: bottom is positive (panic), top is negative (crush)
+  // If normal: bottom is negative, top is positive
+  const range2 = isVolInverted 
+    ? [R2 * alpha, -R2 * (1.0 - alpha)] 
+    : [-R2 * alpha, R2 * (1.0 - alpha)];
+
+  return { range1, range2, alpha };
+}
+
 function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
   const isNdx = (currentAssetPair === 'NDX');
   const c = isNdx ? (cachedCorrNdx[tf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[tf] || cachedCorr['1D'] || cachedCorr);
   const times = c.times || [];
-  const assetPct = c.spx_pct || c.ndx_pct || [];
-  const volPt = c.vix_pt || c.vxn_pt || [];
   const rollingCorr = c.rolling_corr || [];
 
   const assetLabel = isNdx ? 'NDX' : 'SPX';
   const volLabel = isNdx ? 'VXN' : 'VIX';
+
+  // Compute Anchored Series (or baseline if anchor not active)
+  const anchoredSeries = computeAnchoredSeries(c, isNdx);
+  const assetPct = anchoredSeries.spotPct;
+  const volPt = anchoredSeries.volPt;
+  const isAnchored = anchoredSeries.isAnchored;
+
+  // Evaluate Recovery Leader Diagnostics & update banner
+  const diag = evaluateRecoveryLeader(anchoredSeries, isNdx);
+  const banner = document.getElementById('corr-recovery-banner');
+  if (banner) {
+    if (isAnchored && diag) {
+      const spotSign = diag.spotNetPct >= 0 ? '+' : '';
+      const volSign = diag.volNetPt >= 0 ? '+' : '';
+      const spotColor = diag.spotNetPct >= 0 ? 'text-emerald-400' : 'text-rose-400';
+      const volColor = diag.volNetPt <= 0 ? 'text-emerald-400' : 'text-amber-400';
+
+      banner.innerHTML = `
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-slate-400">⏱️ Elapsed: <strong class="text-white">${diag.elapsedStr}</strong></span>
+          <span class="text-slate-700">|</span>
+          <span>${assetLabel}: <strong class="${spotColor}">${spotSign}${diag.spotNetPct.toFixed(2)}%</strong> <span class="text-slate-400 text-[10px]">(${spotSign}${diag.spotNetPts.toFixed(1)} pts)</span></span>
+          <span class="text-slate-700">|</span>
+          <span>${volLabel}: <strong class="${volColor}">${volSign}${diag.volNetPt.toFixed(2)} pts</strong></span>
+          <span class="text-slate-700">|</span>
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${diag.badgeClass}">${diag.tag}</span>
+          <span class="text-[10px] text-slate-300 font-sans hidden lg:inline font-normal">(${diag.summary})</span>
+        </div>
+      `;
+    } else {
+      banner.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from open. Select <strong>[${assetLabel} Low]</strong> or <strong>[${volLabel} High]</strong>, or click chart to analyze recovery leader.</span>`;
+    }
+  }
 
   const dStart = times.length > 0 ? times[0] : '';
   const dEnd = times.length > 0 ? times[times.length - 1] : '';
@@ -941,35 +1516,79 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
   }
 
   const timeHoverFmt = (tf === '1Y') ? '%b %d, %Y' : '%b %d, %H:%M';
-  let assetHoverLabel = (tf === '1D') ? `${assetLabel} Day Move` : ((tf === '5D') ? `${assetLabel} 5D Move` : `${assetLabel} 1Y Move`);
-  let volHoverLabel = (tf === '1D') ? `${volLabel} Day Move` : ((tf === '5D') ? `${volLabel} 5D Move` : `${volLabel} 1Y Move`);
+  let assetHoverLabel = isAnchored ? `${assetLabel} from Anchor` : ((tf === '1D') ? `${assetLabel} Day Move` : ((tf === '5D') ? `${assetLabel} 5D Move` : `${assetLabel} 1Y Move`));
+  let volHoverLabel = isAnchored ? `${volLabel} from Anchor` : ((tf === '1D') ? `${volLabel} Day Move` : ((tf === '5D') ? `${volLabel} 5D Move` : `${volLabel} 1Y Move`));
 
   const assetColor = isNdx ? '#C084FC' : '#10B981';
   const volColor = '#F59E0B';
   const corrColor = isNdx ? '#A855F7' : '#00E5FF';
 
+  // Common anchor shapes & annotations
+  const anchorShapes = isAnchored && anchoredSeries.anchorTime ? [
+    {
+      type: 'line',
+      xref: 'x',
+      yref: 'paper',
+      x0: anchoredSeries.anchorTime,
+      x1: anchoredSeries.anchorTime,
+      y0: 0,
+      y1: 1,
+      line: {
+        color: '#00E5FF',
+        width: 2,
+        dash: 'dashdot'
+      }
+    }
+  ] : [];
+
+  const anchorAnnotations = isAnchored && anchoredSeries.anchorTime ? [
+    {
+      xref: 'x',
+      yref: 'paper',
+      x: anchoredSeries.anchorTime,
+      y: 1.05,
+      text: `⚓ Anchor: ${anchoredSeries.anchorTime.length > 10 ? anchoredSeries.anchorTime.slice(11) : anchoredSeries.anchorTime}`,
+      showarrow: false,
+      font: { color: '#00E5FF', size: 10, family: 'monospace' },
+      bgcolor: 'rgba(15, 23, 42, 0.9)',
+      bordercolor: '#00E5FF',
+      borderwidth: 1,
+      borderpad: 3
+    }
+  ] : [];
+
   if (mode === 'dual') {
+    const dualRanges = computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted);
+
     // Subplot 1: Asset % Move (left axis) vs Vol pt move (right axis)
     const traceAsset = {
       x: times,
       y: assetPct,
-      name: `${assetLabel} % Move`,
+      customdata: anchoredSeries.spotRaw ? anchoredSeries.spotRaw.map(v => typeof v === 'number' ? v.toFixed(2) : v) : [],
+      name: isAnchored ? `${assetLabel} % (Anchored)` : `${assetLabel} % Move`,
       mode: 'lines',
       line: { color: assetColor, width: 1.8 },
       xaxis: 'x',
       yaxis: 'y',
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{y:+.2f}%<extra></extra>`
+      hovertemplate: isAnchored 
+        ? `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{y:+.2f}%<br>Price: %{customdata}<extra></extra>`
+        : `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{y:+.2f}%<extra></extra>`
     };
 
     const traceVol = {
       x: times,
       y: volPt,
-      name: isVolInverted ? `${volLabel} Point Move (Inv)` : `${volLabel} Point Move`,
+      customdata: anchoredSeries.volRaw ? anchoredSeries.volRaw.map(v => typeof v === 'number' ? v.toFixed(2) : v) : [],
+      name: isVolInverted 
+        ? (isAnchored ? `${volLabel} Pt (Anchored Inv)` : `${volLabel} Point Move (Inv)`) 
+        : (isAnchored ? `${volLabel} Pt (Anchored)` : `${volLabel} Point Move`),
       mode: 'lines',
       line: { color: volColor, width: 1.8 },
       xaxis: 'x',
       yaxis: 'y2',
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<extra></extra>`
+      hovertemplate: isAnchored 
+        ? `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<br>Level: %{customdata}<extra></extra>`
+        : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<extra></extra>`
     };
 
     // Subplot 2: Rolling Pearson Correlation
@@ -1006,10 +1625,37 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       hoverinfo: 'none'
     };
 
+    // Anchor Origin Marker: glowing cyan dot at (anchorTime, 0.0) where both curves start
+    const traceAnchorOrigin = (isAnchored && anchoredSeries.anchorTime) ? {
+      x: [anchoredSeries.anchorTime],
+      y: [0.0],
+      mode: 'markers',
+      name: '⚓ Anchor (0, 0)',
+      marker: {
+        color: '#00E5FF',
+        size: 9,
+        symbol: 'circle',
+        line: { color: '#FFFFFF', width: 2 }
+      },
+      xaxis: 'x',
+      yaxis: 'y',
+      hovertemplate: `<b>⚓ Anchor Origin Point</b><br>Time: %{x|${timeHoverFmt}}<br>${assetLabel}: 0.00%<br>${volLabel}: 0.00 pts<extra></extra>`,
+      showlegend: false
+    } : null;
+
+    const plotTraces = [traceAsset, traceVol, traceCorr, traceZero, traceNormal];
+    if (traceAnchorOrigin) {
+      plotTraces.push(traceAnchorOrigin);
+    }
+
     const layout = {
       paper_bgcolor: 'transparent',
       plot_bgcolor: 'transparent',
       autosize: true,
+      hovermode: 'x',
+      dragmode: false,
+      clickmode: 'event',
+      hoverdistance: 50,
       margin: { l: 50, r: 50, t: 25, b: 40 },
       xaxis: {
         anchor: 'y3',
@@ -1020,29 +1666,55 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
         showgrid: true,
-        nticks: 10
+        nticks: 10,
+        fixedrange: true,
+        showspikes: true,
+        spikemode: 'across',
+        spikesnap: 'cursor',
+        spikecolor: '#00E5FF',
+        spikethickness: 1,
+        spikedash: 'dot'
       },
       yaxis: {
         domain: [0.48, 1.0],
-        title: { text: `${assetLabel} % Move`, font: { color: assetColor, size: 10 } },
+        title: { 
+          text: isAnchored ? `${assetLabel} % Since Anchor` : `${assetLabel} % Move`, 
+          font: { color: assetColor, size: 10 } 
+        },
+        range: dualRanges.range1,
+        autorange: false,
+        zeroline: true,
+        zerolinecolor: 'rgba(148, 163, 184, 0.4)',
+        zerolinewidth: 1,
+        zerolinedash: 'dash',
         gridcolor: '#1e293b',
-        tickfont: { color: assetColor, size: 10 }
+        tickfont: { color: assetColor, size: 10 },
+        fixedrange: true
       },
       yaxis2: {
         domain: [0.48, 1.0],
-        title: { text: isVolInverted ? `${volLabel} Point Move (Inverted ▼)` : `${volLabel} Point Move`, font: { color: volColor, size: 10 } },
+        title: { 
+          text: isAnchored 
+            ? (isVolInverted ? `${volLabel} Pt Since Anchor (Inv ▼)` : `${volLabel} Pt Since Anchor`)
+            : (isVolInverted ? `${volLabel} Point Move (Inverted ▼)` : `${volLabel} Point Move`), 
+          font: { color: volColor, size: 10 } 
+        },
         overlaying: 'y',
         side: 'right',
-        autorange: isVolInverted ? 'reversed' : true,
+        range: dualRanges.range2,
+        autorange: false,
+        zeroline: false,
         gridcolor: 'transparent',
-        tickfont: { color: volColor, size: 10 }
+        tickfont: { color: volColor, size: 10 },
+        fixedrange: true
       },
       yaxis3: {
         domain: [0.0, 0.40],
         title: { text: 'Rolling ρ', font: { color: corrColor, size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
-        range: [-1.05, upperY]
+        range: [-1.05, upperY],
+        fixedrange: true
       },
       legend: {
         orientation: 'h',
@@ -1050,13 +1722,15 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
         y: 1.12,
         font: { color: '#94A3B8', size: 10 }
       },
+      shapes: anchorShapes,
+      annotations: anchorAnnotations,
       showlegend: true
     };
 
-    Plotly.newPlot('correlation-chart', [traceAsset, traceVol, traceCorr, traceZero, traceNormal], layout, {
+    Plotly.newPlot('correlation-chart', plotTraces, layout, {
       responsive: true,
       displayModeBar: false
-    });
+    }).then(attachCorrelationChartClickListener);
   } else {
     // Correlation Only mode (single large plot)
     const traceCorr = {
@@ -1090,6 +1764,10 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       paper_bgcolor: 'transparent',
       plot_bgcolor: 'transparent',
       autosize: true,
+      hovermode: 'x',
+      dragmode: false,
+      clickmode: 'event',
+      hoverdistance: 50,
       margin: { l: 50, r: 20, t: 25, b: 40 },
       xaxis: {
         type: 'date',
@@ -1099,13 +1777,21 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
         showgrid: true,
-        nticks: 10
+        nticks: 10,
+        fixedrange: true,
+        showspikes: true,
+        spikemode: 'across',
+        spikesnap: 'cursor',
+        spikecolor: '#00E5FF',
+        spikethickness: 1,
+        spikedash: 'dot'
       },
       yaxis: {
         title: { text: `Rolling Pearson ρ(${assetLabel}, ${volLabel})`, font: { color: corrColor, size: 10 } },
         gridcolor: '#1e293b',
         tickfont: { color: '#94A3B8', size: 10 },
-        range: [-1.05, upperY]
+        range: [-1.05, upperY],
+        fixedrange: true
       },
       legend: {
         orientation: 'h',
@@ -1113,12 +1799,82 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
         y: 1.1,
         font: { color: '#94A3B8', size: 10 }
       },
+      shapes: anchorShapes,
+      annotations: anchorAnnotations,
       showlegend: true
     };
 
     Plotly.newPlot('correlation-chart', [traceCorr, traceZero, traceNormal], layout, {
       responsive: true,
       displayModeBar: false
+    }).then(attachCorrelationChartClickListener);
+  }
+}
+
+let lastAnchorClickTimestamp = 0;
+
+function attachCorrelationChartClickListener() {
+  const chartEl = document.getElementById('correlation-chart');
+  if (!chartEl) return;
+
+  // Re-bind plotly_click on the chart element (Plotly.newPlot clears internal events on gd)
+  if (typeof chartEl.removeAllListeners === 'function') {
+    chartEl.removeAllListeners('plotly_click');
+  }
+  chartEl.on('plotly_click', function(eventData) {
+    if (Date.now() - lastAnchorClickTimestamp < 300) return;
+    if (eventData && eventData.points && eventData.points.length > 0) {
+      const pt = eventData.points[0];
+      if (pt && pt.x !== undefined && pt.x !== null) {
+        lastAnchorClickTimestamp = Date.now();
+        setCorrAnchor('custom', pt.x);
+      }
+    }
+  });
+
+  // Attach native DOM click listener to chart container once as bulletproof fallback
+  if (!chartEl._hasDomClickListener) {
+    chartEl._hasDomClickListener = true;
+    chartEl.addEventListener('click', function(e) {
+      if (Date.now() - lastAnchorClickTimestamp < 300) return;
+
+      // Ignore clicks on legend items or plotly modebar controls
+      if (e.target && (e.target.closest('.legend') || e.target.closest('.modebar') || e.target.closest('.hovertext'))) {
+        return;
+      }
+
+      const fl = chartEl._fullLayout;
+      if (!fl || !fl.xaxis) return;
+
+      const rect = chartEl.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const xaxis = fl.xaxis;
+
+      const xOffset = (xaxis._offset !== undefined) ? xaxis._offset : 50;
+      const xLength = (xaxis._length !== undefined) ? xaxis._length : (rect.width - 100);
+
+      if (clickX >= xOffset && clickX <= xOffset + xLength) {
+        // Try axis coordinate conversion first
+        if (typeof xaxis.p2c === 'function') {
+          const dataCoord = xaxis.p2c(clickX - xOffset);
+          if (dataCoord !== undefined && dataCoord !== null) {
+            lastAnchorClickTimestamp = Date.now();
+            setCorrAnchor('custom', dataCoord);
+            return;
+          }
+        }
+
+        // Secondary fallback: proportional index across session times
+        const isNdx = (currentAssetPair === 'NDX');
+        const c = isNdx ? (cachedCorrNdx[currentCorrTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[currentCorrTf] || cachedCorr['1D'] || cachedCorr);
+        const times = (c && c.times) ? c.times : [];
+        if (times.length > 0) {
+          lastAnchorClickTimestamp = Date.now();
+          const frac = Math.max(0, Math.min(1, (clickX - xOffset) / xLength));
+          const idx = Math.round(frac * (times.length - 1));
+          setCorrAnchor('custom', times[idx]);
+        }
+      }
     });
   }
 }
@@ -1717,16 +2473,8 @@ function updateUI(data) {
         cr.rolling_corr.push(corrVal);
       }
 
-      if (currentCorrMode === 'dual') {
-        Plotly.restyle('correlation-chart', {
-          x: [cr.times, cr.times, cr.times],
-          y: [pctArr, ptArr, cr.rolling_corr]
-        }, [0, 1, 2]);
-        if (cr.times.length > 0) {
-          Plotly.restyle('correlation-chart', {
-            x: [[cr.times[0], liveDt], [cr.times[0], liveDt]]
-          }, [3, 4]);
-        }
+      if (currentCorrMode === 'dual' || corrAnchor.active) {
+        renderCorrelationChart(currentCorrMode, currentCorrTf);
       } else {
         Plotly.restyle('correlation-chart', {
           x: [cr.times],
@@ -1772,16 +2520,8 @@ function updateUI(data) {
         if (corr) cr.rolling_corr.push(corr.rolling_corr);
       }
 
-      if (currentCorrMode === 'dual') {
-        Plotly.restyle('correlation-chart', {
-          x: [cr.times, cr.times, cr.times],
-          y: [cr.spx_pct, cr.vix_pt, cr.rolling_corr]
-        }, [0, 1, 2]);
-        if (cr.times.length > 0) {
-          Plotly.restyle('correlation-chart', {
-            x: [[cr.times[0], liveDt], [cr.times[0], liveDt]]
-          }, [3, 4]);
-        }
+      if (currentCorrMode === 'dual' || corrAnchor.active) {
+        renderCorrelationChart(currentCorrMode, currentCorrTf);
       } else {
         Plotly.restyle('correlation-chart', {
           x: [cr.times],

@@ -387,6 +387,48 @@
         </div>
       </div>
 
+      <!-- RECOVERY ANCHOR TOOLBAR & DIAGNOSTIC STRIP -->
+      <div class="flex flex-wrap items-center justify-between bg-slate-950/70 border border-slate-800/80 rounded-lg px-3 py-2 mb-2 gap-2 text-xs">
+        <!-- Left: Anchor Presets & Pickers -->
+        <div class="flex flex-wrap items-center gap-1.5">
+          <div class="flex items-center space-x-1.5 mr-1">
+            <span class="text-cyan-400 font-bold text-xs">⚓ Anchor:</span>
+            <span id="anchor-status-pill" class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-medium">Session Baseline</span>
+          </div>
+
+          <div class="flex items-center space-x-1 bg-slate-900/90 p-0.5 rounded-md border border-slate-800 text-[11px]">
+            <button id="btn-anchor-open" class="px-2 py-1 rounded text-cyan-400 font-semibold bg-slate-800 shadow-sm transition hover:text-white" title="Anchor from Session Open / Prior Close">Open</button>
+            <button id="btn-anchor-spot-low" class="px-2 py-1 rounded text-slate-400 hover:text-emerald-400 transition flex items-center space-x-1" title="Anchor to intraday equity index low (trough)">
+              <span>⚡</span>
+              <span id="anchor-spot-low-label">SPX Low</span>
+            </button>
+            <button id="btn-anchor-vol-high" class="px-2 py-1 rounded text-slate-400 hover:text-amber-400 transition flex items-center space-x-1" title="Anchor to intraday volatility spike peak">
+              <span>🔥</span>
+              <span id="anchor-vol-high-label">VIX High</span>
+            </button>
+            <button id="btn-anchor-custom-toggle" class="px-2 py-1 rounded text-slate-400 hover:text-cyan-400 transition flex items-center space-x-1" title="Specify a custom date/time to anchor">
+              <span>🕒</span>
+              <span>Custom</span>
+            </button>
+          </div>
+
+          <!-- Custom Time Input (hidden by default, toggled via Custom button) -->
+          <div id="anchor-custom-wrapper" class="hidden items-center space-x-1 bg-slate-900/90 px-1.5 py-0.5 rounded-md border border-slate-700">
+            <input type="text" id="anchor-time-picker" class="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-[11px] text-white font-mono focus:outline-none focus:border-cyan-500 w-24" placeholder="HH:MM" value="09:30">
+            <button id="btn-apply-custom-time" class="px-2 py-0.5 bg-cyan-500 hover:bg-cyan-400 text-black font-bold rounded text-[10px] transition">Set</button>
+          </div>
+
+          <button id="btn-anchor-reset" class="px-2 py-1 rounded text-[11px] text-slate-400 hover:text-red-400 transition" title="Reset anchor back to session baseline">✕ Reset</button>
+
+          <span class="text-[10px] text-slate-500 italic hidden xl:inline ml-2">(Click any point on chart to anchor)</span>
+        </div>
+
+        <!-- Right: Recovery Leader Diagnostic Strip -->
+        <div id="corr-recovery-banner" class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+          <!-- Injected dynamically by dashboard.js -->
+        </div>
+      </div>
+
       <!-- Intraday Correlation Plotly Chart -->
       <div id="correlation-chart" class="chart-container" style="min-height: 380px;"></div>
     </div>
@@ -676,6 +718,6 @@
   </div>
 
   <!-- DASHBOARD SCRIPT (v4.0 with Sound Muted by Default) -->
-  <script src="/static/dashboard.js?v=4.1"></script>
+  <script src="/static/dashboard.js?v=4.4"></script>
 </body>
 </html>

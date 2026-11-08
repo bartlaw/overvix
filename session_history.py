@@ -442,6 +442,10 @@ async def fetch_and_build_historical_session(
                     "vix_pt": [round(float(v), 2) for v in df_sess['vxn_pt'].tolist()],
                     "ndx_pct": [round(float(v), 2) for v in df_sess['ndx_pct'].tolist()],
                     "vxn_pt": [round(float(v), 2) for v in df_sess['vxn_pt'].tolist()],
+                    "spot_raw": [round(float(v), 2) for v in df_sess['ndx'].tolist()],
+                    "vol_raw": [round(float(v), 2) for v in df_sess['vxn'].tolist()],
+                    "ndx_raw": [round(float(v), 2) for v in df_sess['ndx'].tolist()],
+                    "vxn_raw": [round(float(v), 2) for v in df_sess['vxn'].tolist()],
                     "rolling_corr": [round(float(v), 3) for v in df_sess['ndx_rolling_corr'].tolist()],
                     "current_corr": round(final_ndx_corr, 3),
                     "1D": {
@@ -450,6 +454,10 @@ async def fetch_and_build_historical_session(
                         "vix_pt": [round(float(v), 2) for v in df_sess['vxn_pt'].tolist()],
                         "ndx_pct": [round(float(v), 2) for v in df_sess['ndx_pct'].tolist()],
                         "vxn_pt": [round(float(v), 2) for v in df_sess['vxn_pt'].tolist()],
+                        "spot_raw": [round(float(v), 2) for v in df_sess['ndx'].tolist()],
+                        "vol_raw": [round(float(v), 2) for v in df_sess['vxn'].tolist()],
+                        "ndx_raw": [round(float(v), 2) for v in df_sess['ndx'].tolist()],
+                        "vxn_raw": [round(float(v), 2) for v in df_sess['vxn'].tolist()],
                         "rolling_corr": [round(float(v), 3) for v in df_sess['ndx_rolling_corr'].tolist()]
                     }
                 },
@@ -568,12 +576,20 @@ async def fetch_and_build_historical_session(
                 "times": times_formatted,
                 "spx_pct": [round(float(v), 2) for v in df_sess['spx_pct'].tolist()],
                 "vix_pt": [round(float(v), 2) for v in df_sess['vix_pt'].tolist()],
+                "spot_raw": [round(float(v), 2) for v in df_sess['spx'].tolist()],
+                "vol_raw": [round(float(v), 2) for v in df_sess['vix'].tolist()],
+                "spx_raw": [round(float(v), 2) for v in df_sess['spx'].tolist()],
+                "vix_raw": [round(float(v), 2) for v in df_sess['vix'].tolist()],
                 "rolling_corr": [round(float(v), 3) for v in df_sess['rolling_corr'].tolist()],
                 "current_corr": round(final_corr, 3),
                 "1D": {
                     "times": times_formatted,
                     "spx_pct": [round(float(v), 2) for v in df_sess['spx_pct'].tolist()],
                     "vix_pt": [round(float(v), 2) for v in df_sess['vix_pt'].tolist()],
+                    "spot_raw": [round(float(v), 2) for v in df_sess['spx'].tolist()],
+                    "vol_raw": [round(float(v), 2) for v in df_sess['vix'].tolist()],
+                    "spx_raw": [round(float(v), 2) for v in df_sess['spx'].tolist()],
+                    "vix_raw": [round(float(v), 2) for v in df_sess['vix'].tolist()],
                     "rolling_corr": [round(float(v), 3) for v in df_sess['rolling_corr'].tolist()]
                 },
                 "metrics": {

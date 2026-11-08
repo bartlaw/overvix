@@ -51,6 +51,12 @@ The **Overvix Terminal** monitors the real-time pricing relationship between spo
   - **Weakening ($-0.40 \le \rho < 0.00$)**: Spot-vol link degrading.
   - **Positive Decoupling ($\rho \ge 0.00$)**: Spot equities and volatility moving in tandem (extreme market stress or short-covering rallies).
 - **Interactive Dual Overlay**: Plots minute-by-minute normalized trajectories of Spot % move and Vol point move, with a one-click toggle to invert the volatility axis for direct parallel visual comparison.
+- **Recovery Anchor & Leader Diagnostic**:
+  - Re-anchors baseline moves to any specific timestamp $t_0$ (e.g. market bottom or panic spike peak).
+  - Quick presets: `[⚡ SPX Low]`, `[🔥 VIX High]`, `[🕒 Custom Time]`, or **direct 1-click on any bar on the chart**.
+  - **Zero-Aligned Dual Y-Axes**: Dynamically computes mathematically synchronized axis bounds for left (Spot %) and right (Vol pts, upright or inverted) axes so that $0.0$ on both scales aligns at the **exact same vertical pixel height**. At anchor point $t_0$, both curves intersect and emerge from a single glowing origin marker $(t_0, 0)$.
+  - **Recovery Leader Engine**: Automatically evaluates post-anchor moves and diagnoses whether implied volatility crushed first (**VOL CRUSH LEADING**) or equities rebounded with sticky vol (**EQUITIES LEADING**).
+  - Live metric banner tracking elapsed recovery time, net asset moves, and lead/lag minutes.
 
 ### 4. Tech Volatility Premium (VXN - VIX & VXN / VIX)
 - Real-time spread and ratio between Nasdaq volatility (**VXN**) and S&P volatility (**VIX**).

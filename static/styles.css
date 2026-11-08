@@ -82,3 +82,15 @@ body {
   min-height: 460px;
   width: 100%;
 }
+
+/* Correlation Chart Interactive Crosshair Cursor for 1-Click Anchoring */
+#correlation-chart {
+  cursor: crosshair !important;
+}
+#correlation-chart .drag {
+  cursor: crosshair !important;
+}
+#correlation-chart .nsewdrag {
+  cursor: crosshair !important;
+}
+

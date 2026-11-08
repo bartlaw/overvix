@@ -1178,21 +1178,34 @@ async def get_bootstrap():
     # Format Dynamic Correlation across 1D, 5D, 1Y
     def format_corr_df(df, col_x='spx_pct', col_y='vix_pt', is_daily=False):
         if df.empty or col_x not in df.columns or col_y not in df.columns:
-            return {"times": [], "spx_pct": [], "vix_pt": [], "ndx_pct": [], "vxn_pt": [], "rolling_corr": []}
+            return {"times": [], "spx_pct": [], "vix_pt": [], "ndx_pct": [], "vxn_pt": [], "spot_raw": [], "vol_raw": [], "rolling_corr": []}
         if is_daily:
             times = [str(d)[:10] for d in df.index]
         else:
             times = to_eastern_dt_list(df.index)
         x_vals = [round(float(v), 2) for v in df[col_x].tolist()]
         y_vals = [round(float(v), 2) for v in df[col_y].tolist()]
-        return {
+        spot_raw = [round(float(v), 2) for v in df['spx'].tolist()] if 'spx' in df.columns else ([round(float(v), 2) for v in df['ndx'].tolist()] if 'ndx' in df.columns else [])
+        vol_raw = [round(float(v), 2) for v in df['vix'].tolist()] if 'vix' in df.columns else ([round(float(v), 2) for v in df['vxn'].tolist()] if 'vxn' in df.columns else [])
+        res = {
             "times": times,
             "spx_pct": x_vals,
             "vix_pt": y_vals,
             "ndx_pct": x_vals,
             "vxn_pt": y_vals,
+            "spot_raw": spot_raw,
+            "vol_raw": vol_raw,
             "rolling_corr": [round(float(v), 3) for v in df['rolling_corr'].tolist()] if 'rolling_corr' in df.columns else []
         }
+        if 'spx' in df.columns:
+            res["spx_raw"] = spot_raw
+        if 'vix' in df.columns:
+            res["vix_raw"] = vol_raw
+        if 'ndx' in df.columns:
+            res["ndx_raw"] = spot_raw
+        if 'vxn' in df.columns:
+            res["vxn_raw"] = vol_raw
+        return res
 
     corr_1d = format_corr_df(state.df_spx_vix_1d, 'spx_pct', 'vix_pt')
     corr_5d = format_corr_df(state.df_spx_vix_5d, 'spx_pct', 'vix_pt')
