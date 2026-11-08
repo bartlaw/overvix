@@ -67,7 +67,11 @@ The **Overvix Terminal** monitors the real-time pricing relationship between spo
   - Quick presets: `[⚡ SPX Low]`, `[🔥 VIX High]`, `[🕒 Custom Time]`, or **direct 1-click on any bar on the chart**.
   - **Zero-Aligned Dual Y-Axes**: Dynamically computes mathematically synchronized axis bounds for left (Spot %) and right (Vol pts, upright or inverted) axes so that $0.0$ on both scales aligns at the **exact same vertical pixel height**. At anchor point $t_0$, both curves intersect and emerge from a single glowing origin marker $(t_0, 0)$.
   - **Recovery Leader Engine**: Automatically evaluates post-anchor moves and diagnoses whether implied volatility crushed first (**VOL CRUSH LEADING**) or equities rebounded with sticky vol (**EQUITIES LEADING**).
-  - Live metric banner tracking elapsed recovery time, net asset moves, and lead/lag minutes.
+  - **Anchored Expanding Pearson Correlation ($\rho_{\text{anchored}}$)**:
+    - Calculates expanding post-anchor Pearson correlation on stationary log returns strictly for the post-anchor trajectory ($\tau \in [t_0, t]$), completely eliminating backward-looking window contamination from the pre-anchor sell-off.
+    - Renders the bold glowing amber **Anchored Recovery $\rho$** curve starting at $t_0$ over the background rolling baseline.
+    - Injects live recovery correlation score and regime badge (`HEALTHY INVERSE`, `NORMAL INVERSE`, `STICKY VOL`, or `POSITIVE DECOUPLING`) directly into the diagnostic banner.
+  - Live metric banner tracking elapsed recovery time, net asset moves, post-anchor recovery correlation, and lead/lag minutes.
 
 ### 4. Tech Volatility Premium (VXN - VIX & VXN / VIX)
 - Real-time spread and ratio between Nasdaq volatility (**VXN**) and S&P volatility (**VIX**).

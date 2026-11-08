@@ -1423,6 +1423,65 @@ function setCorrAnchor(mode, targetTime = null) {
   renderCorrelationChart(currentCorrMode, currentCorrTf);
 }
 
+function computeAnchoredCorrelation(spotRaw, volRaw, anchorIdx) {
+  const len = spotRaw ? spotRaw.length : 0;
+  const series = new Array(len).fill(null);
+  if (!spotRaw || !volRaw || anchorIdx < 0 || anchorIdx >= len - 2) {
+    return { series: series, latestCorr: null, count: 0 };
+  }
+
+  // Calculate stationary log returns for spot and vol: Δ ln(S) vs Δ ln(Vol)
+  const sLog = [];
+  const vLog = [];
+  for (let i = 1; i < len; i++) {
+    const sPrev = spotRaw[i - 1];
+    const sCurr = spotRaw[i];
+    const vPrev = volRaw[i - 1];
+    const vCurr = volRaw[i];
+    sLog.push((sPrev > 0 && sCurr > 0) ? Math.log(sCurr / sPrev) : 0);
+    vLog.push((vPrev > 0 && vCurr > 0) ? Math.log(vCurr / vPrev) : 0);
+  }
+
+  let sumS = 0, sumV = 0, sumS2 = 0, sumV2 = 0, sumSV = 0;
+  let count = 0;
+
+  for (let i = anchorIdx; i < len - 1; i++) {
+    const rs = sLog[i];
+    const rv = vLog[i];
+    sumS += rs;
+    sumV += rv;
+    sumS2 += rs * rs;
+    sumV2 += rv * rv;
+    sumSV += rs * rv;
+    count++;
+
+    // Minimum 3 return points for valid correlation
+    if (count >= 3) {
+      const meanS = sumS / count;
+      const meanV = sumV / count;
+      const varS = (sumS2 / count) - (meanS * meanS);
+      const varV = (sumV2 / count) - (meanV * meanV);
+
+      if (varS > 1e-12 && varV > 1e-12) {
+        const cov = (sumSV / count) - (meanS * meanV);
+        const r = cov / Math.sqrt(varS * varV);
+        const clampedR = Math.max(-1.0, Math.min(1.0, r));
+        series[i + 1] = Math.round(clampedR * 1000) / 1000;
+      }
+    }
+  }
+
+  let latestCorr = null;
+  for (let i = len - 1; i >= anchorIdx; i--) {
+    if (series[i] !== null && series[i] !== undefined) {
+      latestCorr = series[i];
+      break;
+    }
+  }
+
+  return { series: series, latestCorr: latestCorr, count: count };
+}
+
 function computeAnchoredSeries(c, isNdx) {
   const times = c.times || [];
   const raw = getRawSpotVolSeries(c, isNdx);
@@ -1438,7 +1497,10 @@ function computeAnchoredSeries(c, isNdx) {
       volRaw: volRaw,
       isAnchored: false,
       anchorIdx: -1,
-      anchorTime: null
+      anchorTime: null,
+      anchoredCorr: null,
+      latestAnchoredCorr: null,
+      returnCount: 0
     };
   }
 
@@ -1448,6 +1510,9 @@ function computeAnchoredSeries(c, isNdx) {
 
   const anchoredSpotPct = spotRaw.map(s => (s0 > 0 ? ((s - s0) / s0 * 100.0) : 0));
   const anchoredVolPt = volRaw.map(v => (v - v0));
+
+  // Compute post-anchor expanding Pearson correlation on log returns strictly from anchorIdx to latest
+  const corrRes = computeAnchoredCorrelation(spotRaw, volRaw, idx);
 
   return {
     times: times,
@@ -1459,7 +1524,10 @@ function computeAnchoredSeries(c, isNdx) {
     anchorIdx: idx,
     anchorTime: times[idx],
     s0: s0,
-    v0: v0
+    v0: v0,
+    anchoredCorr: corrRes.series,
+    latestAnchoredCorr: corrRes.latestCorr,
+    returnCount: corrRes.count
   };
 }
 
@@ -1477,6 +1545,11 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
       spotNetPct: 0,
       spotNetPts: 0,
       volNetPt: 0,
+      corrStr: '---',
+      corrRegime: 'AT ANCHOR',
+      corrBadgeClass: 'bg-slate-800 text-slate-400 border-slate-700',
+      corrColor: 'text-slate-400',
+      corrVal: null,
       badgeClass: 'bg-slate-800 text-slate-300 border-slate-700',
       tag: 'ANCHOR AT LATEST BAR',
       summary: 'Anchor set at the latest bar. Monitoring incoming recovery ticks...'
@@ -1552,6 +1625,44 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
     summary = `Mild fluctuations since anchor: ${assetLabel} ${spotNetPct >= 0 ? '+' : ''}${spotNetPct.toFixed(2)}%, ${volLabel} ${volNetPt >= 0 ? '+' : ''}${volNetPt.toFixed(2)} pts.`;
   }
 
+  // Evaluate Post-Anchor Expanding Pearson Correlation Diagnostic strictly from anchorIdx to latest
+  let corrStr = "---";
+  let corrRegime = "N/A";
+  let corrBadgeClass = "bg-slate-800 text-slate-400 border-slate-700";
+  let corrColor = "text-slate-400";
+  let corrSummaryPart = "";
+  const corrVal = anchoredSeries.latestAnchoredCorr;
+
+  if (corrVal !== null && corrVal !== undefined) {
+    corrStr = fmtNum(corrVal, 3);
+    if (corrVal <= -0.70) {
+      corrRegime = "HEALTHY INVERSE";
+      corrBadgeClass = "bg-emerald-950 text-emerald-400 border border-emerald-800";
+      corrColor = "text-emerald-400";
+      corrSummaryPart = ` Post-anchor recovery correlation is strongly inverse (ρ = ${corrStr}), confirming healthy institutional volatility unwinding.`;
+    } else if (corrVal <= -0.50) {
+      corrRegime = "NORMAL INVERSE";
+      corrBadgeClass = "bg-teal-950 text-teal-300 border border-teal-800";
+      corrColor = "text-teal-300";
+      corrSummaryPart = ` Post-anchor recovery correlation is normal (ρ = ${corrStr}).`;
+    } else if (corrVal < 0.0) {
+      corrRegime = "VOL STICKY / STRESS";
+      corrBadgeClass = "bg-amber-950 text-amber-300 border border-amber-800";
+      corrColor = "text-amber-400";
+      corrSummaryPart = ` Post-anchor recovery correlation broke above -0.50 (ρ = ${corrStr}), indicating lingering tail hedging or vol-of-vol stress.`;
+    } else {
+      corrRegime = "POSITIVE DECOUPLING";
+      corrBadgeClass = "bg-rose-950 text-rose-300 border border-rose-800 animate-pulse";
+      corrColor = "text-rose-400";
+      corrSummaryPart = ` Post-anchor correlation turned positive (ρ = ${corrStr})! Spot and volatility are moving in tandem.`;
+    }
+  } else if (anchoredSeries.returnCount < 3) {
+    corrStr = "Calibrating (< 3 bars)";
+    corrRegime = "CALIBRATING";
+  }
+
+  summary += corrSummaryPart;
+
   return {
     isLatest: false,
     elapsedStr: elapsedStr,
@@ -1561,7 +1672,12 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
     tag: tag,
     badgeClass: badgeClass,
     summary: summary,
-    anchorTime: times[anchorIdx]
+    anchorTime: times[anchorIdx],
+    corrStr: corrStr,
+    corrRegime: corrRegime,
+    corrBadgeClass: corrBadgeClass,
+    corrColor: corrColor,
+    corrVal: corrVal
   };
 }
 
@@ -1697,12 +1813,14 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
           <span class="text-slate-700">|</span>
           <span>${volLabel}: <strong class="${volColor}">${volSign}${diag.volNetPt.toFixed(2)} pts</strong></span>
           <span class="text-slate-700">|</span>
+          <span title="Post-anchor cumulative Pearson correlation on log returns strictly since anchor point">⚓ Recovery ρ: <strong class="${diag.corrColor}">${diag.corrStr}</strong> <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${diag.corrBadgeClass}">${diag.corrRegime}</span></span>
+          <span class="text-slate-700">|</span>
           <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${diag.badgeClass}">${diag.tag}</span>
           <span class="text-[10px] text-slate-300 font-sans hidden lg:inline font-normal">(${diag.summary})</span>
         </div>
       `;
     } else {
-      banner.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from open. Select <strong>[${assetLabel} Low]</strong> or <strong>[${volLabel} High]</strong>, or click chart to analyze recovery leader.</span>`;
+      banner.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from open. Select <strong>[${assetLabel} Low]</strong> or <strong>[${volLabel} High]</strong>, or click chart to analyze recovery leader &amp; post-anchor correlation.</span>`;
     }
   }
 
@@ -1710,7 +1828,8 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
   const dEnd = times.length > 0 ? times[times.length - 1] : '';
 
   // Dynamic Pearson upper bound: 0.05 by default (framing 0.0 Decoupling line at top), expanding only if ρ > 0
-  const validCorrs = rollingCorr.filter(v => typeof v === 'number' && !isNaN(v));
+  const allCorrs = rollingCorr.concat(isAnchored && anchoredSeries.anchoredCorr ? anchoredSeries.anchoredCorr : []);
+  const validCorrs = allCorrs.filter(v => typeof v === 'number' && !isNaN(v));
   const maxCorrVal = validCorrs.length > 0 ? Math.max(...validCorrs) : -0.7;
   const upperY = maxCorrVal > 0 ? Math.min(1.05, Math.ceil((maxCorrVal + 0.05) * 10) / 10) : 0.05;
 
@@ -1796,17 +1915,33 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
         : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{y:+.2f} pts<extra></extra>`
     };
 
-    // Subplot 2: Rolling Pearson Correlation
+    // Subplot 2: Rolling Pearson Correlation (Background context when anchored)
     const traceCorr = {
       x: times,
       y: rollingCorr,
-      name: corrTraceName,
+      name: isAnchored ? `Rolling Context (${corrTraceName})` : corrTraceName,
       mode: 'lines',
-      line: { color: corrColor, width: 2 },
+      line: { 
+        color: isAnchored ? (isNdx ? 'rgba(168, 85, 247, 0.40)' : 'rgba(0, 229, 255, 0.40)') : corrColor, 
+        width: isAnchored ? 1.5 : 2,
+        dash: isAnchored ? 'dot' : 'solid'
+      },
       xaxis: 'x',
       yaxis: 'y3',
       hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${corrHoverLabel}: %{y:.3f}<extra></extra>`
     };
+
+    // Anchored Recovery Correlation (Foreground recovery trajectory strictly since anchor)
+    const traceAnchoredCorr = (isAnchored && anchoredSeries.anchoredCorr) ? {
+      x: times,
+      y: anchoredSeries.anchoredCorr,
+      name: `Anchored Recovery ρ (${assetLabel}, ${volLabel})`,
+      mode: 'lines',
+      line: { color: '#F59E0B', width: 2.8 },
+      xaxis: 'x',
+      yaxis: 'y3',
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>⚓ Anchored Recovery ρ: %{y:.3f}<extra></extra>`
+    } : null;
 
     const traceZero = {
       x: [dStart, dEnd],
@@ -1859,7 +1994,11 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       showlegend: false
     } : null;
 
-    const plotTraces = [traceAsset, traceVol, traceCorr, traceZero, traceStress, traceBaseline];
+    const plotTraces = [traceAsset, traceVol, traceCorr];
+    if (traceAnchoredCorr) {
+      plotTraces.push(traceAnchoredCorr);
+    }
+    plotTraces.push(traceZero, traceStress, traceBaseline);
     if (traceAnchorOrigin) {
       plotTraces.push(traceAnchorOrigin);
     }
@@ -1952,11 +2091,24 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
     const traceCorr = {
       x: times,
       y: rollingCorr,
-      name: corrTraceName,
+      name: isAnchored ? `Rolling Context (${corrTraceName})` : corrTraceName,
       mode: 'lines',
-      line: { color: corrColor, width: 2.2 },
+      line: { 
+        color: isAnchored ? (isNdx ? 'rgba(168, 85, 247, 0.40)' : 'rgba(0, 229, 255, 0.40)') : corrColor, 
+        width: isAnchored ? 1.5 : 2.2,
+        dash: isAnchored ? 'dot' : 'solid'
+      },
       hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${corrHoverLabel}: %{y:.3f}<extra></extra>`
     };
+
+    const traceAnchoredCorr = (isAnchored && anchoredSeries.anchoredCorr) ? {
+      x: times,
+      y: anchoredSeries.anchoredCorr,
+      name: `Anchored Recovery ρ (${assetLabel}, ${volLabel})`,
+      mode: 'lines',
+      line: { color: '#F59E0B', width: 3.0 },
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>⚓ Anchored Recovery ρ: %{y:.3f}<extra></extra>`
+    } : null;
 
     const traceZero = {
       x: [dStart, dEnd],
@@ -1984,6 +2136,12 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       line: { color: '#10B981', width: 1, dash: 'dot' },
       hoverinfo: 'none'
     };
+
+    const plotTracesOnly = [traceCorr];
+    if (traceAnchoredCorr) {
+      plotTracesOnly.push(traceAnchoredCorr);
+    }
+    plotTracesOnly.push(traceZero, traceStress, traceBaseline);
 
     const layout = {
       paper_bgcolor: 'transparent',
@@ -2029,7 +2187,7 @@ function renderCorrelationChart(mode = currentCorrMode, tf = currentCorrTf) {
       showlegend: true
     };
 
-    Plotly.newPlot('correlation-chart', [traceCorr, traceZero, traceStress, traceBaseline], layout, {
+    Plotly.newPlot('correlation-chart', plotTracesOnly, layout, {
       responsive: true,
       displayModeBar: false
     }).then(attachCorrelationChartClickListener);
