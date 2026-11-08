@@ -328,6 +328,93 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
     return True
 
 
+def bars_to_df(bars, col_name: str) -> pd.DataFrame:
+    """
+    Convert raw IBKR historical bars into a timezone-aware Eastern DataFrame with date, time, and day columns.
+    """
+    if not bars:
+        return pd.DataFrame()
+    try:
+        df = util.df(bars)
+        if df is None or df.empty or 'date' not in df.columns or 'close' not in df.columns:
+            return pd.DataFrame()
+        df['date'] = pd.to_datetime(df['date'])
+        if df['date'].dt.tz is not None:
+            df['date_et'] = df['date'].dt.tz_convert('US/Eastern')
+        else:
+            df['date_et'] = df['date'].dt.tz_localize('UTC').dt.tz_convert('US/Eastern')
+        df['time'] = df['date_et'].dt.time
+        df['day'] = df['date_et'].dt.date
+        df = df.rename(columns={'close': col_name})
+        return df[['date_et', 'time', 'day', col_name]]
+    except Exception as e:
+        print(f"[bars_to_df] Error parsing {col_name}: {e}")
+        return pd.DataFrame()
+
+
+def resample_30m_to_session(df: pd.DataFrame, target_size: str, col_name: str) -> pd.Series:
+    """
+    Resample 30-min bars to session-anchored 2-hour or 4-hour bars starting at 09:30 ET.
+    Eliminates IBKR's clock-hour (:00) alignment distortion where 09:30 market open produces 30-min stubs.
+
+    For 2h:
+      - Block 1: 09:30 - 11:30 (times: 09:30, 10:00, 10:30, 11:00) -> '09:30'
+      - Block 2: 11:30 - 13:30 (times: 11:30, 12:00, 12:30, 13:00) -> '11:30'
+      - Block 3: 13:30 - 16:00 (times: 13:30, 14:00, 14:30, 15:00, 15:30) -> '13:30'
+    For 4h:
+      - Block 1: 09:30 - 13:30 (times: 09:30 to 13:00) -> '09:30'
+      - Block 2: 13:30 - 16:00 (times: 13:30 to 15:30) -> '13:30'
+    For 30m:
+      - Cleanly filtered RTH bars with '%Y-%m-%d %H:%M' index.
+    """
+    if df is None or df.empty or col_name not in df.columns:
+        return pd.Series(dtype=float, name=col_name)
+
+    # Filter strictly to RTH (09:30 to 16:00 ET)
+    df_rth = df[(df['time'] >= pd.to_datetime('09:30').time()) & (df['time'] < pd.to_datetime('16:00').time())].copy()
+    if df_rth.empty:
+        return pd.Series(dtype=float, name=col_name)
+
+    if target_size == '30m':
+        df_rth['date_str'] = df_rth['date_et'].dt.strftime('%Y-%m-%d %H:%M')
+        return df_rth.drop_duplicates(subset=['date_str']).set_index('date_str')[col_name]
+
+    records = []
+    for day, group in df_rth.groupby('day'):
+        group = group.sort_values('date_et')
+        if target_size == '2h':
+            # Block 1: 09:30 - 11:30
+            b1 = group[(group['time'] >= pd.to_datetime('09:30').time()) & (group['time'] < pd.to_datetime('11:30').time())]
+            if not b1.empty:
+                records.append({'date': b1['date_et'].iloc[0].strftime('%Y-%m-%d %H:%M'), col_name: float(b1[col_name].iloc[-1])})
+
+            # Block 2: 11:30 - 13:30
+            b2 = group[(group['time'] >= pd.to_datetime('11:30').time()) & (group['time'] < pd.to_datetime('13:30').time())]
+            if not b2.empty:
+                records.append({'date': b2['date_et'].iloc[0].strftime('%Y-%m-%d %H:%M'), col_name: float(b2[col_name].iloc[-1])})
+
+            # Block 3: 13:30 - 16:00 (afternoon session close)
+            b3 = group[(group['time'] >= pd.to_datetime('13:30').time()) & (group['time'] < pd.to_datetime('16:00').time())]
+            if not b3.empty:
+                records.append({'date': b3['date_et'].iloc[0].strftime('%Y-%m-%d %H:%M'), col_name: float(b3[col_name].iloc[-1])})
+
+        elif target_size == '4h':
+            # Block 1: 09:30 - 13:30 (4h)
+            b1 = group[(group['time'] >= pd.to_datetime('09:30').time()) & (group['time'] < pd.to_datetime('13:30').time())]
+            if not b1.empty:
+                records.append({'date': b1['date_et'].iloc[0].strftime('%Y-%m-%d %H:%M'), col_name: float(b1[col_name].iloc[-1])})
+
+            # Block 2: 13:30 - 16:00 (2.5h)
+            b2 = group[(group['time'] >= pd.to_datetime('13:30').time()) & (group['time'] < pd.to_datetime('16:00').time())]
+            if not b2.empty:
+                records.append({'date': b2['date_et'].iloc[0].strftime('%Y-%m-%d %H:%M'), col_name: float(b2[col_name].iloc[-1])})
+
+    if not records:
+        return pd.Series(dtype=float, name=col_name)
+    res_df = pd.DataFrame(records).drop_duplicates(subset=['date']).set_index('date')
+    return res_df[col_name]
+
+
 def safe_to_series(bars, col_name: str) -> pd.Series:
     if not bars:
         return pd.Series(dtype=float, name=col_name)
@@ -419,28 +506,17 @@ async def refresh_historical_data():
                         barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
                     )
 
-        # 2. Fetch Multi-Timeframe Bars (1M 30m, 3M 2h, 6M 4h, 2Y 1d) in parallel
-        (b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn,
-         b3m_spx, b3m_vix, b3m_vix3m, b3m_ndx, b3m_vxn,
-         b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn,
+        # 2. Fetch Multi-Timeframe Intraday Pool (6M 30-min bars) & Daily Macro Pool (2Y 1-day) in parallel
+        # Note: 6M of 30-min bars natively provides high-resolution data that we session-anchor to 09:30 ET
+        # to cleanly eliminate IBKR's clock-hour (:00) alignment 30-minute stub bars for 2h (3M) and 4h (6M),
+        # while also perfectly slicing 1M without redundant API requests.
+        (b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn,
          spx_bars_2y, vix_bars_2y, vix3m_bars_2y, ndx_bars_2y, vxn_bars_2y) = await asyncio.gather(
-            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '1 M', '30 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '1 M', '30 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '1 M', '30 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '1 M', '30 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '1 M', '30 mins', 'TRADES', True, 1),
-
-            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '3 M', '2 hours', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '3 M', '2 hours', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '3 M', '2 hours', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '3 M', '2 hours', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '3 M', '2 hours', 'TRADES', True, 1),
-
-            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '6 M', '4 hours', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '6 M', '4 hours', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '6 M', '4 hours', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '6 M', '4 hours', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '6 M', '4 hours', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
 
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
@@ -584,11 +660,11 @@ async def refresh_historical_data():
 
         # Helper to process multi-timeframe bar sets (5D, 1M, 3M, 6M)
         def build_horizon_pack(s_bars, v_bars, v3_bars, n_bars, vx_bars, roll_win=20, min_p=5):
-            df_s = safe_to_series(s_bars, 'spx')
-            df_v = safe_to_series(v_bars, 'vix')
-            df_v3 = safe_to_series(v3_bars, 'vix3m')
-            df_n = safe_to_series(n_bars, 'ndx')
-            df_vx = safe_to_series(vx_bars, 'vxn')
+            df_s = s_bars if isinstance(s_bars, pd.Series) else safe_to_series(s_bars, 'spx')
+            df_v = v_bars if isinstance(v_bars, pd.Series) else safe_to_series(v_bars, 'vix')
+            df_v3 = v3_bars if isinstance(v3_bars, pd.Series) else safe_to_series(v3_bars, 'vix3m')
+            df_n = n_bars if isinstance(n_bars, pd.Series) else safe_to_series(n_bars, 'ndx')
+            df_vx = vx_bars if isinstance(vx_bars, pd.Series) else safe_to_series(vx_bars, 'vxn')
 
             # Term Structure
             df_ts = pd.concat([df_v, df_v3], axis=1).dropna()
@@ -635,22 +711,47 @@ async def refresh_historical_data():
             b5_spx, b5_vix, b5_vix3m, b5_ndx, b5_vxn, roll_win=78, min_p=20
         )
 
-        # 5. Process 1M Bars (30-min)
+        # Process 30-min unified intraday pool for 1M, 3M (2h), and 6M (4h)
+        dfs_pool = {
+            name: bars_to_df(bars, name)
+            for name, bars in zip(['spx', 'vix', 'vix3m', 'ndx', 'vxn'],
+                                  [b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn])
+        }
+        trading_days = sorted(dfs_pool['spx']['day'].unique()) if not dfs_pool['spx'].empty else []
+        days_3m = set(trading_days[-64:]) if len(trading_days) >= 64 else set(trading_days)
+        days_1m = set(trading_days[-22:]) if len(trading_days) >= 22 else set(trading_days)
+
+        # 5. Process 1M Bars (RTH 30-min bars for last 22 trading days)
+        s_1m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_1m)], '30m', 'spx')
+        v_1m = resample_30m_to_session(dfs_pool['vix'][dfs_pool['vix']['day'].isin(days_1m)], '30m', 'vix')
+        v3_1m = resample_30m_to_session(dfs_pool['vix3m'][dfs_pool['vix3m']['day'].isin(days_1m)], '30m', 'vix3m')
+        n_1m = resample_30m_to_session(dfs_pool['ndx'][dfs_pool['ndx']['day'].isin(days_1m)], '30m', 'ndx')
+        vx_1m = resample_30m_to_session(dfs_pool['vxn'][dfs_pool['vxn']['day'].isin(days_1m)], '30m', 'vxn')
         (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
          state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_horizon_pack(
-            b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn, roll_win=39, min_p=10
+            s_1m, v_1m, v3_1m, n_1m, vx_1m, roll_win=39, min_p=10
         )
 
-        # 6. Process 3M Bars (2-hour)
+        # 6. Process 3M Bars (Session-anchored 2-hour bars for last 64 trading days, starts strictly at 09:30 ET)
+        s_3m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_3m)], '2h', 'spx')
+        v_3m = resample_30m_to_session(dfs_pool['vix'][dfs_pool['vix']['day'].isin(days_3m)], '2h', 'vix')
+        v3_3m = resample_30m_to_session(dfs_pool['vix3m'][dfs_pool['vix3m']['day'].isin(days_3m)], '2h', 'vix3m')
+        n_3m = resample_30m_to_session(dfs_pool['ndx'][dfs_pool['ndx']['day'].isin(days_3m)], '2h', 'ndx')
+        vx_3m = resample_30m_to_session(dfs_pool['vxn'][dfs_pool['vxn']['day'].isin(days_3m)], '2h', 'vxn')
         (state.df_ts_3m, state.df_spx_vix_3m, state.df_ndx_vxn_3m,
          state.df_tech_vol_3m, state.corr_3m, state.corr_3m_ndx) = build_horizon_pack(
-            b3m_spx, b3m_vix, b3m_vix3m, b3m_ndx, b3m_vxn, roll_win=35, min_p=10
+            s_3m, v_3m, v3_3m, n_3m, vx_3m, roll_win=30, min_p=10
         )
 
-        # 7. Process 6M Bars (4-hour)
+        # 7. Process 6M Bars (Session-anchored 4-hour bars for all 126 trading days, starts strictly at 09:30 ET)
+        s_6m = resample_30m_to_session(dfs_pool['spx'], '4h', 'spx')
+        v_6m = resample_30m_to_session(dfs_pool['vix'], '4h', 'vix')
+        v3_6m = resample_30m_to_session(dfs_pool['vix3m'], '4h', 'vix3m')
+        n_6m = resample_30m_to_session(dfs_pool['ndx'], '4h', 'ndx')
+        vx_6m = resample_30m_to_session(dfs_pool['vxn'], '4h', 'vxn')
         (state.df_ts_6m, state.df_spx_vix_6m, state.df_ndx_vxn_6m,
          state.df_tech_vol_6m, state.corr_6m, state.corr_6m_ndx) = build_horizon_pack(
-            b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn, roll_win=30, min_p=5
+            s_6m, v_6m, v3_6m, n_6m, vx_6m, roll_win=30, min_p=10
         )
 
         # 8. Combined Daily Dataset (2Y pool) for YTD, 1Y, and MAX
@@ -736,7 +837,7 @@ async def refresh_historical_data():
         state.hist_version += 1
         print(f"[IBKR] Baseline & multi-timeframe datasets successfully loaded (Version {state.hist_version}):")
         print(f"       1D={len(state.df_ts_1d)} bars, 5D={len(state.df_ts_5d)} bars, 1M={len(state.df_ts_1m)} bars (30m), "
-              f"3M={len(state.df_ts_3m)} bars (2h), 6M={len(state.df_ts_6m)} bars (4h), YTD={len(state.df_ts_ytd)} bars, "
+              f"3M={len(state.df_ts_3m)} bars (session-anchored 2h), 6M={len(state.df_ts_6m)} bars (session-anchored 4h), YTD={len(state.df_ts_ytd)} bars, "
               f"1Y={len(state.df_ts_1y)} bars, MAX={len(state.df_ts_max)} bars.")
 
     except Exception as ex:
