@@ -101,7 +101,7 @@ const TF_CONFIG = {
     xTitle: '3-Month Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ bounds: ['sat', 'mon'] }]
+    rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
   },
   '6M': {
     step: 4,
@@ -118,7 +118,7 @@ const TF_CONFIG = {
     xTitle: '6-Month Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ bounds: ['sat', 'mon'] }]
+    rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
   },
   'YTD': {
     step: 5,
