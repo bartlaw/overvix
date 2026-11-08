@@ -114,7 +114,7 @@ class DashboardState:
         # Historical datasets (SPX & VIX)
         self.df_spotvol = pd.DataFrame()
         self.df_ts_1d = pd.DataFrame()       # Intraday 1-min bars for VIX/VIX3M
-        self.df_ts_5d = pd.DataFrame()       # Recent 5-day 15-min bars for VIX/VIX3M
+        self.df_ts_5d = pd.DataFrame()       # Recent 5-day 5-min bars for VIX/VIX3M
         self.df_ts_1m = pd.DataFrame()       # 1-Month 30-min bars for VIX/VIX3M
         self.df_ts_3m = pd.DataFrame()       # 3-Month 4-hour bars for VIX/VIX3M
         self.df_ts_6m = pd.DataFrame()       # 6-Month 4-hour bars for VIX/VIX3M
@@ -123,7 +123,7 @@ class DashboardState:
         self.df_ts_max = pd.DataFrame()      # 2-Year daily bars for VIX/VIX3M
 
         self.df_spx_vix_1d = pd.DataFrame()  # Intraday 1-min bars for SPX & VIX
-        self.df_spx_vix_5d = pd.DataFrame()  # 5-day 15-min bars for SPX & VIX
+        self.df_spx_vix_5d = pd.DataFrame()  # 5-day 5-min bars for SPX & VIX
         self.df_spx_vix_1m = pd.DataFrame()  # 1-Month 30-min bars for SPX & VIX
         self.df_spx_vix_3m = pd.DataFrame()  # 3-Month 4-hour bars for SPX & VIX
         self.df_spx_vix_6m = pd.DataFrame()  # 6-Month 4-hour bars for SPX & VIX
@@ -134,7 +134,7 @@ class DashboardState:
         # Historical datasets (NDX & VXN & Tech Vol Spread)
         self.df_spotvol_ndx = pd.DataFrame()
         self.df_ndx_vxn_1d = pd.DataFrame()  # Intraday 1-min bars for NDX & VXN
-        self.df_ndx_vxn_5d = pd.DataFrame()  # 5-day 15-min bars for NDX & VXN
+        self.df_ndx_vxn_5d = pd.DataFrame()  # 5-day 5-min bars for NDX & VXN
         self.df_ndx_vxn_1m = pd.DataFrame()  # 1-Month 30-min bars for NDX & VXN
         self.df_ndx_vxn_3m = pd.DataFrame()  # 3-Month 4-hour bars for NDX & VXN
         self.df_ndx_vxn_6m = pd.DataFrame()  # 6-Month 4-hour bars for NDX & VXN
@@ -358,7 +358,7 @@ async def refresh_historical_data():
     Fetch historical daily and intraday bars directly from IBKR for SPX, VIX, VIX3M, NDX, VXN
     across all 8 supported multi-timeframe horizons:
       - 1D: 1-minute intraday bars (today's active session)
-      - 5D: 15-minute weekly bars (~130 bars)
+      - 5D: 5-minute weekly bars (~390 bars)
       - 1M: 30-minute monthly bars (~286 bars)
       - 3M: 4-hour quarterly bars (~133 bars, native VIX3M contract match)
       - 6M: 4-hour semi-annual bars (~257 bars)
@@ -368,7 +368,7 @@ async def refresh_historical_data():
     """
     print("[IBKR] Fetching historical baseline & multi-timeframe datasets from IBKR (SPX, VIX, VIX3M, NDX, VXN)...")
     try:
-        # 1. Fetch Intraday 1D (1-min) & 5D (15-min) bars in parallel
+        # 1. Fetch Intraday 1D (1-min) & 5D (5-min) bars in parallel
         (b1_spx, b1_vix, b1_vix3m, b1_ndx, b1_vxn,
          b5_spx, b5_vix, b5_vix3m, b5_ndx, b5_vxn) = await asyncio.gather(
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '1 D', '1 min', 'TRADES', True, 1),
@@ -377,11 +377,11 @@ async def refresh_historical_data():
             state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '1 D', '1 min', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '1 D', '1 min', 'TRADES', True, 1),
 
-            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '5 D', '15 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '5 D', '15 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '5 D', '15 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '5 D', '15 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '5 D', '15 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
         )
 
         # Pre-market / GTH Session Synchronization:
@@ -629,10 +629,10 @@ async def refresh_historical_data():
 
             return df_ts, df_sv, df_nv, df_tv, corr_val, corr_ndx_val
 
-        # 4. Process 5D Bars (15-min)
+        # 4. Process 5D Bars (5-min)
         (state.df_ts_5d, state.df_spx_vix_5d, state.df_ndx_vxn_5d,
          state.df_tech_vol_5d, state.corr_5d, state.corr_5d_ndx) = build_horizon_pack(
-            b5_spx, b5_vix, b5_vix3m, b5_ndx, b5_vxn, roll_win=26, min_p=10
+            b5_spx, b5_vix, b5_vix3m, b5_ndx, b5_vxn, roll_win=78, min_p=20
         )
 
         # 5. Process 1M Bars (30-min)
@@ -1197,7 +1197,7 @@ async def get_bootstrap():
     Deliver full historical & intraday datasets for instant client charting:
       - 60-day Spot-Vol points
       - 1D intraday 1-minute bars (Term Structure & SPX-VIX Correlation)
-      - 5D weekly 15-minute bars
+      - 5D weekly 5-minute bars
       - 1Y macro daily bars
     """
     live = compute_live_payload()

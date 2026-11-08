@@ -14,7 +14,7 @@ The **Overvix Terminal** monitors the real-time pricing relationship between spo
 |  [SPX 500: 7356.73 (-4.32%)]  [VIX: 27.59 (+10.98 pts)]  [VIX/VIX3M: 1.0210 (INVERTED)]       |
 +-----------------------------------------------------------------------------------------------+
 |  [Spot-Vol Regression & Overvix Trail]   |   [Volatility Term Structure (VIX / VIX3M)]        |
-|  - 60D OLS Trendline & +2.0 pt Band      |   - 1D (1-min), 5D (15-min), 1Y (daily)            |
+|  - 60D OLS Trendline & +2.0 pt Band      |   - 1D (1-min), 5D (5-min), 1Y (daily)             |
 |  - Intraday Breadcrumb Trail & Beacon   |   - Contango (<0.90) vs Backwardation (>=1.00)      |
 +------------------------------------------+----------------------------------------------------+
 |  [Dynamic Correlation & Divergence]      |   [Tech Vol Premium (VXN - VIX)]                   |
@@ -45,7 +45,7 @@ The **Overvix Terminal** monitors the real-time pricing relationship between spo
 - **Dynamic Stepped Timeframe Slider (8 Granular Horizons)**:
   Both Card 2 (Term Structure) and Card 3 (Dynamic Correlation) feature an interactive stepped slider (`0` to `7`) supporting 8 distinct multi-timeframe horizons with tailor-made bar granularities:
   1. **`1D`**: Intraday 1-minute RTH bars (390 bars) with rolling 30-min Pearson correlation.
-  2. **`5D`**: 1-Week 15-minute bars (~130 bars) with rolling 1-day Pearson correlation.
+  2. **`5D`**: 1-Week 5-minute bars (~390 bars) with rolling 1-day Pearson correlation.
   3. **`1M`**: 1-Month 30-minute bars (~286 bars) for granular monthly OPEX and swing cycle analysis.
   4. **`3M`**: Quarterly 4-hour bars (~133 bars) **natively matched to the 90-day VIX3M contract tenor**.
   5. **`6M`**: Semi-Annual 4-hour bars (~257 bars) for multi-quarter volatility cycles.
