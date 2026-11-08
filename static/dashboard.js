@@ -1977,13 +1977,19 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     }
   ] : [];
 
+  const anchorTimeFormatted = anchoredSeries.anchorTime 
+    ? (targetTf === '1D' 
+        ? (anchoredSeries.anchorTime.length > 10 ? anchoredSeries.anchorTime.slice(11) : anchoredSeries.anchorTime)
+        : (anchoredSeries.anchorTime.length > 10 ? anchoredSeries.anchorTime.slice(5) : anchoredSeries.anchorTime))
+    : '';
+
   const anchorAnnotations = isAnchored && anchoredSeries.anchorTime ? [
     {
       xref: 'x',
       yref: 'paper',
       x: anchoredSeries.anchorTime,
       y: 1.05,
-      text: `⚓ Anchor: ${anchoredSeries.anchorTime.length > 10 ? anchoredSeries.anchorTime.slice(11) : anchoredSeries.anchorTime}`,
+      text: `⚓ Anchor: ${anchorTimeFormatted}`,
       showarrow: false,
       font: { color: '#00E5FF', size: 10, family: 'monospace' },
       bgcolor: 'rgba(15, 23, 42, 0.9)',
@@ -1993,16 +1999,20 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     }
   ] : [];
 
-  // 60-Day Macro Baseline Spot-Vol Slope from Overvix model
+  // 60-Day Macro Baseline Spot-Vol Slope & Intercept from Overvix model
   let rawSlope = -1.9796;
+  let rawIntercept = 0.0622;
   if (cachedBootstrap) {
-    if (isNdx && cachedBootstrap.ndx && cachedBootstrap.ndx.model && cachedBootstrap.ndx.model.slope) {
-      rawSlope = cachedBootstrap.ndx.model.slope;
-    } else if (cachedBootstrap.model && cachedBootstrap.model.slope) {
-      rawSlope = cachedBootstrap.model.slope;
+    if (isNdx && cachedBootstrap.ndx && cachedBootstrap.ndx.model) {
+      if (typeof cachedBootstrap.ndx.model.slope === 'number') rawSlope = cachedBootstrap.ndx.model.slope;
+      if (typeof cachedBootstrap.ndx.model.intercept === 'number') rawIntercept = cachedBootstrap.ndx.model.intercept;
+    } else if (cachedBootstrap.model) {
+      if (typeof cachedBootstrap.model.slope === 'number') rawSlope = cachedBootstrap.model.slope;
+      if (typeof cachedBootstrap.model.intercept === 'number') rawIntercept = cachedBootstrap.model.intercept;
     }
   } else if (isNdx) {
     rawSlope = -1.3712;
+    rawIntercept = 0.0;
   }
   const beta = Math.abs(rawSlope) > 0.05 ? Math.abs(rawSlope) : 1.98;
 
@@ -2049,9 +2059,11 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       : '-';
     const sPct = assetPct[i] || 0;
     const vPt = volPt[i] || 0;
-    // Expected VIX move = -beta * SPX %
-    // Overvix residual = vPt - (-beta * sPct) = vPt + beta * sPct
-    const resid = vPt + beta * sPct;
+    // Expected VIX move = alpha + slope * sPct = alpha - beta * sPct
+    // For 1D unanchored session baseline, alpha is the daily intercept from the baseline regression
+    const alpha = (!isAnchored && targetTf === '1D') ? rawIntercept : 0;
+    // Overvix residual = vPt - (alpha - beta * sPct) = vPt - alpha + beta * sPct
+    const resid = vPt - alpha + beta * sPct;
     return [raw, resid.toFixed(2)];
   });
 
