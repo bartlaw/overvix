@@ -1083,11 +1083,18 @@ function attachOvervixChartClickListener() {
 }
 
 function handleHistoricalDotClick(dateStr) {
+  // 1. If 1D chart is selected, clicking any historical session dot loads that historical day's 1-min intraday replay
+  if (currentCorrTf === '1D') {
+    loadHistoricalSession(dateStr);
+    return;
+  }
+
+  // 2. Multi-day horizon (5D, 1M, 3M, 6M, 1Y):
   const isNdx = (currentAssetPair === 'NDX');
   const c = isNdx ? (cachedCorrNdx[currentCorrTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[currentCorrTf] || cachedCorr['1D'] || cachedCorr);
   const times = (c && c.times) ? c.times : [];
 
-  // If dateStr is the immediately preceding session, route to prior_close
+  // If dateStr is the immediately preceding session in the multi-day timeline, route to official prior close (-2.11 pts)
   const latestDate = times.length > 0 ? times[times.length - 1].slice(0, 10) : '';
   const isPriorSession = (dateStr < latestDate && !times.some(t => t.slice(0, 10) > dateStr && t.slice(0, 10) < latestDate));
   if (isPriorSession) {
@@ -1100,16 +1107,9 @@ function handleHistoricalDotClick(dateStr) {
   if (hasDateInCurrentTf) {
     setCorrAnchor('date_close', dateStr);
     highlightAnchorScroll();
-  } else if (currentCorrTf !== '1D') {
-    // Multi-day horizon: set date_close
-    setCorrAnchor('date_close', dateStr);
-    highlightAnchorScroll();
   } else {
-    // 1D horizon: date is historical.
-    const conf = confirm(`Session ${dateStr} selected from Spot-Vol regression.\n\nLoad this historical session into the dashboard?`);
-    if (conf) {
-      loadHistoricalSession(dateStr);
-    }
+    // Outside current multi-day timeframe -> load historical session
+    loadHistoricalSession(dateStr);
   }
 }
 
