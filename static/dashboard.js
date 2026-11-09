@@ -927,9 +927,9 @@ function renderOvervixChart(bootstrap) {
       name: `${assetLabel} Historical (60D)`,
       marker: {
         color: isNdx ? '#C084FC' : '#E6D385',
-        size: 7,
-        opacity: 0.75,
-        line: { color: isNdx ? '#9333EA' : '#B39F50', width: 0.5 }
+        size: 9,
+        opacity: 0.85,
+        line: { color: isNdx ? '#9333EA' : '#B39F50', width: 0.75 }
       },
       hovertemplate: `<b>%{text}</b><br>${assetLabel} Move: %{x:.2f}%<br>${volLabel} Move: %{y:.2f} pts<br><span style="color:#C084FC;font-size:10px">👉 Click to Anchor / Inspect Date</span><extra></extra>`,
       visible: currentTrailMode === 'today' ? false : true
@@ -941,7 +941,7 @@ function renderOvervixChart(bootstrap) {
       mode: 'lines',
       name: 'Expected Trendline',
       line: { color: isNdx ? '#A855F7' : '#C5BF85', width: 2 },
-      hoverinfo: 'none'
+      hoverinfo: 'skip'
     },
     // 2: Overvix / Over-VXN Threshold Line
     {
@@ -950,7 +950,7 @@ function renderOvervixChart(bootstrap) {
       mode: 'lines',
       name: `Threshold (+${threshold.toFixed(1)} pts)`,
       line: { color: '#FF5370', width: 1.5, dash: 'dash' },
-      hoverinfo: 'none'
+      hoverinfo: 'skip'
     },
     // 3: Overvix Shaded Zone
     {
@@ -960,7 +960,7 @@ function renderOvervixChart(bootstrap) {
       fillcolor: 'rgba(255, 83, 112, 0.12)',
       line: { color: 'transparent' },
       name: isNdx ? 'Over-VXN Zone' : 'Overvix Zone',
-      hoverinfo: 'none'
+      hoverinfo: 'skip'
     },
     // 4: Intraday Breadcrumb Trail
     {
@@ -999,6 +999,8 @@ function renderOvervixChart(bootstrap) {
     paper_bgcolor: 'transparent',
     plot_bgcolor: 'transparent',
     autosize: true,
+    hovermode: 'closest',
+    hoverdistance: 35,
     margin: { l: 50, r: 20, t: 25, b: 45 },
     xaxis: {
       title: { text: `${assetLabel} % Change (${sessionPeriodLabel})`, font: { color: '#94A3B8', size: 11 } },
@@ -2365,7 +2367,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         line: { color: 'transparent', width: 0 },
         xaxis: 'x',
         yaxis: 'y',
-        hoverinfo: 'none',
+        hoverinfo: 'skip',
         showlegend: false
       };
       const traceRedRibbon = {
@@ -2377,7 +2379,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         fillcolor: 'rgba(244, 63, 94, 0.22)', // Red when Spot < Vol (Negative Overvix residual)
         xaxis: 'x',
         yaxis: 'y',
-        hoverinfo: 'none',
+        hoverinfo: 'skip',
         showlegend: false
       };
       const traceVolRef2 = {
@@ -2387,7 +2389,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         line: { color: 'transparent', width: 0 },
         xaxis: 'x',
         yaxis: 'y',
-        hoverinfo: 'none',
+        hoverinfo: 'skip',
         showlegend: false
       };
       const traceGreenRibbon = {
@@ -2399,7 +2401,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         fillcolor: 'rgba(16, 185, 129, 0.22)', // Green when Spot > Vol (Positive Overvix residual)
         xaxis: 'x',
         yaxis: 'y',
-        hoverinfo: 'none',
+        hoverinfo: 'skip',
         showlegend: false
       };
       dualRibbonTraces = [traceVolRef1, traceRedRibbon, traceVolRef2, traceGreenRibbon];
@@ -2473,7 +2475,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       xaxis: 'x',
       yaxis: 'y3',
       showlegend: false,
-      hoverinfo: 'none'
+      hoverinfo: 'skip'
     };
 
     // Rose Red shading to zero when Residual < 0
@@ -2487,7 +2489,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       xaxis: 'x',
       yaxis: 'y3',
       showlegend: false,
-      hoverinfo: 'none'
+      hoverinfo: 'skip'
     };
 
     const traceResidual = {
@@ -2511,7 +2513,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       xaxis: 'x',
       yaxis: 'y3',
       showlegend: false,
-      hoverinfo: 'none'
+      hoverinfo: 'skip'
     };
 
     const traceOvervixAlert = {
@@ -2523,7 +2525,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       xaxis: 'x',
       yaxis: 'y3',
       showlegend: false,
-      hoverinfo: 'none'
+      hoverinfo: 'skip'
     };
 
     const traceVolCrush = {
@@ -2535,7 +2537,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       xaxis: 'x',
       yaxis: 'y3',
       showlegend: false,
-      hoverinfo: 'none'
+      hoverinfo: 'skip'
     };
 
     // Anchor Origin Marker: glowing cyan dot at (anchorTime, 0.0) where both curves start
