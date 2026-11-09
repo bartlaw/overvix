@@ -1048,16 +1048,29 @@ function attachOvervixChartClickListener() {
     const curveNum = pt.curveNumber;
     lastOvervixClickTimestamp = Date.now();
 
-    // 1. Intraday Path Clicked (Trace 4)
-    if (curveNum === 4 && pt.text) {
-      setCorrAnchor('custom', pt.text);
+    // 1. Session Close Beacon (Trace 5) OR final point of Intraday Path (Trace 4 tip)
+    const trailLen = (cachedTrail && cachedTrail.x) ? cachedTrail.x.length : 0;
+    const isBeacon = (curveNum === 5) || (curveNum === 4 && pt.pointIndex !== undefined && pt.pointIndex >= trailLen - 1);
+
+    if (isBeacon) {
+      setCorrAnchor('prior_close');
       highlightAnchorScroll();
       return;
     }
 
-    // 2. Session Close Point / Live Current Point Clicked (Trace 5)
-    if (curveNum === 5) {
-      setCorrAnchor('close');
+    // 2. Intraday Path Clicked (Trace 4)
+    if (curveNum === 4 && pt.text) {
+      let targetTime = pt.text;
+      const isNdx = (currentAssetPair === 'NDX');
+      const c = isNdx ? (cachedCorrNdx[currentCorrTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[currentCorrTf] || cachedCorr['1D'] || cachedCorr);
+      const times = (c && c.times) ? c.times : [];
+      const sessDate = (cachedBootstrap && cachedBootstrap.session_date) 
+        ? cachedBootstrap.session_date 
+        : (times.length > 0 ? times[times.length - 1].slice(0, 10) : '');
+      if (sessDate && targetTime.length <= 8 && !targetTime.includes('-')) {
+        targetTime = `${sessDate} ${targetTime}`;
+      }
+      setCorrAnchor('custom', targetTime);
       highlightAnchorScroll();
       return;
     }
@@ -1073,6 +1086,15 @@ function handleHistoricalDotClick(dateStr) {
   const isNdx = (currentAssetPair === 'NDX');
   const c = isNdx ? (cachedCorrNdx[currentCorrTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[currentCorrTf] || cachedCorr['1D'] || cachedCorr);
   const times = (c && c.times) ? c.times : [];
+
+  // If dateStr is the immediately preceding session, route to prior_close
+  const latestDate = times.length > 0 ? times[times.length - 1].slice(0, 10) : '';
+  const isPriorSession = (dateStr < latestDate && !times.some(t => t.slice(0, 10) > dateStr && t.slice(0, 10) < latestDate));
+  if (isPriorSession) {
+    setCorrAnchor('prior_close');
+    highlightAnchorScroll();
+    return;
+  }
 
   const hasDateInCurrentTf = times.some(t => t.startsWith(dateStr));
   if (hasDateInCurrentTf) {
@@ -1593,6 +1615,12 @@ function setCorrAnchor(mode, targetTime = null) {
       isOfficialPriorClose = true;
     }
   } else if (mode === 'date_close' && targetTime) {
+    const latestDate = times.length > 0 ? times[times.length - 1].slice(0, 10) : '';
+    const isPriorSession = (targetTime < latestDate && !times.some(t => t.slice(0, 10) > targetTime && t.slice(0, 10) < latestDate));
+    if (isPriorSession) {
+      setCorrAnchor('prior_close');
+      return;
+    }
     for (let i = times.length - 1; i >= 0; i--) {
       if (times[i].startsWith(targetTime)) {
         chosenIdx = i;
