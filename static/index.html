@@ -113,12 +113,6 @@
           <span id="sound-text">Muted</span>
         </button>
 
-        <!-- Regime Guide Button -->
-        <button id="btn-guide" class="flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-800/80 transition shadow-sm">
-          <span>📖</span>
-          <span>Regime Guide</span>
-        </button>
-
         <!-- Settings Button -->
         <button id="btn-settings" class="flex items-center space-x-1 px-3 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
           <span>⚙️</span>
@@ -372,10 +366,6 @@
             <h2 id="corr-title" class="text-sm font-bold text-white uppercase tracking-tight">SPX &amp; VIX Spot-Vol &amp; Overvix Residual Monitor</h2>
             <span id="corr-tf-pill" class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60">Intraday 1M</span>
             <span id="corr-status-pill" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">Normal Residual (&plusmn;2.0 pts)</span>
-            <button id="btn-corr-guide" title="View 4-Regime Spot-Vol Playbook" class="text-slate-400 hover:text-cyan-400 text-xs px-2 py-0.5 rounded border border-slate-800 hover:border-cyan-800 bg-slate-950/60 transition flex items-center space-x-1">
-              <span>📖</span>
-              <span class="text-[10px] font-semibold uppercase tracking-wider">Playbook</span>
-            </button>
           </div>
           <p id="corr-subtitle" class="text-xs text-slate-400">Minute-by-Minute Normalized Overlay (Upper) &amp; Instantaneous Overvix Residual (Lower)</p>
         </div>
@@ -800,7 +790,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v5.8 with Official Settlement Prior Close Anchoring & Spot-Vol Click Routing) -->
-  <script src="/static/dashboard.js?v=5.8"></script>
+  <!-- DASHBOARD SCRIPT (v5.9 - Clean UI header without regime guide & playbook buttons) -->
+  <script src="/static/dashboard.js?v=5.9"></script>
 </body>
 </html>
