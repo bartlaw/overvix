@@ -2082,7 +2082,7 @@ function updateAnchorUI() {
   const btnCustom = document.getElementById('btn-anchor-custom-toggle');
 
   [btnOpen, btnPriorClose, btnSpotLow, btnVolHigh, btnCustom].forEach(btn => {
-    if (btn) btn.className = "px-2 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1";
+    if (btn) btn.className = "px-2.5 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1 font-semibold";
   });
 
   if (!corrAnchor.active) {

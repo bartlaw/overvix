@@ -361,28 +361,24 @@
     <!-- ROW 2: SPX vs. VIX DYNAMIC CORRELATION & DECOUPLING MONITOR -->
     <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col shadow-md">
       <div class="flex flex-wrap items-center justify-between pb-3 border-b border-slate-800/80 mb-2 gap-2">
-        <div>
+      <!-- TIER 1: MONITOR HEADER & VIEW CONTROLS -->
+      <div class="flex flex-wrap items-center justify-between pb-2.5 border-b border-slate-800/80 mb-2 gap-2">
+        <div class="flex flex-col">
           <div class="flex items-center space-x-2">
             <h2 id="corr-title" class="text-sm font-bold text-white uppercase tracking-tight">SPX &amp; VIX Spot-Vol &amp; Overvix Residual Monitor</h2>
             <span id="corr-tf-pill" class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60">Intraday 1M</span>
             <span id="corr-status-pill" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">Normal Residual (&plusmn;2.0 pts)</span>
           </div>
-          <p id="corr-subtitle" class="text-xs text-slate-400">Minute-by-Minute Normalized Overlay (Upper) &amp; Instantaneous Overvix Residual (Lower)</p>
+          <p id="corr-subtitle" class="text-xs text-slate-400">Normalized Overlay (Upper) &amp; Instantaneous Overvix Residual (Lower)</p>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
-          <!-- Real-Time Overvix Residual Badge -->
-          <div class="flex items-center space-x-2 bg-slate-950/90 px-3 py-1.5 rounded-lg border border-slate-800 text-xs font-mono">
-            <span id="corr-live-label" class="text-slate-400 text-[11px]">Latest Residual:</span>
-            <strong id="corr-live-val" class="text-cyan-400 font-bold">--.-- pts</strong>
-          </div>
-
           <!-- Timeframe Stepped Slider (Card 3: Dynamic Correlation) -->
-          <div class="timeframe-slider-wrapper flex flex-col bg-slate-950/80 px-3 py-1.5 rounded-lg border border-slate-800 min-w-[320px]">
-            <div class="flex items-center justify-between mb-1">
+          <div class="timeframe-slider-wrapper flex flex-col bg-slate-950/80 px-3 py-1 rounded-lg border border-slate-800 min-w-[290px]">
+            <div class="flex items-center justify-between mb-0.5">
               <div class="flex items-center space-x-1.5">
                 <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Horizon:</span>
-                <span id="corr-slider-badge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold">
+                <span id="corr-slider-badge" class="text-[11px] font-mono px-2 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold">
                   1D &bull; Intraday (1m)
                 </span>
               </div>
@@ -403,17 +399,16 @@
             </div>
           </div>
 
-
           <!-- Scale Mode Switcher (Beta Locked vs Auto Fit) -->
-          <div id="corr-scale-group" class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium">
-            <button id="btn-corr-scale" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition flex items-center space-x-1" title="Lock dual axes to Spot-Vol Slope (1% Spot = |Slope| pts Vol) so visual separation equals Overvix residual">
+          <div id="corr-scale-group" class="flex items-center space-x-1 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium">
+            <button id="btn-corr-scale" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition flex items-center space-x-1" title="Lock dual axes to Spot-Vol Slope (1% Spot = |Slope| pts Vol) so visual separation equals Overvix residual">
               <span id="corr-scale-label">Beta Scaled</span>
             </button>
           </div>
 
           <!-- Volatility Axis Invert Toggle -->
-          <div id="corr-invert-group" class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium">
-            <button id="btn-corr-invert" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1" title="Invert Volatility scale so VIX tracks Spot in lockstep">
+          <div id="corr-invert-group" class="flex items-center space-x-1 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium">
+            <button id="btn-corr-invert" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1" title="Invert Volatility scale so VIX tracks Spot in lockstep">
               <span>Invert Vol</span>
               <span id="corr-invert-icon" class="text-[10px] font-bold">▼</span>
             </button>
@@ -421,30 +416,30 @@
         </div>
       </div>
 
-      <!-- RECOVERY ANCHOR TOOLBAR & DIAGNOSTIC STRIP -->
+      <!-- TIER 2: ANCHOR ACTION BAR & PERFORMANCE HUD -->
       <div class="flex flex-wrap items-center justify-between bg-slate-950/70 border border-slate-800/80 rounded-lg px-3 py-2 mb-2 gap-2 text-xs">
-        <!-- Left: Anchor Presets & Pickers -->
-        <div class="flex flex-wrap items-center gap-1.5">
-          <div class="flex items-center space-x-1.5 mr-1">
-            <span class="text-cyan-400 font-bold text-xs">⚓ Anchor:</span>
-            <span id="anchor-status-pill" class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-medium">Session Baseline</span>
-          </div>
+        <!-- Left: Fixed Stationary Action Buttons (Never Shift!) -->
+        <div class="flex flex-wrap items-center gap-1.5 flex-shrink-0">
+          <span class="text-cyan-400 font-bold text-xs flex items-center space-x-1 mr-0.5">
+            <span>⚓</span>
+            <span>Anchor:</span>
+          </span>
 
           <div class="flex items-center space-x-1 bg-slate-900/90 p-0.5 rounded-md border border-slate-800 text-[11px]">
-            <button id="btn-anchor-open" class="px-2 py-1 rounded text-cyan-400 font-semibold bg-slate-800 shadow-sm transition hover:text-white" title="Anchor from Session Open / Baseline">Open</button>
-            <button id="btn-anchor-prior-close" class="px-2 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1" title="Anchor to Prior Day Official Close (16:00 ET)">
+            <button id="btn-anchor-open" class="px-2.5 py-1 rounded text-cyan-400 font-semibold bg-slate-800 shadow-sm transition hover:text-white" title="Anchor from Session Open / Baseline">Open</button>
+            <button id="btn-anchor-prior-close" class="px-2.5 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1" title="Anchor to Prior Day Official Close (16:00 ET)">
               <span>⏮️</span>
               <span>Prior Close</span>
             </button>
-            <button id="btn-anchor-spot-low" class="px-2 py-1 rounded text-slate-400 hover:text-emerald-400 transition flex items-center space-x-1" title="Anchor to intraday equity index low (trough)">
+            <button id="btn-anchor-spot-low" class="px-2.5 py-1 rounded text-slate-400 hover:text-emerald-400 transition flex items-center space-x-1" title="Anchor to intraday equity index low (trough)">
               <span>⚡</span>
               <span id="anchor-spot-low-label">SPX Low</span>
             </button>
-            <button id="btn-anchor-vol-high" class="px-2 py-1 rounded text-slate-400 hover:text-amber-400 transition flex items-center space-x-1" title="Anchor to intraday volatility spike peak">
+            <button id="btn-anchor-vol-high" class="px-2.5 py-1 rounded text-slate-400 hover:text-amber-400 transition flex items-center space-x-1" title="Anchor to intraday volatility spike peak">
               <span>🔥</span>
               <span id="anchor-vol-high-label">VIX High</span>
             </button>
-            <button id="btn-anchor-custom-toggle" class="px-2 py-1 rounded text-slate-400 hover:text-cyan-400 transition flex items-center space-x-1" title="Specify a custom date/time to anchor">
+            <button id="btn-anchor-custom-toggle" class="px-2.5 py-1 rounded text-slate-400 hover:text-cyan-400 transition flex items-center space-x-1" title="Specify a custom date/time to anchor">
               <span>🕒</span>
               <span>Custom</span>
             </button>
@@ -457,13 +452,17 @@
           </div>
 
           <button id="btn-anchor-reset" class="px-2 py-1 rounded text-[11px] text-slate-400 hover:text-red-400 transition" title="Reset anchor back to session baseline">✕ Reset</button>
-
-          <span class="text-[10px] text-slate-500 italic hidden xl:inline ml-2" title="Click any point on chart to anchor dual curves and calculate post-anchor Overvix residual">(Click any point on chart to anchor)</span>
         </div>
 
-        <!-- Right: Recovery Leader Diagnostic Strip -->
-        <div id="corr-recovery-banner" class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
-          <!-- Injected dynamically by dashboard.js -->
+        <!-- Right: Anchor Status Description & Performance Diagnostic HUD -->
+        <div class="flex flex-wrap items-center gap-2 font-mono text-[11px] ml-auto">
+          <!-- Active Anchor Status Pill -->
+          <span id="anchor-status-pill" class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-medium">Session Baseline</span>
+
+          <!-- Real-Time Recovery Diagnostic Strip -->
+          <div id="corr-recovery-banner" class="flex flex-wrap items-center gap-2">
+            <!-- Injected dynamically by dashboard.js -->
+          </div>
         </div>
       </div>
 
@@ -786,7 +785,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v6.0 - Streamlined anchor presets without redundant Close button) -->
-  <script src="/static/dashboard.js?v=6.0"></script>
+  <!-- DASHBOARD SCRIPT (v6.1 - Reorganized Two-Tier Command Deck layout with stationary anchor buttons) -->
+  <script src="/static/dashboard.js?v=6.1"></script>
 </body>
 </html>
