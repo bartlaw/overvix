@@ -441,7 +441,15 @@
           </div>
 
           <div class="flex items-center space-x-1 bg-slate-900/90 p-0.5 rounded-md border border-slate-800 text-[11px]">
-            <button id="btn-anchor-open" class="px-2 py-1 rounded text-cyan-400 font-semibold bg-slate-800 shadow-sm transition hover:text-white" title="Anchor from Session Open / Prior Close">Open</button>
+            <button id="btn-anchor-open" class="px-2 py-1 rounded text-cyan-400 font-semibold bg-slate-800 shadow-sm transition hover:text-white" title="Anchor from Session Open / Baseline">Open</button>
+            <button id="btn-anchor-prior-close" class="px-2 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1" title="Anchor to Prior Day Official Close (16:00 ET)">
+              <span>⏮️</span>
+              <span>Prior Close</span>
+            </button>
+            <button id="btn-anchor-close" class="px-2 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1" title="Anchor to Session Official Close (16:00 ET)">
+              <span>🏁</span>
+              <span>Close</span>
+            </button>
             <button id="btn-anchor-spot-low" class="px-2 py-1 rounded text-slate-400 hover:text-emerald-400 transition flex items-center space-x-1" title="Anchor to intraday equity index low (trough)">
               <span>⚡</span>
               <span id="anchor-spot-low-label">SPX Low</span>

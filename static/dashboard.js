@@ -672,6 +672,8 @@ function setupCorrButtons() {
 
 function setupAnchorButtons() {
   const btnOpen = document.getElementById('btn-anchor-open');
+  const btnPriorClose = document.getElementById('btn-anchor-prior-close');
+  const btnClose = document.getElementById('btn-anchor-close');
   const btnSpotLow = document.getElementById('btn-anchor-spot-low');
   const btnVolHigh = document.getElementById('btn-anchor-vol-high');
   const btnCustomToggle = document.getElementById('btn-anchor-custom-toggle');
@@ -682,6 +684,12 @@ function setupAnchorButtons() {
 
   if (btnOpen) {
     btnOpen.addEventListener('click', () => setCorrAnchor('open'));
+  }
+  if (btnPriorClose) {
+    btnPriorClose.addEventListener('click', () => setCorrAnchor('prior_close'));
+  }
+  if (btnClose) {
+    btnClose.addEventListener('click', () => setCorrAnchor('close'));
   }
   if (btnSpotLow) {
     btnSpotLow.addEventListener('click', () => setCorrAnchor('spot_low'));
@@ -923,7 +931,7 @@ function renderOvervixChart(bootstrap) {
         opacity: 0.75,
         line: { color: isNdx ? '#9333EA' : '#B39F50', width: 0.5 }
       },
-      hovertemplate: `<b>%{text}</b><br>${assetLabel} Move: %{x:.2f}%<br>${volLabel} Move: %{y:.2f} pts<extra></extra>`,
+      hovertemplate: `<b>%{text}</b><br>${assetLabel} Move: %{x:.2f}%<br>${volLabel} Move: %{y:.2f} pts<br><span style="color:#C084FC;font-size:10px">👉 Click to Anchor / Inspect Date</span><extra></extra>`,
       visible: currentTrailMode === 'today' ? false : true
     },
     // 1: Regression Trendline
@@ -963,7 +971,7 @@ function renderOvervixChart(bootstrap) {
       name: bootstrap.is_historical ? `${bootstrap.session_date} Path` : (bootstrap.session_date ? `Session ${bootstrap.session_date} Path` : "Intraday Path"),
       line: { color: '#00E5FF', width: 1.8, shape: 'spline' },
       marker: { color: '#00E5FF', size: 4, opacity: 0.8 },
-      hovertemplate: `<b>%{text}</b><br>${assetLabel}: %{x:.2f}%<br>${volLabel}: %{y:.2f} pts<extra></extra>`,
+      hovertemplate: `<b>%{text}</b><br>${assetLabel}: %{x:.2f}%<br>${volLabel}: %{y:.2f} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`,
       visible: currentTrailMode === '60d' ? false : true
     },
     // 5: Session End / Live Current Point
@@ -978,8 +986,8 @@ function renderOvervixChart(bootstrap) {
         line: { color: '#FFFFFF', width: 2 }
       },
       hovertemplate: (bootstrap.is_historical || bootstrap.is_rth_active === false)
-        ? `<b>Session Close (${bootstrap.session_date || 'Prior'})</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<extra></extra>`
-        : `<b>Live Current Point</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<extra></extra>`
+        ? `<b>Session Close (${bootstrap.session_date || 'Prior'})</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Official Close</span><extra></extra>`
+        : `<b>Live Current Point</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`
     }
   ];
 
@@ -1015,7 +1023,82 @@ function renderOvervixChart(bootstrap) {
     showlegend: true
   };
 
-  Plotly.newPlot('overvix-chart', traces, layout, { responsive: true, displayModeBar: false });
+  Plotly.newPlot('overvix-chart', traces, layout, { responsive: true, displayModeBar: false }).then(attachOvervixChartClickListener);
+}
+
+let lastOvervixClickTimestamp = 0;
+
+function attachOvervixChartClickListener() {
+  const chartEl = document.getElementById('overvix-chart');
+  if (!chartEl) return;
+
+  if (typeof chartEl.removeAllListeners === 'function') {
+    chartEl.removeAllListeners('plotly_click');
+  }
+
+  chartEl.on('plotly_click', function(eventData) {
+    if (Date.now() - lastOvervixClickTimestamp < 300) return;
+    if (!eventData || !eventData.points || eventData.points.length === 0) return;
+
+    const pt = eventData.points[0];
+    const curveNum = pt.curveNumber;
+    lastOvervixClickTimestamp = Date.now();
+
+    // 1. Intraday Path Clicked (Trace 4)
+    if (curveNum === 4 && pt.text) {
+      setCorrAnchor('custom', pt.text);
+      highlightAnchorScroll();
+      return;
+    }
+
+    // 2. Session Close Point / Live Current Point Clicked (Trace 5)
+    if (curveNum === 5) {
+      setCorrAnchor('close');
+      highlightAnchorScroll();
+      return;
+    }
+
+    // 3. Historical 60D Spot-Vol Point Clicked (Trace 0)
+    if (curveNum === 0 && pt.text) {
+      handleHistoricalDotClick(pt.text);
+    }
+  });
+}
+
+function handleHistoricalDotClick(dateStr) {
+  const isNdx = (currentAssetPair === 'NDX');
+  const c = isNdx ? (cachedCorrNdx[currentCorrTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[currentCorrTf] || cachedCorr['1D'] || cachedCorr);
+  const times = (c && c.times) ? c.times : [];
+
+  const hasDateInCurrentTf = times.some(t => t.startsWith(dateStr));
+  if (hasDateInCurrentTf) {
+    setCorrAnchor('date_close', dateStr);
+    highlightAnchorScroll();
+  } else if (currentCorrTf !== '1D') {
+    // Multi-day horizon: set date_close
+    setCorrAnchor('date_close', dateStr);
+    highlightAnchorScroll();
+  } else {
+    // 1D horizon: date is historical.
+    const conf = confirm(`Session ${dateStr} selected from Spot-Vol regression.\n\nLoad this historical session into the dashboard?`);
+    if (conf) {
+      loadHistoricalSession(dateStr);
+    }
+  }
+}
+
+function highlightAnchorScroll() {
+  const target = document.getElementById('correlation-chart');
+  if (target) {
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  const pill = document.getElementById('anchor-status-pill');
+  if (pill) {
+    pill.classList.add('ring-2', 'ring-cyan-400', 'animate-pulse');
+    setTimeout(() => {
+      pill.classList.remove('ring-2', 'ring-cyan-400', 'animate-pulse');
+    }, 2000);
+  }
 }
 
 function renderTechVolChart(tf = currentTimeframe) {
@@ -1461,6 +1544,32 @@ function setCorrAnchor(mode, targetTime = null) {
       }
     }
     if (chosenIdx === -1) chosenIdx = 0;
+  } else if (mode === 'close') {
+    chosenIdx = times.length - 1;
+  } else if (mode === 'prior_close') {
+    if (currentCorrTf === '1D') {
+      chosenIdx = 0;
+    } else {
+      const latestDate = times[times.length - 1].slice(0, 10);
+      for (let i = times.length - 1; i >= 0; i--) {
+        if (times[i].slice(0, 10) < latestDate) {
+          chosenIdx = i;
+          break;
+        }
+      }
+      if (chosenIdx === -1) chosenIdx = 0;
+    }
+  } else if (mode === 'date_close' && targetTime) {
+    for (let i = times.length - 1; i >= 0; i--) {
+      if (times[i].startsWith(targetTime)) {
+        chosenIdx = i;
+        break;
+      }
+    }
+    if (chosenIdx === -1) {
+      chosenIdx = findClosestTimeIndex(times, targetTime);
+    }
+    if (chosenIdx === -1) chosenIdx = 0;
   } else if (mode === 'custom') {
     chosenIdx = findClosestTimeIndex(times, targetTime);
     if (chosenIdx === -1) chosenIdx = 0;
@@ -1474,14 +1583,23 @@ function setCorrAnchor(mode, targetTime = null) {
   corrAnchor.index = chosenIdx;
   corrAnchor.spotBase = spotRaw[chosenIdx];
   corrAnchor.volBase = volRaw[chosenIdx];
+  corrAnchor.targetDate = (mode === 'date_close') ? targetTime : null;
 
-  const timeDisplay = (currentCorrTf === '1D') ? (corrAnchor.time.length > 10 ? corrAnchor.time.slice(11) : corrAnchor.time) : corrAnchor.time;
-  corrAnchor.label = `${timeDisplay} (${assetLabel}: ${corrAnchor.spotBase.toFixed(2)}, ${volLabel}: ${corrAnchor.volBase.toFixed(2)})`;
+  const is1D = (currentCorrTf === '1D');
+  const timeDisplay = is1D ? (corrAnchor.time.length > 10 ? corrAnchor.time.slice(11) : corrAnchor.time) : corrAnchor.time;
+  let modePrefix = '';
+  if (mode === 'close') modePrefix = 'Close: ';
+  else if (mode === 'prior_close') modePrefix = 'Prior Close: ';
+  else if (mode === 'date_close') modePrefix = 'Session Close: ';
+  else if (mode === 'spot_low') modePrefix = `${assetLabel} Low: `;
+  else if (mode === 'vol_high') modePrefix = `${volLabel} High: `;
+
+  corrAnchor.label = `${modePrefix}${timeDisplay} (${assetLabel}: ${corrAnchor.spotBase.toFixed(2)}, ${volLabel}: ${corrAnchor.volBase.toFixed(2)})`;
 
   // Sync custom time input if available
   const timePicker = document.getElementById('anchor-time-picker');
   if (timePicker) {
-    const timeVal = (currentCorrTf === '1D') ? (corrAnchor.time.length > 10 ? corrAnchor.time.slice(11, 16) : corrAnchor.time) : corrAnchor.time;
+    const timeVal = is1D ? (corrAnchor.time.length > 10 ? corrAnchor.time.slice(11, 16) : corrAnchor.time) : corrAnchor.time;
     timePicker.value = timeVal;
   }
 
@@ -1576,6 +1694,30 @@ function syncCorrAnchorForTimeframe(tf) {
         newIdx = i;
       }
     }
+  } else if (corrAnchor.mode === 'close') {
+    newIdx = times.length - 1;
+  } else if (corrAnchor.mode === 'prior_close') {
+    if (tf === '1D') {
+      newIdx = 0;
+    } else {
+      const latestDate = times[times.length - 1].slice(0, 10);
+      for (let i = times.length - 1; i >= 0; i--) {
+        if (times[i].slice(0, 10) < latestDate) {
+          newIdx = i;
+          break;
+        }
+      }
+      if (newIdx === -1) newIdx = 0;
+    }
+  } else if (corrAnchor.mode === 'date_close' && corrAnchor.targetDate) {
+    for (let i = times.length - 1; i >= 0; i--) {
+      if (times[i].startsWith(corrAnchor.targetDate)) {
+        newIdx = i;
+        break;
+      }
+    }
+    if (newIdx === -1) newIdx = findClosestTimeIndex(times, corrAnchor.targetDate);
+    if (newIdx === -1) newIdx = 0;
   } else if (corrAnchor.time) {
     newIdx = findClosestTimeIndex(times, corrAnchor.time);
   }
@@ -1590,7 +1732,14 @@ function syncCorrAnchorForTimeframe(tf) {
   const assetLabel = isNdx ? 'NDX' : 'SPX';
   const volLabel = isNdx ? 'VXN' : 'VIX';
   const timeDisplay = (tf === '1D') ? (corrAnchor.time.length > 10 ? corrAnchor.time.slice(11) : corrAnchor.time) : corrAnchor.time;
-  corrAnchor.label = `${timeDisplay} (${assetLabel}: ${corrAnchor.spotBase ? corrAnchor.spotBase.toFixed(2) : '-'}, ${volLabel}: ${corrAnchor.volBase ? corrAnchor.volBase.toFixed(2) : '-'})`;
+  let modePrefix = '';
+  if (corrAnchor.mode === 'close') modePrefix = 'Close: ';
+  else if (corrAnchor.mode === 'prior_close') modePrefix = 'Prior Close: ';
+  else if (corrAnchor.mode === 'date_close') modePrefix = 'Session Close: ';
+  else if (corrAnchor.mode === 'spot_low') modePrefix = `${assetLabel} Low: `;
+  else if (corrAnchor.mode === 'vol_high') modePrefix = `${volLabel} High: `;
+
+  corrAnchor.label = `${modePrefix}${timeDisplay} (${assetLabel}: ${corrAnchor.spotBase ? corrAnchor.spotBase.toFixed(2) : '-'}, ${volLabel}: ${corrAnchor.volBase ? corrAnchor.volBase.toFixed(2) : '-'})`;
 
   updateAnchorUI();
 }
@@ -1825,11 +1974,13 @@ function updateAnchorUI() {
   const pill = document.getElementById('anchor-status-pill');
   const banner = document.getElementById('corr-recovery-banner');
   const btnOpen = document.getElementById('btn-anchor-open');
+  const btnPriorClose = document.getElementById('btn-anchor-prior-close');
+  const btnClose = document.getElementById('btn-anchor-close');
   const btnSpotLow = document.getElementById('btn-anchor-spot-low');
   const btnVolHigh = document.getElementById('btn-anchor-vol-high');
   const btnCustom = document.getElementById('btn-anchor-custom-toggle');
 
-  [btnOpen, btnSpotLow, btnVolHigh, btnCustom].forEach(btn => {
+  [btnOpen, btnPriorClose, btnClose, btnSpotLow, btnVolHigh, btnCustom].forEach(btn => {
     if (btn) btn.className = "px-2 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1";
   });
 
@@ -1850,11 +2001,15 @@ function updateAnchorUI() {
     pill.className = "text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold";
   }
 
-  if (corrAnchor.mode === 'spot_low' && btnSpotLow) {
+  if (corrAnchor.mode === 'prior_close' && btnPriorClose) {
+    btnPriorClose.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
+  } else if (corrAnchor.mode === 'close' && btnClose) {
+    btnClose.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
+  } else if (corrAnchor.mode === 'spot_low' && btnSpotLow) {
     btnSpotLow.className = "px-2 py-1 rounded text-emerald-400 font-semibold bg-emerald-950/80 border border-emerald-800 shadow-sm transition flex items-center space-x-1";
   } else if (corrAnchor.mode === 'vol_high' && btnVolHigh) {
     btnVolHigh.className = "px-2 py-1 rounded text-amber-400 font-semibold bg-amber-950/80 border border-amber-800 shadow-sm transition flex items-center space-x-1";
-  } else if (corrAnchor.mode === 'custom' && btnCustom) {
+  } else if ((corrAnchor.mode === 'custom' || corrAnchor.mode === 'date_close') && btnCustom) {
     btnCustom.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
   }
 }
