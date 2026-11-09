@@ -1658,7 +1658,11 @@ function setCorrAnchor(mode, targetTime = null) {
   else if (mode === 'spot_low') modePrefix = `${assetLabel} Low: `;
   else if (mode === 'vol_high') modePrefix = `${volLabel} High: `;
 
-  const timeLabel = isOfficialPriorClose ? '16:00' : timeDisplay;
+  let timeLabel = isOfficialPriorClose ? '16:00' : timeDisplay;
+  if (mode === 'date_close') {
+    const dStr = (targetTime && targetTime.length >= 10) ? targetTime.slice(0, 10) : (corrAnchor.time.length >= 10 ? corrAnchor.time.slice(0, 10) : corrAnchor.time);
+    timeLabel = `${dStr} 16:00`;
+  }
   corrAnchor.label = `${modePrefix}${timeLabel} (${assetLabel}: ${corrAnchor.spotBase.toFixed(2)}, ${volLabel}: ${corrAnchor.volBase.toFixed(2)})`;
 
   // Sync custom time input if available
@@ -1812,7 +1816,11 @@ function syncCorrAnchorForTimeframe(tf) {
   else if (corrAnchor.mode === 'spot_low') modePrefix = `${assetLabel} Low: `;
   else if (corrAnchor.mode === 'vol_high') modePrefix = `${volLabel} High: `;
 
-  const timeLabel = corrAnchor.isOfficialPriorClose ? '16:00' : timeDisplay;
+  let timeLabel = corrAnchor.isOfficialPriorClose ? '16:00' : timeDisplay;
+  if (corrAnchor.mode === 'date_close') {
+    const dStr = corrAnchor.targetDate || (corrAnchor.time.length >= 10 ? corrAnchor.time.slice(0, 10) : corrAnchor.time);
+    timeLabel = `${dStr} 16:00`;
+  }
   corrAnchor.label = `${modePrefix}${timeLabel} (${assetLabel}: ${corrAnchor.spotBase ? corrAnchor.spotBase.toFixed(2) : '-'}, ${volLabel}: ${corrAnchor.volBase ? corrAnchor.volBase.toFixed(2) : '-'})`;
 
   updateAnchorUI();
