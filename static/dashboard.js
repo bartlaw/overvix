@@ -677,7 +677,6 @@ function setupCorrButtons() {
 function setupAnchorButtons() {
   const btnOpen = document.getElementById('btn-anchor-open');
   const btnPriorClose = document.getElementById('btn-anchor-prior-close');
-  const btnClose = document.getElementById('btn-anchor-close');
   const btnSpotLow = document.getElementById('btn-anchor-spot-low');
   const btnVolHigh = document.getElementById('btn-anchor-vol-high');
   const btnCustomToggle = document.getElementById('btn-anchor-custom-toggle');
@@ -691,9 +690,6 @@ function setupAnchorButtons() {
   }
   if (btnPriorClose) {
     btnPriorClose.addEventListener('click', () => setCorrAnchor('prior_close'));
-  }
-  if (btnClose) {
-    btnClose.addEventListener('click', () => setCorrAnchor('close'));
   }
   if (btnSpotLow) {
     btnSpotLow.addEventListener('click', () => setCorrAnchor('spot_low'));
@@ -2081,12 +2077,11 @@ function updateAnchorUI() {
   const banner = document.getElementById('corr-recovery-banner');
   const btnOpen = document.getElementById('btn-anchor-open');
   const btnPriorClose = document.getElementById('btn-anchor-prior-close');
-  const btnClose = document.getElementById('btn-anchor-close');
   const btnSpotLow = document.getElementById('btn-anchor-spot-low');
   const btnVolHigh = document.getElementById('btn-anchor-vol-high');
   const btnCustom = document.getElementById('btn-anchor-custom-toggle');
 
-  [btnOpen, btnPriorClose, btnClose, btnSpotLow, btnVolHigh, btnCustom].forEach(btn => {
+  [btnOpen, btnPriorClose, btnSpotLow, btnVolHigh, btnCustom].forEach(btn => {
     if (btn) btn.className = "px-2 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1";
   });
 
@@ -2109,8 +2104,6 @@ function updateAnchorUI() {
 
   if (corrAnchor.mode === 'prior_close' && btnPriorClose) {
     btnPriorClose.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
-  } else if (corrAnchor.mode === 'close' && btnClose) {
-    btnClose.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
   } else if (corrAnchor.mode === 'spot_low' && btnSpotLow) {
     btnSpotLow.className = "px-2 py-1 rounded text-emerald-400 font-semibold bg-emerald-950/80 border border-emerald-800 shadow-sm transition flex items-center space-x-1";
   } else if (corrAnchor.mode === 'vol_high' && btnVolHigh) {
