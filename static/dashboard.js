@@ -2102,7 +2102,11 @@ function updateAnchorUI() {
     }
     if (btnOpen) btnOpen.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-slate-800 shadow-sm transition hover:text-white";
     if (banner) {
-      banner.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from open. Select <strong>[${assetLabel} Low]</strong> or <strong>[${volLabel} High]</strong>, or click chart to analyze recovery leader.</span>`;
+      banner.innerHTML = '';
+    }
+    const commentEl = document.getElementById('anchor-summary-comment');
+    if (commentEl) {
+      commentEl.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from session open. Select <strong>[Prior Close]</strong>, <strong>[${assetLabel} Low]</strong>, or <strong>[${volLabel} High]</strong>, or click chart to set anchor point.</span>`;
     }
     return;
   }
@@ -2236,6 +2240,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   // Evaluate Recovery Leader Diagnostics & update banner
   const diag = evaluateRecoveryLeader(anchoredSeries, isNdx);
   const banner = document.getElementById('corr-recovery-banner');
+  const commentEl = document.getElementById('anchor-summary-comment');
   if (banner) {
     if (isAnchored && diag) {
       const spotSign = diag.spotNetPct >= 0 ? '+' : '';
@@ -2254,11 +2259,16 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
           <span title="Net Overvix residual calculated strictly relative to anchor point">${isNdx ? 'Over-VXN' : 'Overvix'} Residual: <strong class="${diag.residColor}">${diag.residSign}${diag.netResid.toFixed(2)} pts</strong> <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${diag.residBadgeClass}">${diag.residStatus}</span></span>
           <span class="text-slate-700">|</span>
           <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${diag.badgeClass}">${diag.tag}</span>
-          <span class="text-[10px] text-slate-300 font-sans hidden lg:inline font-normal">(${diag.summary})</span>
         </div>
       `;
+      if (commentEl) {
+        commentEl.textContent = diag.summary ? `(${diag.summary})` : '';
+      }
     } else {
-      banner.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from open. Select <strong>[${assetLabel} Low]</strong> or <strong>[${volLabel} High]</strong>, or click chart to set anchor point and evaluate post-anchor Overvix residual.</span>`;
+      banner.innerHTML = '';
+      if (commentEl) {
+        commentEl.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from session open. Select <strong>[Prior Close]</strong>, <strong>[${assetLabel} Low]</strong>, or <strong>[${volLabel} High]</strong>, or click chart to set anchor point and evaluate post-anchor Overvix residual.</span>`;
+      }
     }
   }
 

@@ -417,52 +417,58 @@
       </div>
 
       <!-- TIER 2: ANCHOR ACTION BAR & PERFORMANCE HUD -->
-      <div class="flex flex-wrap items-center justify-between bg-slate-950/70 border border-slate-800/80 rounded-lg px-3 py-2 mb-2 gap-2 text-xs">
-        <!-- Left: Fixed Stationary Action Buttons (Never Shift!) -->
-        <div class="flex flex-wrap items-center gap-1.5 flex-shrink-0">
-          <span class="text-cyan-400 font-bold text-xs flex items-center space-x-1 mr-0.5">
-            <span>⚓</span>
-            <span>Anchor:</span>
-          </span>
+      <div class="flex flex-col bg-slate-950/70 border border-slate-800/80 rounded-lg px-3 py-2 mb-2 gap-1.5 text-xs">
+        <!-- Row 1: Fixed Stationary Action Buttons (Left) & Real-Time Performance HUD (Right) -->
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <!-- Left: Fixed Stationary Action Buttons (Never Shift!) -->
+          <div class="flex flex-wrap items-center gap-1.5 flex-shrink-0">
+            <span class="text-cyan-400 font-bold text-xs flex items-center space-x-1 mr-0.5">
+              <span>⚓</span>
+              <span>Anchor:</span>
+            </span>
 
-          <div class="flex items-center space-x-1 bg-slate-900/90 p-0.5 rounded-md border border-slate-800 text-[11px]">
-            <button id="btn-anchor-open" class="px-2.5 py-1 rounded text-cyan-400 font-semibold bg-slate-800 shadow-sm transition hover:text-white" title="Anchor from Session Open / Baseline">Open</button>
-            <button id="btn-anchor-prior-close" class="px-2.5 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1" title="Anchor to Prior Day Official Close (16:00 ET)">
-              <span>⏮️</span>
-              <span>Prior Close</span>
-            </button>
-            <button id="btn-anchor-spot-low" class="px-2.5 py-1 rounded text-slate-400 hover:text-emerald-400 transition flex items-center space-x-1" title="Anchor to intraday equity index low (trough)">
-              <span>⚡</span>
-              <span id="anchor-spot-low-label">SPX Low</span>
-            </button>
-            <button id="btn-anchor-vol-high" class="px-2.5 py-1 rounded text-slate-400 hover:text-amber-400 transition flex items-center space-x-1" title="Anchor to intraday volatility spike peak">
-              <span>🔥</span>
-              <span id="anchor-vol-high-label">VIX High</span>
-            </button>
-            <button id="btn-anchor-custom-toggle" class="px-2.5 py-1 rounded text-slate-400 hover:text-cyan-400 transition flex items-center space-x-1" title="Specify a custom date/time to anchor">
-              <span>🕒</span>
-              <span>Custom</span>
-            </button>
+            <div class="flex items-center space-x-1 bg-slate-900/90 p-0.5 rounded-md border border-slate-800 text-[11px]">
+              <button id="btn-anchor-open" class="px-2.5 py-1 rounded text-cyan-400 font-semibold bg-slate-800 shadow-sm transition hover:text-white" title="Anchor from Session Open / Baseline">Open</button>
+              <button id="btn-anchor-prior-close" class="px-2.5 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1" title="Anchor to Prior Day Official Close (16:00 ET)">
+                <span>⏮️</span>
+                <span>Prior Close</span>
+              </button>
+              <button id="btn-anchor-spot-low" class="px-2.5 py-1 rounded text-slate-400 hover:text-emerald-400 transition flex items-center space-x-1" title="Anchor to intraday equity index low (trough)">
+                <span>⚡</span>
+                <span id="anchor-spot-low-label">SPX Low</span>
+              </button>
+              <button id="btn-anchor-vol-high" class="px-2.5 py-1 rounded text-slate-400 hover:text-amber-400 transition flex items-center space-x-1" title="Anchor to intraday volatility spike peak">
+                <span>🔥</span>
+                <span id="anchor-vol-high-label">VIX High</span>
+              </button>
+              <button id="btn-anchor-custom-toggle" class="px-2.5 py-1 rounded text-slate-400 hover:text-cyan-400 transition flex items-center space-x-1" title="Specify a custom date/time to anchor">
+                <span>🕒</span>
+                <span>Custom</span>
+              </button>
+            </div>
+
+            <!-- Custom Time Input (hidden by default, toggled via Custom button) -->
+            <div id="anchor-custom-wrapper" class="hidden items-center space-x-1 bg-slate-900/90 px-1.5 py-0.5 rounded-md border border-slate-700">
+              <input type="text" id="anchor-time-picker" class="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-[11px] text-white font-mono focus:outline-none focus:border-cyan-500 w-24" placeholder="HH:MM" value="09:30">
+              <button id="btn-apply-custom-time" class="px-2 py-0.5 bg-cyan-500 hover:bg-cyan-400 text-black font-bold rounded text-[10px] transition">Set</button>
+            </div>
+
+            <button id="btn-anchor-reset" class="px-2 py-1 rounded text-[11px] text-slate-400 hover:text-red-400 transition" title="Reset anchor back to session baseline">✕ Reset</button>
           </div>
 
-          <!-- Custom Time Input (hidden by default, toggled via Custom button) -->
-          <div id="anchor-custom-wrapper" class="hidden items-center space-x-1 bg-slate-900/90 px-1.5 py-0.5 rounded-md border border-slate-700">
-            <input type="text" id="anchor-time-picker" class="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-[11px] text-white font-mono focus:outline-none focus:border-cyan-500 w-24" placeholder="HH:MM" value="09:30">
-            <button id="btn-apply-custom-time" class="px-2 py-0.5 bg-cyan-500 hover:bg-cyan-400 text-black font-bold rounded text-[10px] transition">Set</button>
-          </div>
-
-          <button id="btn-anchor-reset" class="px-2 py-1 rounded text-[11px] text-slate-400 hover:text-red-400 transition" title="Reset anchor back to session baseline">✕ Reset</button>
-        </div>
-
-        <!-- Right: Anchor Status Description & Performance Diagnostic HUD -->
-        <div class="flex flex-wrap items-center gap-2 font-mono text-[11px] ml-auto">
-          <!-- Active Anchor Status Pill -->
-          <span id="anchor-status-pill" class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-medium">Session Baseline</span>
-
-          <!-- Real-Time Recovery Diagnostic Strip -->
-          <div id="corr-recovery-banner" class="flex flex-wrap items-center gap-2">
+          <!-- Right: Real-Time Recovery Diagnostic Strip -->
+          <div id="corr-recovery-banner" class="flex flex-wrap items-center gap-2 font-mono text-[11px] ml-auto">
             <!-- Injected dynamically by dashboard.js -->
           </div>
+        </div>
+
+        <!-- Row 2: Anchor Status Pill & Analytical Commentary in the Empty Spot to the Right -->
+        <div class="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800/60 font-mono text-[11px]">
+          <!-- Active Anchor Status Pill -->
+          <span id="anchor-status-pill" class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-medium flex-shrink-0">Session Baseline</span>
+
+          <!-- Analytical Commentary (Moved to the empty spot to the right of the anchor pill) -->
+          <span id="anchor-summary-comment" class="text-[11px] text-slate-300 font-sans font-normal"></span>
         </div>
       </div>
 
@@ -785,7 +791,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v6.4 - hoverinfo:skip & closest hovermode fix for corner beacons) -->
-  <script src="/static/dashboard.js?v=6.4"></script>
+  <!-- DASHBOARD SCRIPT (v6.5 - anchor commentary relocated to Row 2 next to anchor pill) -->
+  <script src="/static/dashboard.js?v=6.5"></script>
 </body>
 </html>
