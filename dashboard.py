@@ -28,6 +28,8 @@ import webbrowser
 from datetime import datetime, time as dtime
 from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
+import pickle
+import urllib.request
 import pytz
 
 warnings.filterwarnings('ignore')
@@ -80,6 +82,7 @@ DEFAULT_NDX_THRESHOLD_PTS = 2.5
 DEFAULT_THRESHOLD_PTS = DEFAULT_SPX_THRESHOLD_PTS
 DEFAULT_UPDATE_INTERVAL = 1.0
 COMMON_IBKR_PORTS = [7496, 7497, 4001, 4002]
+CACHE_PATH = os.path.join(os.path.dirname(__file__), 'data', 'history_cache.pkl')
 
 
 # ==============================================================================
@@ -440,20 +443,335 @@ def safe_to_series(bars, col_name: str) -> pd.Series:
         return pd.Series(dtype=float, name=col_name)
 
 
+def load_history_cache() -> Optional[Dict[str, Any]]:
+    if os.path.exists(CACHE_PATH):
+        try:
+            with open(CACHE_PATH, 'rb') as f:
+                data = pickle.load(f)
+                if isinstance(data, dict) and 'dfs_pool' in data and 'df_daily' in data:
+                    return data
+        except Exception as e:
+            print(f"[Cache Error] Failed reading history cache: {e}")
+    return None
+
+
+def save_history_cache(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.DataFrame, cache_date: str):
+    try:
+        os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
+        payload = {
+            'cache_date': cache_date,
+            'dfs_pool': dfs_pool,
+            'df_daily': df_daily
+        }
+        with open(CACHE_PATH, 'wb') as f:
+            pickle.dump(payload, f)
+        print(f"[Cache Saved] Deep multi-timeframe history saved to disk ({os.path.getsize(CACHE_PATH) / 1024:.1f} KB, date={cache_date})")
+    except Exception as e:
+        print(f"[Cache Error] Failed saving history cache: {e}")
+
+
+def build_horizon_pack(s_bars, v_bars, v3_bars, n_bars, vx_bars, roll_win=20, min_p=5):
+    df_s = s_bars if isinstance(s_bars, pd.Series) else safe_to_series(s_bars, 'spx')
+    df_v = v_bars if isinstance(v_bars, pd.Series) else safe_to_series(v_bars, 'vix')
+    df_v3 = v3_bars if isinstance(v3_bars, pd.Series) else safe_to_series(v3_bars, 'vix3m')
+    df_n = n_bars if isinstance(n_bars, pd.Series) else safe_to_series(n_bars, 'ndx')
+    df_vx = vx_bars if isinstance(vx_bars, pd.Series) else safe_to_series(vx_bars, 'vxn')
+
+    # Term Structure
+    df_ts = pd.concat([df_v, df_v3], axis=1).dropna()
+    if not df_ts.empty:
+        df_ts['ratio'] = df_ts['vix'] / df_ts['vix3m']
+
+    # SPX / VIX Corr
+    df_sv = pd.concat([df_s, df_v], axis=1).dropna()
+    corr_val = -0.75
+    if not df_sv.empty:
+        ref_s = float(df_sv['spx'].iloc[0])
+        ref_v = float(df_sv['vix'].iloc[0])
+        df_sv['spx_pct'] = (df_sv['spx'] - ref_s) / ref_s * 100.0
+        df_sv['vix_pt'] = df_sv['vix'] - ref_v
+        # Always compute on log returns: Δ ln(S_t) vs Δ ln(VIX_t)
+        df_sv['spx_ret'] = np.log(df_sv['spx'] / df_sv['spx'].shift(1))
+        df_sv['vix_ret'] = np.log(df_sv['vix'] / df_sv['vix'].shift(1))
+        df_sv['rolling_corr'] = df_sv['spx_ret'].rolling(roll_win, min_periods=min_p).corr(df_sv['vix_ret']).fillna(-0.75)
+        corr_val = float(df_sv['rolling_corr'].iloc[-1])
+
+    # NDX / VXN Corr
+    df_nv = pd.concat([df_n, df_vx], axis=1).dropna()
+    corr_ndx_val = -0.75
+    if not df_nv.empty:
+        ref_n = float(df_nv['ndx'].iloc[0])
+        ref_vx = float(df_nv['vxn'].iloc[0])
+        df_nv['ndx_pct'] = (df_nv['ndx'] - ref_n) / ref_n * 100.0
+        df_nv['vxn_pt'] = df_nv['vxn'] - ref_vx
+        # Always compute on log returns: Δ ln(NDX_t) vs Δ ln(VXN_t)
+        df_nv['ndx_ret'] = np.log(df_nv['ndx'] / df_nv['ndx'].shift(1))
+        df_nv['vxn_ret'] = np.log(df_nv['vxn'] / df_nv['vxn'].shift(1))
+        df_nv['rolling_corr'] = df_nv['ndx_ret'].rolling(roll_win, min_periods=min_p).corr(df_nv['vxn_ret']).fillna(-0.75)
+        corr_ndx_val = float(df_nv['rolling_corr'].iloc[-1])
+
+    # Tech Vol Spread & Ratio
+    df_tv = pd.concat([df_vx, df_v], axis=1).dropna()
+    if not df_tv.empty:
+        df_tv['spread'] = df_tv['vxn'] - df_tv['vix']
+        df_tv['ratio'] = df_tv['vxn'] / df_tv['vix']
+
+    return df_ts, df_sv, df_nv, df_tv, corr_val, corr_ndx_val
+
+
+def build_from_daily_df(df_pool: pd.DataFrame, roll_win=20, min_p=5):
+    if df_pool.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), -0.75, -0.75
+    # Term Structure
+    df_ts = df_pool[['vix', 'vix3m']].copy()
+    df_ts['ratio'] = df_ts['vix'] / df_ts['vix3m']
+
+    # SPX / VIX Corr
+    df_sv = df_pool[['spx', 'vix']].copy()
+    ref_s = float(df_sv['spx'].iloc[0])
+    ref_v = float(df_sv['vix'].iloc[0])
+    df_sv['spx_pct'] = (df_sv['spx'] - ref_s) / ref_s * 100.0
+    df_sv['vix_pt'] = df_sv['vix'] - ref_v
+    # Always compute on log returns: Δ ln(S_t) vs Δ ln(VIX_t)
+    df_sv['spx_ret'] = np.log(df_sv['spx'] / df_sv['spx'].shift(1))
+    df_sv['vix_ret'] = np.log(df_sv['vix'] / df_sv['vix'].shift(1))
+    df_sv['rolling_corr'] = df_sv['spx_ret'].rolling(roll_win, min_periods=min_p).corr(df_sv['vix_ret']).fillna(-0.75)
+    corr_val = float(df_sv['rolling_corr'].iloc[-1])
+
+    # NDX / VXN Corr
+    df_nv = df_pool[['ndx', 'vxn']].copy()
+    ref_n = float(df_nv['ndx'].iloc[0])
+    ref_vx = float(df_nv['vxn'].iloc[0])
+    df_nv['ndx_pct'] = (df_nv['ndx'] - ref_n) / ref_n * 100.0
+    df_nv['vxn_pt'] = df_nv['vxn'] - ref_vx
+    # Always compute on log returns: Δ ln(NDX_t) vs Δ ln(VXN_t)
+    df_nv['ndx_ret'] = np.log(df_nv['ndx'] / df_nv['ndx'].shift(1))
+    df_nv['vxn_ret'] = np.log(df_nv['vxn'] / df_nv['vxn'].shift(1))
+    df_nv['rolling_corr'] = df_nv['ndx_ret'].rolling(roll_win, min_periods=min_p).corr(df_nv['vxn_ret']).fillna(-0.75)
+    corr_ndx_val = float(df_nv['rolling_corr'].iloc[-1])
+
+    # Tech Vol Spread & Ratio
+    df_tv = df_pool[['vxn', 'vix']].copy()
+    df_tv['spread'] = df_tv['vxn'] - df_tv['vix']
+    df_tv['ratio'] = df_tv['vxn'] / df_tv['vix']
+
+    return df_ts, df_sv, df_nv, df_tv, corr_val, corr_ndx_val
+
+
+def compute_spotvol_baselines(df_daily: pd.DataFrame, active_sess_date: Optional[str], today_et: str):
+    col_spx = 'spx_close' if 'spx_close' in df_daily.columns else 'spx'
+    col_vix = 'vix_close' if 'vix_close' in df_daily.columns else 'vix'
+    df_sv = df_daily[[col_spx, col_vix]].dropna().rename(columns={col_spx: 'spx_close', col_vix: 'vix_close'})
+
+    if active_sess_date:
+        df_prior_sv = df_sv.loc[[str(d)[:10] < active_sess_date for d in df_sv.index]]
+        if df_prior_sv.empty:
+            df_prior_sv = df_sv.iloc[:-1] if len(df_sv) > 1 else df_sv
+    else:
+        is_today_in_sv = (str(df_sv.index[-1])[:10] == today_et) if not df_sv.empty else False
+        df_prior_sv = df_sv.iloc[:-1] if is_today_in_sv and len(df_sv) > 1 else df_sv
+
+    df_prior_sv = df_prior_sv.copy()
+    df_prior_sv['spx_pct'] = df_prior_sv['spx_close'].pct_change() * 100.0
+    df_prior_sv['vix_pt'] = df_prior_sv['vix_close'].diff()
+    df_prior_sv = df_prior_sv.dropna()
+
+    state.df_spotvol = df_prior_sv.iloc[-state.window_days:].copy()
+
+    x = state.df_spotvol['spx_pct'].values
+    y = state.df_spotvol['vix_pt'].values
+    slope, intercept, r_value, _, _ = stats.linregress(x, y)
+    state.slope = float(slope)
+    state.intercept = float(intercept)
+    state.r_squared = float(r_value ** 2)
+    state.vol_slope = float(1.0 / slope) if slope != 0 else 0.0
+
+    state.latest_spx_close = float(state.df_spotvol['spx_close'].iloc[-1])
+    state.latest_vix_close = float(state.df_spotvol['vix_close'].iloc[-1])
+    state.prior_spx_close = float(state.df_spotvol['spx_close'].iloc[-2]) if len(state.df_spotvol) > 1 else state.latest_spx_close
+    state.prior_vix_close = float(state.df_spotvol['vix_close'].iloc[-2]) if len(state.df_spotvol) > 1 else state.latest_vix_close
+    state.last_sess_x = float(state.df_spotvol['spx_pct'].iloc[-1])
+    state.last_sess_y = float(state.df_spotvol['vix_pt'].iloc[-1])
+
+    # NDX / VXN Spot-Vol Baseline
+    col_ndx = 'ndx_close' if 'ndx_close' in df_daily.columns else 'ndx'
+    col_vxn = 'vxn_close' if 'vxn_close' in df_daily.columns else 'vxn'
+    df_sv_ndx = df_daily[[col_ndx, col_vxn]].dropna().rename(columns={col_ndx: 'ndx_close', col_vxn: 'vxn_close'})
+
+    if active_sess_date:
+        df_prior_ndx = df_sv_ndx.loc[[str(d)[:10] < active_sess_date for d in df_sv_ndx.index]]
+        if df_prior_ndx.empty:
+            df_prior_ndx = df_sv_ndx.iloc[:-1] if len(df_sv_ndx) > 1 else df_sv_ndx
+    else:
+        is_today_in_ndx = (str(df_sv_ndx.index[-1])[:10] == today_et) if not df_sv_ndx.empty else False
+        df_prior_ndx = df_sv_ndx.iloc[:-1] if is_today_in_ndx and len(df_sv_ndx) > 1 else df_sv_ndx
+
+    df_prior_ndx = df_prior_ndx.copy()
+    df_prior_ndx['ndx_pct'] = df_prior_ndx['ndx_close'].pct_change() * 100.0
+    df_prior_ndx['vxn_pt'] = df_prior_ndx['vxn_close'].diff()
+    df_prior_ndx = df_prior_ndx.dropna()
+
+    state.df_spotvol_ndx = df_prior_ndx.iloc[-state.window_days:].copy()
+
+    x_ndx = state.df_spotvol_ndx['ndx_pct'].values
+    y_ndx = state.df_spotvol_ndx['vxn_pt'].values
+    ndx_slope, ndx_intercept, ndx_r_val, _, _ = stats.linregress(x_ndx, y_ndx)
+    state.ndx_slope = float(ndx_slope)
+    state.ndx_intercept = float(ndx_intercept)
+    state.ndx_r_squared = float(ndx_r_val ** 2)
+    state.ndx_vol_slope = float(1.0 / ndx_slope) if ndx_slope != 0 else 0.0
+
+    state.latest_ndx_close = float(state.df_spotvol_ndx['ndx_close'].iloc[-1])
+    state.latest_vxn_close = float(state.df_spotvol_ndx['vxn_close'].iloc[-1])
+    state.prior_ndx_close = float(state.df_spotvol_ndx['ndx_close'].iloc[-2]) if len(state.df_spotvol_ndx) > 1 else state.latest_ndx_close
+    state.prior_vxn_close = float(state.df_spotvol_ndx['vxn_close'].iloc[-2]) if len(state.df_spotvol_ndx) > 1 else state.latest_vxn_close
+    state.prior_tech_spread_close = state.latest_vxn_close - state.latest_vix_close
+    state.prior_tech_ratio_close = (state.latest_vxn_close / state.latest_vix_close) if state.latest_vix_close > 0 else 1.0
+    state.last_sess_ndx_x = float(state.df_spotvol_ndx['ndx_pct'].iloc[-1])
+    state.last_sess_ndx_y = float(state.df_spotvol_ndx['vxn_pt'].iloc[-1])
+
+    print(f" SPX Spot-Vol Baseline ({len(state.df_spotvol)} bars): R²={state.r_squared:.4f}, Slope={state.slope:.4f}")
+    print(f" NDX Spot-Vol Baseline ({len(state.df_spotvol_ndx)} bars): R²={state.ndx_r_squared:.4f}, Slope={state.ndx_slope:.4f}")
+
+
+def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.DataFrame, active_sess_date: Optional[str], today_et: str):
+    if not dfs_pool or 'spx' not in dfs_pool or dfs_pool['spx'].empty:
+        return
+
+    trading_days = sorted(dfs_pool['spx']['day'].unique()) if not dfs_pool['spx'].empty else []
+    days_3m = set(trading_days[-64:]) if len(trading_days) >= 64 else set(trading_days)
+    days_1m = set(trading_days[-22:]) if len(trading_days) >= 22 else set(trading_days)
+
+    # 1M Bars (RTH 30-min bars for last 22 trading days)
+    s_1m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_1m)], '30m', 'spx')
+    v_1m = resample_30m_to_session(dfs_pool['vix'][dfs_pool['vix']['day'].isin(days_1m)], '30m', 'vix')
+    v3_1m = resample_30m_to_session(dfs_pool['vix3m'][dfs_pool['vix3m']['day'].isin(days_1m)], '30m', 'vix3m')
+    n_1m = resample_30m_to_session(dfs_pool['ndx'][dfs_pool['ndx']['day'].isin(days_1m)], '30m', 'ndx')
+    vx_1m = resample_30m_to_session(dfs_pool['vxn'][dfs_pool['vxn']['day'].isin(days_1m)], '30m', 'vxn')
+    (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
+     state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_horizon_pack(
+        s_1m, v_1m, v3_1m, n_1m, vx_1m, roll_win=39, min_p=10
+    )
+
+    # 3M Bars (RTH 30-min bars for last 64 trading days)
+    s_3m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_3m)], '30m', 'spx')
+    v_3m = resample_30m_to_session(dfs_pool['vix'][dfs_pool['vix']['day'].isin(days_3m)], '30m', 'vix')
+    v3_3m = resample_30m_to_session(dfs_pool['vix3m'][dfs_pool['vix3m']['day'].isin(days_3m)], '30m', 'vix3m')
+    n_3m = resample_30m_to_session(dfs_pool['ndx'][dfs_pool['ndx']['day'].isin(days_3m)], '30m', 'ndx')
+    vx_3m = resample_30m_to_session(dfs_pool['vxn'][dfs_pool['vxn']['day'].isin(days_3m)], '30m', 'vxn')
+    (state.df_ts_3m, state.df_spx_vix_3m, state.df_ndx_vxn_3m,
+     state.df_tech_vol_3m, state.corr_3m, state.corr_3m_ndx) = build_horizon_pack(
+        s_3m, v_3m, v3_3m, n_3m, vx_3m, roll_win=130, min_p=20
+    )
+
+    # 6M Bars (RTH 30-min bars for all available trading days)
+    s_6m = resample_30m_to_session(dfs_pool['spx'], '30m', 'spx')
+    v_6m = resample_30m_to_session(dfs_pool['vix'], '30m', 'vix')
+    v3_6m = resample_30m_to_session(dfs_pool['vix3m'], '30m', 'vix3m')
+    n_6m = resample_30m_to_session(dfs_pool['ndx'], '30m', 'ndx')
+    vx_6m = resample_30m_to_session(dfs_pool['vxn'], '30m', 'vxn')
+    (state.df_ts_6m, state.df_spx_vix_6m, state.df_ndx_vxn_6m,
+     state.df_tech_vol_6m, state.corr_6m, state.corr_6m_ndx) = build_horizon_pack(
+        s_6m, v_6m, v3_6m, n_6m, vx_6m, roll_win=195, min_p=30
+    )
+
+    # Daily Macro Horizons (MAX, 1Y, YTD)
+    if not df_daily.empty:
+        state.df_daily = df_daily
+
+        # MAX
+        (state.df_ts_max, state.df_spx_vix_max, state.df_ndx_vxn_max,
+         state.df_tech_vol_max, state.corr_max, state.corr_max_ndx) = build_from_daily_df(
+            state.df_daily, roll_win=60, min_p=20
+        )
+
+        # 1Y
+        df_1y_pool = state.df_daily.iloc[-252:] if len(state.df_daily) >= 252 else state.df_daily
+        (state.df_ts_1y, state.df_spx_vix_1y, state.df_ndx_vxn_1y,
+         state.df_tech_vol_1y, state.corr_1y, state.corr_1y_ndx) = build_from_daily_df(
+            df_1y_pool, roll_win=60, min_p=15
+        )
+
+        # YTD
+        active_year = str(active_sess_date)[:4] if active_sess_date else datetime.now().strftime('%Y')
+        df_ytd_pool = state.df_daily.loc[[str(d)[:4] == active_year for d in state.df_daily.index]]
+        if df_ytd_pool.empty:
+            df_ytd_pool = state.df_daily.iloc[-60:]
+        (state.df_ts_ytd, state.df_spx_vix_ytd, state.df_ndx_vxn_ytd,
+         state.df_tech_vol_ytd, state.corr_ytd, state.corr_ytd_ndx) = build_from_daily_df(
+            df_ytd_pool, roll_win=20, min_p=5
+        )
+
+        if active_sess_date:
+            df_1y_comp = state.df_ts_1y.loc[[str(d)[:10] < active_sess_date for d in state.df_ts_1y.index]]
+            if df_1y_comp.empty:
+                df_1y_comp = state.df_ts_1y.iloc[:-1] if len(state.df_ts_1y) > 1 else state.df_ts_1y
+        else:
+            is_today_in_1y = (str(state.df_ts_1y.index[-1])[:10] == today_et) if not state.df_ts_1y.empty else False
+            df_1y_comp = state.df_ts_1y.iloc[:-1] if is_today_in_1y and len(state.df_ts_1y) > 1 else state.df_ts_1y
+
+        if not df_1y_comp.empty:
+            state.latest_vix3m_close = float(df_1y_comp['vix3m'].iloc[-1])
+            state.prior_vix3m_close = float(df_1y_comp['vix3m'].iloc[-2]) if len(df_1y_comp) > 1 else state.latest_vix3m_close
+            state.prior_ratio_close = (state.latest_vix_close / state.latest_vix3m_close) if state.latest_vix3m_close > 0 else 1.0
+
+
+async def hydrate_deep_history_background(active_sess_date: Optional[str], today_et: str):
+    """
+    Background worker that fetches 6M (30-min) and 2Y (1-day) bars from IBKR,
+    persists them to disk cache (history_cache.pkl), updates state multi-timeframe horizons,
+    and bumps state.hist_version so connected browser clients receive updated datasets without UI blocking.
+    """
+    try:
+        print("[Background Cache] Hydrating deep history (6M 30-min & 2Y daily) from IBKR in background...")
+        (b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn,
+         spx_bars_2y, vix_bars_2y, vix3m_bars_2y, ndx_bars_2y, vxn_bars_2y) = await asyncio.gather(
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
+
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
+        )
+        dfs_pool = {
+            name: bars_to_df(bars, name)
+            for name, bars in zip(['spx', 'vix', 'vix3m', 'ndx', 'vxn'],
+                                  [b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn])
+        }
+        df_s2y = safe_to_series(spx_bars_2y, 'spx')
+        df_v2y = safe_to_series(vix_bars_2y, 'vix')
+        df_v32y = safe_to_series(vix3m_bars_2y, 'vix3m')
+        df_n2y = safe_to_series(ndx_bars_2y, 'ndx')
+        df_vx2y = safe_to_series(vxn_bars_2y, 'vxn')
+        df_daily = pd.concat([df_s2y, df_v2y, df_v32y, df_n2y, df_vx2y], axis=1).dropna()
+
+        # Save to disk cache
+        save_history_cache(dfs_pool, df_daily, today_et)
+
+        # Apply to state and bump hist_version
+        apply_multi_timeframe_pool(dfs_pool, df_daily, active_sess_date, today_et)
+        compute_spotvol_baselines(df_daily, active_sess_date, today_et)
+
+        state.hist_version += 1
+        print(f"[Background Cache] Deep history successfully hydrated and saved to disk. (Version {state.hist_version})")
+    except Exception as e:
+        print(f"[Background Cache Error] Failed hydrating deep history: {e}")
+
+
 async def refresh_historical_data():
     """
     Fetch historical daily and intraday bars directly from IBKR for SPX, VIX, VIX3M, NDX, VXN
     across all 8 supported multi-timeframe horizons:
       - 1D: 1-minute intraday bars (today's active session)
       - 5D: 5-minute weekly bars (~390 bars)
-      - 1M: 30-minute monthly bars (~286 bars)
-      - 3M: 30-minute quarterly bars (~832 bars, native VIX3M contract match)
-      - 6M: 30-minute semi-annual bars (~1638 bars)
-      - YTD: Daily bars from Jan 1 of active session year
-      - 1Y: Macro daily bars (252 trading days)
-      - MAX: Multi-year daily bars (500 trading days / 2Y)
+      - 1M, 3M, 6M, YTD, 1Y, MAX: Loaded instantly from disk cache (<0.01s) or hydrated in background
     """
-    print("[IBKR] Fetching historical baseline & multi-timeframe datasets from IBKR (SPX, VIX, VIX3M, NDX, VXN)...")
+    print("[IBKR] Fetching historical baseline & multi-timeframe datasets (Fast Startup)...")
     try:
         # 1. Fetch Intraday 1D (1-min) & 5D (5-min) bars in parallel
         (b1_spx, b1_vix, b1_vix3m, b1_ndx, b1_vxn,
@@ -472,11 +790,6 @@ async def refresh_historical_data():
         )
 
         # Pre-market / GTH Session Synchronization:
-        # SPX, NDX, VIX3M, and VXN only trade during Regular Trading Hours (09:30-16:00 ET).
-        # CBOE VIX trades overnight / GTH starting at 03:15 ET.
-        # Before 09:30 ET, SPX/NDX are on the prior completed session (e.g. 2026-11-05),
-        # while VIX has pre-market bars for today (2026-11-06).
-        # Re-align VIX to the active RTH session date so all 5 assets align on the exact same session.
         now_et = datetime.now(pytz.timezone('US/Eastern'))
         today_et = now_et.strftime('%Y-%m-%d')
         is_rth_now = (now_et.weekday() < 5) and (dtime(9, 30) <= now_et.time() < dtime(16, 15))
@@ -506,100 +819,40 @@ async def refresh_historical_data():
                         barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
                     )
 
-        # 2. Fetch Multi-Timeframe Intraday Pool (6M 30-min bars) & Daily Macro Pool (2Y 1-day) in parallel
-        # Note: 6M of 30-min bars natively provides high-resolution data that we session-anchor to 09:30 ET
-        # to cleanly eliminate IBKR's clock-hour (:00) alignment 30-minute stub bars for 2h (3M) and 4h (6M),
-        # while also perfectly slicing 1M without redundant API requests.
-        (b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn,
-         spx_bars_2y, vix_bars_2y, vix3m_bars_2y, ndx_bars_2y, vxn_bars_2y) = await asyncio.gather(
-            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
+        # 2. Check disk cache for multi-timeframe pools
+        cache_data = load_history_cache()
+        need_background_hydration = False
 
-            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
-        )
-
-        # Slicing Daily Bars strictly prior to active_sess_date for 60-day Spot-Vol Baseline
-        df_spx_daily = safe_to_series(spx_bars_2y, 'spx_close')
-        df_vix_daily = safe_to_series(vix_bars_2y, 'vix_close')
-        df_sv = pd.concat([df_spx_daily, df_vix_daily], axis=1).dropna()
-
-        if active_sess_date:
-            df_prior_sv = df_sv.loc[[str(d)[:10] < active_sess_date for d in df_sv.index]]
-            if df_prior_sv.empty:
-                df_prior_sv = df_sv.iloc[:-1] if len(df_sv) > 1 else df_sv
+        if cache_data and 'dfs_pool' in cache_data and 'df_daily' in cache_data and not cache_data['df_daily'].empty:
+            print("[IBKR] Loading deep multi-timeframe history from local disk cache (<0.01s)...")
+            cached_dfs = cache_data['dfs_pool']
+            cached_df_daily = cache_data['df_daily']
+            compute_spotvol_baselines(cached_df_daily, active_sess_date, today_et)
+            apply_multi_timeframe_pool(cached_dfs, cached_df_daily, active_sess_date, today_et)
+            if cache_data.get('cache_date') < today_et:
+                need_background_hydration = True
         else:
-            is_today_in_sv = (str(df_sv.index[-1])[:10] == today_et) if not df_sv.empty else False
-            df_prior_sv = df_sv.iloc[:-1] if is_today_in_sv and len(df_sv) > 1 else df_sv
+            # Cold first launch with no disk cache: fetch 4M (1-day) bars in parallel (~0.25s) for immediate Spot-Vol baselines
+            print("[IBKR] No disk cache found. Fetching 4M daily baseline for instant startup...")
+            (spx_d, vix_d, vix3m_d, ndx_d, vxn_d) = await asyncio.gather(
+                state.ib.reqHistoricalDataAsync(state.spx_contract, '', '4 M', '1 day', 'TRADES', True, 1),
+                state.ib.reqHistoricalDataAsync(state.vix_contract, '', '4 M', '1 day', 'TRADES', True, 1),
+                state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '4 M', '1 day', 'TRADES', True, 1),
+                state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '4 M', '1 day', 'TRADES', True, 1),
+                state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '4 M', '1 day', 'TRADES', True, 1),
+            )
+            df_s4m = safe_to_series(spx_d, 'spx')
+            df_v4m = safe_to_series(vix_d, 'vix')
+            df_v34m = safe_to_series(vix3m_d, 'vix3m')
+            df_n4m = safe_to_series(ndx_d, 'ndx')
+            df_vx4m = safe_to_series(vxn_d, 'vxn')
+            df_daily_init = pd.concat([df_s4m, df_v4m, df_v34m, df_n4m, df_vx4m], axis=1).dropna()
+            state.df_daily = df_daily_init
+            compute_spotvol_baselines(df_daily_init, active_sess_date, today_et)
+            need_background_hydration = True
 
-        df_prior_sv = df_prior_sv.copy()
-        df_prior_sv['spx_pct'] = df_prior_sv['spx_close'].pct_change() * 100.0
-        df_prior_sv['vix_pt'] = df_prior_sv['vix_close'].diff()
-        df_prior_sv = df_prior_sv.dropna()
-
-        state.df_spotvol = df_prior_sv.iloc[-state.window_days:].copy()
-
-        x = state.df_spotvol['spx_pct'].values
-        y = state.df_spotvol['vix_pt'].values
-        slope, intercept, r_value, _, _ = stats.linregress(x, y)
-        state.slope = float(slope)
-        state.intercept = float(intercept)
-        state.r_squared = float(r_value ** 2)
-        state.vol_slope = float(1.0 / slope) if slope != 0 else 0.0
-
-        # Reference close prices strictly from the session preceding active_sess_date
-        state.latest_spx_close = float(state.df_spotvol['spx_close'].iloc[-1])
-        state.latest_vix_close = float(state.df_spotvol['vix_close'].iloc[-1])
-        state.prior_spx_close = float(state.df_spotvol['spx_close'].iloc[-2]) if len(state.df_spotvol) > 1 else state.latest_spx_close
-        state.prior_vix_close = float(state.df_spotvol['vix_close'].iloc[-2]) if len(state.df_spotvol) > 1 else state.latest_vix_close
-        state.last_sess_x = float(state.df_spotvol['spx_pct'].iloc[-1])
-        state.last_sess_y = float(state.df_spotvol['vix_pt'].iloc[-1])
-
-        # NDX / VXN Spot-Vol Baseline
-        df_ndx_daily = safe_to_series(ndx_bars_2y, 'ndx_close')
-        df_vxn_daily = safe_to_series(vxn_bars_2y, 'vxn_close')
-        df_sv_ndx = pd.concat([df_ndx_daily, df_vxn_daily], axis=1).dropna()
-
-        if active_sess_date:
-            df_prior_ndx = df_sv_ndx.loc[[str(d)[:10] < active_sess_date for d in df_sv_ndx.index]]
-            if df_prior_ndx.empty:
-                df_prior_ndx = df_sv_ndx.iloc[:-1] if len(df_sv_ndx) > 1 else df_sv_ndx
-        else:
-            is_today_in_ndx = (str(df_sv_ndx.index[-1])[:10] == today_et) if not df_sv_ndx.empty else False
-            df_prior_ndx = df_sv_ndx.iloc[:-1] if is_today_in_ndx and len(df_sv_ndx) > 1 else df_sv_ndx
-
-        df_prior_ndx = df_prior_ndx.copy()
-        df_prior_ndx['ndx_pct'] = df_prior_ndx['ndx_close'].pct_change() * 100.0
-        df_prior_ndx['vxn_pt'] = df_prior_ndx['vxn_close'].diff()
-        df_prior_ndx = df_prior_ndx.dropna()
-
-        state.df_spotvol_ndx = df_prior_ndx.iloc[-state.window_days:].copy()
-
-        x_ndx = state.df_spotvol_ndx['ndx_pct'].values
-        y_ndx = state.df_spotvol_ndx['vxn_pt'].values
-        ndx_slope, ndx_intercept, ndx_r_val, _, _ = stats.linregress(x_ndx, y_ndx)
-        state.ndx_slope = float(ndx_slope)
-        state.ndx_intercept = float(ndx_intercept)
-        state.ndx_r_squared = float(ndx_r_val ** 2)
-        state.ndx_vol_slope = float(1.0 / ndx_slope) if ndx_slope != 0 else 0.0
-
-        state.latest_ndx_close = float(state.df_spotvol_ndx['ndx_close'].iloc[-1])
-        state.latest_vxn_close = float(state.df_spotvol_ndx['vxn_close'].iloc[-1])
-        state.prior_ndx_close = float(state.df_spotvol_ndx['ndx_close'].iloc[-2]) if len(state.df_spotvol_ndx) > 1 else state.latest_ndx_close
-        state.prior_vxn_close = float(state.df_spotvol_ndx['vxn_close'].iloc[-2]) if len(state.df_spotvol_ndx) > 1 else state.latest_vxn_close
-        state.prior_tech_spread_close = state.latest_vxn_close - state.latest_vix_close
-        state.prior_tech_ratio_close = (state.latest_vxn_close / state.latest_vix_close) if state.latest_vix_close > 0 else 1.0
-        state.last_sess_ndx_x = float(state.df_spotvol_ndx['ndx_pct'].iloc[-1])
-        state.last_sess_ndx_y = float(state.df_spotvol_ndx['vxn_pt'].iloc[-1])
-
-        print(f" SPX Spot-Vol Baseline ({len(state.df_spotvol)} bars): R²={state.r_squared:.4f}, Slope={state.slope:.4f}")
-        print(f" NDX Spot-Vol Baseline ({len(state.df_spotvol_ndx)} bars): R²={state.ndx_r_squared:.4f}, Slope={state.ndx_slope:.4f}")
+        if need_background_hydration:
+            asyncio.create_task(hydrate_deep_history_background(active_sess_date, today_et))
 
         # 3. Process Intraday 1D Bars (1-min)
         df_v1 = safe_to_series(b1_vix, 'vix')
@@ -660,185 +913,11 @@ async def refresh_historical_data():
         else:
             state.df_tech_vol_1d = pd.DataFrame()
 
-        # Helper to process multi-timeframe bar sets (5D, 1M, 3M, 6M)
-        def build_horizon_pack(s_bars, v_bars, v3_bars, n_bars, vx_bars, roll_win=20, min_p=5):
-            df_s = s_bars if isinstance(s_bars, pd.Series) else safe_to_series(s_bars, 'spx')
-            df_v = v_bars if isinstance(v_bars, pd.Series) else safe_to_series(v_bars, 'vix')
-            df_v3 = v3_bars if isinstance(v3_bars, pd.Series) else safe_to_series(v3_bars, 'vix3m')
-            df_n = n_bars if isinstance(n_bars, pd.Series) else safe_to_series(n_bars, 'ndx')
-            df_vx = vx_bars if isinstance(vx_bars, pd.Series) else safe_to_series(vx_bars, 'vxn')
-
-            # Term Structure
-            df_ts = pd.concat([df_v, df_v3], axis=1).dropna()
-            if not df_ts.empty:
-                df_ts['ratio'] = df_ts['vix'] / df_ts['vix3m']
-
-            # SPX / VIX Corr
-            df_sv = pd.concat([df_s, df_v], axis=1).dropna()
-            corr_val = -0.75
-            if not df_sv.empty:
-                ref_s = float(df_sv['spx'].iloc[0])
-                ref_v = float(df_sv['vix'].iloc[0])
-                df_sv['spx_pct'] = (df_sv['spx'] - ref_s) / ref_s * 100.0
-                df_sv['vix_pt'] = df_sv['vix'] - ref_v
-                # Always compute on log returns: Δ ln(S_t) vs Δ ln(VIX_t)
-                df_sv['spx_ret'] = np.log(df_sv['spx'] / df_sv['spx'].shift(1))
-                df_sv['vix_ret'] = np.log(df_sv['vix'] / df_sv['vix'].shift(1))
-                df_sv['rolling_corr'] = df_sv['spx_ret'].rolling(roll_win, min_periods=min_p).corr(df_sv['vix_ret']).fillna(-0.75)
-                corr_val = float(df_sv['rolling_corr'].iloc[-1])
-
-            # NDX / VXN Corr
-            df_nv = pd.concat([df_n, df_vx], axis=1).dropna()
-            corr_ndx_val = -0.75
-            if not df_nv.empty:
-                ref_n = float(df_nv['ndx'].iloc[0])
-                ref_vx = float(df_nv['vxn'].iloc[0])
-                df_nv['ndx_pct'] = (df_nv['ndx'] - ref_n) / ref_n * 100.0
-                df_nv['vxn_pt'] = df_nv['vxn'] - ref_vx
-                # Always compute on log returns: Δ ln(NDX_t) vs Δ ln(VXN_t)
-                df_nv['ndx_ret'] = np.log(df_nv['ndx'] / df_nv['ndx'].shift(1))
-                df_nv['vxn_ret'] = np.log(df_nv['vxn'] / df_nv['vxn'].shift(1))
-                df_nv['rolling_corr'] = df_nv['ndx_ret'].rolling(roll_win, min_periods=min_p).corr(df_nv['vxn_ret']).fillna(-0.75)
-                corr_ndx_val = float(df_nv['rolling_corr'].iloc[-1])
-
-            # Tech Vol Spread & Ratio
-            df_tv = pd.concat([df_vx, df_v], axis=1).dropna()
-            if not df_tv.empty:
-                df_tv['spread'] = df_tv['vxn'] - df_tv['vix']
-                df_tv['ratio'] = df_tv['vxn'] / df_tv['vix']
-
-            return df_ts, df_sv, df_nv, df_tv, corr_val, corr_ndx_val
-
         # 4. Process 5D Bars (5-min)
         (state.df_ts_5d, state.df_spx_vix_5d, state.df_ndx_vxn_5d,
          state.df_tech_vol_5d, state.corr_5d, state.corr_5d_ndx) = build_horizon_pack(
             b5_spx, b5_vix, b5_vix3m, b5_ndx, b5_vxn, roll_win=78, min_p=20
         )
-
-        # Process 30-min unified intraday pool for 1M, 3M (2h), and 6M (4h)
-        dfs_pool = {
-            name: bars_to_df(bars, name)
-            for name, bars in zip(['spx', 'vix', 'vix3m', 'ndx', 'vxn'],
-                                  [b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn])
-        }
-        trading_days = sorted(dfs_pool['spx']['day'].unique()) if not dfs_pool['spx'].empty else []
-        days_3m = set(trading_days[-64:]) if len(trading_days) >= 64 else set(trading_days)
-        days_1m = set(trading_days[-22:]) if len(trading_days) >= 22 else set(trading_days)
-
-        # 5. Process 1M Bars (RTH 30-min bars for last 22 trading days)
-        s_1m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_1m)], '30m', 'spx')
-        v_1m = resample_30m_to_session(dfs_pool['vix'][dfs_pool['vix']['day'].isin(days_1m)], '30m', 'vix')
-        v3_1m = resample_30m_to_session(dfs_pool['vix3m'][dfs_pool['vix3m']['day'].isin(days_1m)], '30m', 'vix3m')
-        n_1m = resample_30m_to_session(dfs_pool['ndx'][dfs_pool['ndx']['day'].isin(days_1m)], '30m', 'ndx')
-        vx_1m = resample_30m_to_session(dfs_pool['vxn'][dfs_pool['vxn']['day'].isin(days_1m)], '30m', 'vxn')
-        (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
-         state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_horizon_pack(
-            s_1m, v_1m, v3_1m, n_1m, vx_1m, roll_win=39, min_p=10
-        )
-
-        # 6. Process 3M Bars (RTH 30-min bars for last 64 trading days, ~832 bars)
-        s_3m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_3m)], '30m', 'spx')
-        v_3m = resample_30m_to_session(dfs_pool['vix'][dfs_pool['vix']['day'].isin(days_3m)], '30m', 'vix')
-        v3_3m = resample_30m_to_session(dfs_pool['vix3m'][dfs_pool['vix3m']['day'].isin(days_3m)], '30m', 'vix3m')
-        n_3m = resample_30m_to_session(dfs_pool['ndx'][dfs_pool['ndx']['day'].isin(days_3m)], '30m', 'ndx')
-        vx_3m = resample_30m_to_session(dfs_pool['vxn'][dfs_pool['vxn']['day'].isin(days_3m)], '30m', 'vxn')
-        (state.df_ts_3m, state.df_spx_vix_3m, state.df_ndx_vxn_3m,
-         state.df_tech_vol_3m, state.corr_3m, state.corr_3m_ndx) = build_horizon_pack(
-            s_3m, v_3m, v3_3m, n_3m, vx_3m, roll_win=130, min_p=20
-        )
-
-        # 7. Process 6M Bars (RTH 30-min bars for all 126 trading days, ~1638 bars)
-        s_6m = resample_30m_to_session(dfs_pool['spx'], '30m', 'spx')
-        v_6m = resample_30m_to_session(dfs_pool['vix'], '30m', 'vix')
-        v3_6m = resample_30m_to_session(dfs_pool['vix3m'], '30m', 'vix3m')
-        n_6m = resample_30m_to_session(dfs_pool['ndx'], '30m', 'ndx')
-        vx_6m = resample_30m_to_session(dfs_pool['vxn'], '30m', 'vxn')
-        (state.df_ts_6m, state.df_spx_vix_6m, state.df_ndx_vxn_6m,
-         state.df_tech_vol_6m, state.corr_6m, state.corr_6m_ndx) = build_horizon_pack(
-            s_6m, v_6m, v3_6m, n_6m, vx_6m, roll_win=195, min_p=30
-        )
-
-        # 8. Combined Daily Dataset (2Y pool) for YTD, 1Y, and MAX
-        df_s2y = safe_to_series(spx_bars_2y, 'spx')
-        df_v2y = safe_to_series(vix_bars_2y, 'vix')
-        df_v32y = safe_to_series(vix3m_bars_2y, 'vix3m')
-        df_n2y = safe_to_series(ndx_bars_2y, 'ndx')
-        df_vx2y = safe_to_series(vxn_bars_2y, 'vxn')
-        state.df_daily = pd.concat([df_s2y, df_v2y, df_v32y, df_n2y, df_vx2y], axis=1).dropna()
-
-        def build_from_daily_df(df_pool, roll_win=20, min_p=5):
-            if df_pool.empty:
-                return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), -0.75, -0.75
-            # Term Structure
-            df_ts = df_pool[['vix', 'vix3m']].copy()
-            df_ts['ratio'] = df_ts['vix'] / df_ts['vix3m']
-
-            # SPX / VIX Corr
-            df_sv = df_pool[['spx', 'vix']].copy()
-            ref_s = float(df_sv['spx'].iloc[0])
-            ref_v = float(df_sv['vix'].iloc[0])
-            df_sv['spx_pct'] = (df_sv['spx'] - ref_s) / ref_s * 100.0
-            df_sv['vix_pt'] = df_sv['vix'] - ref_v
-            # Always compute on log returns: Δ ln(S_t) vs Δ ln(VIX_t)
-            df_sv['spx_ret'] = np.log(df_sv['spx'] / df_sv['spx'].shift(1))
-            df_sv['vix_ret'] = np.log(df_sv['vix'] / df_sv['vix'].shift(1))
-            df_sv['rolling_corr'] = df_sv['spx_ret'].rolling(roll_win, min_periods=min_p).corr(df_sv['vix_ret']).fillna(-0.75)
-            corr_val = float(df_sv['rolling_corr'].iloc[-1])
-
-            # NDX / VXN Corr
-            df_nv = df_pool[['ndx', 'vxn']].copy()
-            ref_n = float(df_nv['ndx'].iloc[0])
-            ref_vx = float(df_nv['vxn'].iloc[0])
-            df_nv['ndx_pct'] = (df_nv['ndx'] - ref_n) / ref_n * 100.0
-            df_nv['vxn_pt'] = df_nv['vxn'] - ref_vx
-            # Always compute on log returns: Δ ln(NDX_t) vs Δ ln(VXN_t)
-            df_nv['ndx_ret'] = np.log(df_nv['ndx'] / df_nv['ndx'].shift(1))
-            df_nv['vxn_ret'] = np.log(df_nv['vxn'] / df_nv['vxn'].shift(1))
-            df_nv['rolling_corr'] = df_nv['ndx_ret'].rolling(roll_win, min_periods=min_p).corr(df_nv['vxn_ret']).fillna(-0.75)
-            corr_ndx_val = float(df_nv['rolling_corr'].iloc[-1])
-
-            # Tech Vol Spread & Ratio
-            df_tv = df_pool[['vxn', 'vix']].copy()
-            df_tv['spread'] = df_tv['vxn'] - df_tv['vix']
-            df_tv['ratio'] = df_tv['vxn'] / df_tv['vix']
-
-            return df_ts, df_sv, df_nv, df_tv, corr_val, corr_ndx_val
-
-        # A. MAX Horizon (all 500 bars / 2Y - 60-day rolling Pearson correlation)
-        (state.df_ts_max, state.df_spx_vix_max, state.df_ndx_vxn_max,
-         state.df_tech_vol_max, state.corr_max, state.corr_max_ndx) = build_from_daily_df(
-            state.df_daily, roll_win=60, min_p=20
-        )
-
-        # B. 1Y Horizon (last 252 bars - 60-day rolling Pearson correlation)
-        df_1y_pool = state.df_daily.iloc[-252:] if len(state.df_daily) >= 252 else state.df_daily
-        (state.df_ts_1y, state.df_spx_vix_1y, state.df_ndx_vxn_1y,
-         state.df_tech_vol_1y, state.corr_1y, state.corr_1y_ndx) = build_from_daily_df(
-            df_1y_pool, roll_win=60, min_p=15
-        )
-
-        # C. YTD Horizon (from Jan 1 of active year - 20-day rolling Pearson correlation)
-        active_year = str(state.active_session_date)[:4] if state.active_session_date else datetime.now().strftime('%Y')
-        df_ytd_pool = state.df_daily.loc[[str(d)[:4] == active_year for d in state.df_daily.index]]
-        if df_ytd_pool.empty:
-            df_ytd_pool = state.df_daily.iloc[-60:]
-        (state.df_ts_ytd, state.df_spx_vix_ytd, state.df_ndx_vxn_ytd,
-         state.df_tech_vol_ytd, state.corr_ytd, state.corr_ytd_ndx) = build_from_daily_df(
-            df_ytd_pool, roll_win=20, min_p=5
-        )
-
-        if active_sess_date:
-            df_1y_comp = state.df_ts_1y.loc[[str(d)[:10] < active_sess_date for d in state.df_ts_1y.index]]
-            if df_1y_comp.empty:
-                df_1y_comp = state.df_ts_1y.iloc[:-1] if len(state.df_ts_1y) > 1 else state.df_ts_1y
-        else:
-            is_today_in_1y = (str(state.df_ts_1y.index[-1])[:10] == today_et) if not state.df_ts_1y.empty else False
-            df_1y_comp = state.df_ts_1y.iloc[:-1] if is_today_in_1y and len(state.df_ts_1y) > 1 else state.df_ts_1y
-
-        if not df_1y_comp.empty:
-            state.latest_vix3m_close = float(df_1y_comp['vix3m'].iloc[-1])
-            state.prior_vix3m_close = float(df_1y_comp['vix3m'].iloc[-2]) if len(df_1y_comp) > 1 else state.latest_vix3m_close
-            state.prior_ratio_close = (state.latest_vix_close / state.latest_vix3m_close) if state.latest_vix3m_close > 0 else 1.0
 
         state.hist_version += 1
         print(f"[IBKR] Baseline & multi-timeframe datasets successfully loaded (Version {state.hist_version}):")
@@ -1722,8 +1801,15 @@ def main():
 
     if not args.no_browser:
         def open_browser():
-            time.sleep(1.2)
             url = f"http://localhost:{args.web_port}"
+            # Poll /api/status until server is responsive before opening browser
+            for _ in range(60):
+                try:
+                    with urllib.request.urlopen(f"{url}/api/status", timeout=0.5) as resp:
+                        if resp.status == 200:
+                            break
+                except Exception:
+                    time.sleep(0.15)
             print(f"[Dashboard] Opening web dashboard in browser: {url}")
             webbrowser.open(url)
         import threading
