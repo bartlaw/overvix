@@ -360,10 +360,9 @@
 
     <!-- ROW 2: SPX vs. VIX DYNAMIC CORRELATION & DECOUPLING MONITOR -->
     <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col shadow-md">
-      <div class="flex flex-wrap items-center justify-between pb-3 border-b border-slate-800/80 mb-2 gap-2">
       <!-- TIER 1: MONITOR HEADER & VIEW CONTROLS -->
-      <div class="flex flex-wrap items-center justify-between pb-2.5 border-b border-slate-800/80 mb-2 gap-2">
-        <div class="flex flex-col">
+      <div class="flex flex-wrap items-center justify-between pb-2.5 border-b border-slate-800/80 mb-2 gap-3">
+        <div class="flex flex-col flex-shrink-0">
           <div class="flex items-center space-x-2">
             <h2 id="corr-title" class="text-sm font-bold text-white uppercase tracking-tight">SPX &amp; VIX Spot-Vol &amp; Overvix Residual Monitor</h2>
             <span id="corr-tf-pill" class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60">Intraday 1M</span>
@@ -372,9 +371,10 @@
           <p id="corr-subtitle" class="text-xs text-slate-400">Normalized Overlay (Upper) &amp; Instantaneous Overvix Residual (Lower)</p>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
-          <!-- Timeframe Stepped Slider (Card 3: Dynamic Correlation) -->
-          <div class="timeframe-slider-wrapper flex flex-col bg-slate-950/80 px-3 py-1 rounded-lg border border-slate-800 min-w-[290px]">
+        <!-- Right: Fixed Horizon Slider & Display Mode Controls (Anchored Right) -->
+        <div class="ml-auto flex items-center gap-2 flex-shrink-0">
+          <!-- Timeframe Stepped Slider (Fixed 290px width - zero resize shift) -->
+          <div class="timeframe-slider-wrapper flex flex-col bg-slate-950/80 px-3 py-1 rounded-lg border border-slate-800 w-[290px] flex-shrink-0">
             <div class="flex items-center justify-between mb-0.5">
               <div class="flex items-center space-x-1.5">
                 <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Horizon:</span>
@@ -400,15 +400,15 @@
           </div>
 
           <!-- Scale Mode Switcher (Beta Locked vs Auto Fit) -->
-          <div id="corr-scale-group" class="flex items-center space-x-1 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium">
-            <button id="btn-corr-scale" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition flex items-center space-x-1" title="Lock dual axes to Spot-Vol Slope (1% Spot = |Slope| pts Vol) so visual separation equals Overvix residual">
+          <div id="corr-scale-group" class="flex items-center space-x-1 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium flex-shrink-0">
+            <button id="btn-corr-scale" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition flex items-center space-x-1 whitespace-nowrap" title="Lock dual axes to Spot-Vol Slope (1% Spot = |Slope| pts Vol) so visual separation equals Overvix residual">
               <span id="corr-scale-label">Beta Scaled</span>
             </button>
           </div>
 
           <!-- Volatility Axis Invert Toggle -->
-          <div id="corr-invert-group" class="flex items-center space-x-1 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium">
-            <button id="btn-corr-invert" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1" title="Invert Volatility scale so VIX tracks Spot in lockstep">
+          <div id="corr-invert-group" class="flex items-center space-x-1 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium flex-shrink-0">
+            <button id="btn-corr-invert" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1 whitespace-nowrap" title="Invert Volatility scale so VIX tracks Spot in lockstep">
               <span>Invert Vol</span>
               <span id="corr-invert-icon" class="text-[10px] font-bold">▼</span>
             </button>
@@ -785,7 +785,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v6.1 - Reorganized Two-Tier Command Deck layout with stationary anchor buttons) -->
-  <script src="/static/dashboard.js?v=6.1"></script>
+  <!-- DASHBOARD SCRIPT (v6.2 - Right-anchored fixed horizon slider, beta scale, and invert vol controls) -->
+  <script src="/static/dashboard.js?v=6.2"></script>
 </body>
 </html>
