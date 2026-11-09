@@ -1076,6 +1076,13 @@ def compute_live_payload() -> Dict[str, Any]:
                 "source": vix3m_src if is_live_rth else f"SESSION CLOSE{src_suffix}"
             }
         },
+        "reference_closes": {
+            "spx": round(state.latest_spx_close, 2),
+            "vix": round(state.latest_vix_close, 2),
+            "vix3m": round(state.latest_vix3m_close, 2),
+            "ndx": round(state.latest_ndx_close, 2),
+            "vxn": round(state.latest_vxn_close, 2),
+        },
         "model": {
             "r_squared": round(state.r_squared, 4),
             "slope": round(state.slope, 4),

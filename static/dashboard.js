@@ -454,7 +454,11 @@ function switchAssetPair(pair) {
   const dispEl = document.getElementById('disp-thresh-pts');
   if (dispEl) dispEl.textContent = currentThreshold.toFixed(1);
 
-  updateAnchorUI();
+  if (corrAnchor.active) {
+    syncCorrAnchorForTimeframe(currentCorrTf);
+  } else {
+    updateAnchorUI();
+  }
 
   // Re-render charts and UI immediately from cache
   const activeData = (currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap;
@@ -1498,6 +1502,29 @@ function findClosestTimeIndex(times, target) {
   return times.length - 1;
 }
 
+function getOfficialPriorClose(isNdx) {
+  if (cachedBootstrap && cachedBootstrap.reference_closes) {
+    const rc = cachedBootstrap.reference_closes;
+    return isNdx
+      ? { spot: rc.ndx, vol: rc.vxn }
+      : { spot: rc.spx, vol: rc.vix };
+  }
+  if (cachedBootstrap) {
+    if (isNdx && cachedBootstrap.ndx && cachedBootstrap.ndx.market) {
+      const m = cachedBootstrap.ndx.market;
+      const spot = (m.current && typeof m.pct_change === 'number') ? m.current / (1 + m.pct_change / 100) : null;
+      const vol = (m.vxn && m.vxn.current && typeof m.vxn.pt_change === 'number') ? m.vxn.current - m.vxn.pt_change : null;
+      return { spot, vol };
+    } else if (!isNdx && cachedBootstrap.market) {
+      const m = cachedBootstrap.market;
+      const spot = (m.spx && m.spx.current && typeof m.spx.pct_change === 'number') ? m.spx.current / (1 + m.spx.pct_change / 100) : null;
+      const vol = (m.vix && m.vix.current && typeof m.vix.pt_change === 'number') ? m.vix.current - m.vix.pt_change : null;
+      return { spot, vol };
+    }
+  }
+  return null;
+}
+
 function setCorrAnchor(mode, targetTime = null) {
   const isNdx = (currentAssetPair === 'NDX');
   const c = isNdx ? (cachedCorrNdx[currentCorrTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[currentCorrTf] || cachedCorr['1D'] || cachedCorr);
@@ -1512,6 +1539,7 @@ function setCorrAnchor(mode, targetTime = null) {
     corrAnchor.mode = 'open';
     corrAnchor.time = null;
     corrAnchor.index = -1;
+    corrAnchor.isOfficialPriorClose = false;
     corrAnchor.spotBase = null;
     corrAnchor.volBase = null;
     corrAnchor.label = 'Session Baseline';
@@ -1525,6 +1553,7 @@ function setCorrAnchor(mode, targetTime = null) {
   const volRaw = raw.vol;
 
   let chosenIdx = -1;
+  let isOfficialPriorClose = false;
 
   if (mode === 'spot_low') {
     let minVal = Infinity;
@@ -1547,6 +1576,7 @@ function setCorrAnchor(mode, targetTime = null) {
   } else if (mode === 'close') {
     chosenIdx = times.length - 1;
   } else if (mode === 'prior_close') {
+    const offRef = getOfficialPriorClose(isNdx);
     if (currentCorrTf === '1D') {
       chosenIdx = 0;
     } else {
@@ -1558,6 +1588,9 @@ function setCorrAnchor(mode, targetTime = null) {
         }
       }
       if (chosenIdx === -1) chosenIdx = 0;
+    }
+    if (offRef && offRef.spot && offRef.vol) {
+      isOfficialPriorClose = true;
     }
   } else if (mode === 'date_close' && targetTime) {
     for (let i = times.length - 1; i >= 0; i--) {
@@ -1581,8 +1614,15 @@ function setCorrAnchor(mode, targetTime = null) {
   corrAnchor.mode = mode;
   corrAnchor.time = times[chosenIdx];
   corrAnchor.index = chosenIdx;
-  corrAnchor.spotBase = spotRaw[chosenIdx];
-  corrAnchor.volBase = volRaw[chosenIdx];
+  corrAnchor.isOfficialPriorClose = isOfficialPriorClose;
+  if (isOfficialPriorClose) {
+    const offRef = getOfficialPriorClose(isNdx);
+    corrAnchor.spotBase = offRef.spot;
+    corrAnchor.volBase = offRef.vol;
+  } else {
+    corrAnchor.spotBase = spotRaw[chosenIdx];
+    corrAnchor.volBase = volRaw[chosenIdx];
+  }
   corrAnchor.targetDate = (mode === 'date_close') ? targetTime : null;
 
   const is1D = (currentCorrTf === '1D');
@@ -1594,7 +1634,8 @@ function setCorrAnchor(mode, targetTime = null) {
   else if (mode === 'spot_low') modePrefix = `${assetLabel} Low: `;
   else if (mode === 'vol_high') modePrefix = `${volLabel} High: `;
 
-  corrAnchor.label = `${modePrefix}${timeDisplay} (${assetLabel}: ${corrAnchor.spotBase.toFixed(2)}, ${volLabel}: ${corrAnchor.volBase.toFixed(2)})`;
+  const timeLabel = isOfficialPriorClose ? '16:00' : timeDisplay;
+  corrAnchor.label = `${modePrefix}${timeLabel} (${assetLabel}: ${corrAnchor.spotBase.toFixed(2)}, ${volLabel}: ${corrAnchor.volBase.toFixed(2)})`;
 
   // Sync custom time input if available
   const timePicker = document.getElementById('anchor-time-picker');
@@ -1697,6 +1738,7 @@ function syncCorrAnchorForTimeframe(tf) {
   } else if (corrAnchor.mode === 'close') {
     newIdx = times.length - 1;
   } else if (corrAnchor.mode === 'prior_close') {
+    const offRef = getOfficialPriorClose(isNdx);
     if (tf === '1D') {
       newIdx = 0;
     } else {
@@ -1708,6 +1750,11 @@ function syncCorrAnchorForTimeframe(tf) {
         }
       }
       if (newIdx === -1) newIdx = 0;
+    }
+    if (offRef && offRef.spot && offRef.vol) {
+      corrAnchor.isOfficialPriorClose = true;
+      corrAnchor.spotBase = offRef.spot;
+      corrAnchor.volBase = offRef.vol;
     }
   } else if (corrAnchor.mode === 'date_close' && corrAnchor.targetDate) {
     for (let i = times.length - 1; i >= 0; i--) {
@@ -1726,8 +1773,10 @@ function syncCorrAnchorForTimeframe(tf) {
 
   corrAnchor.index = newIdx;
   corrAnchor.time = times[newIdx];
-  if (spotRaw[newIdx] !== undefined) corrAnchor.spotBase = spotRaw[newIdx];
-  if (volRaw[newIdx] !== undefined) corrAnchor.volBase = volRaw[newIdx];
+  if (!corrAnchor.isOfficialPriorClose) {
+    if (spotRaw[newIdx] !== undefined) corrAnchor.spotBase = spotRaw[newIdx];
+    if (volRaw[newIdx] !== undefined) corrAnchor.volBase = volRaw[newIdx];
+  }
 
   const assetLabel = isNdx ? 'NDX' : 'SPX';
   const volLabel = isNdx ? 'VXN' : 'VIX';
@@ -1739,7 +1788,8 @@ function syncCorrAnchorForTimeframe(tf) {
   else if (corrAnchor.mode === 'spot_low') modePrefix = `${assetLabel} Low: `;
   else if (corrAnchor.mode === 'vol_high') modePrefix = `${volLabel} High: `;
 
-  corrAnchor.label = `${modePrefix}${timeDisplay} (${assetLabel}: ${corrAnchor.spotBase ? corrAnchor.spotBase.toFixed(2) : '-'}, ${volLabel}: ${corrAnchor.volBase ? corrAnchor.volBase.toFixed(2) : '-'})`;
+  const timeLabel = corrAnchor.isOfficialPriorClose ? '16:00' : timeDisplay;
+  corrAnchor.label = `${modePrefix}${timeLabel} (${assetLabel}: ${corrAnchor.spotBase ? corrAnchor.spotBase.toFixed(2) : '-'}, ${volLabel}: ${corrAnchor.volBase ? corrAnchor.volBase.toFixed(2) : '-'})`;
 
   updateAnchorUI();
 }
@@ -1785,17 +1835,44 @@ function computeAnchoredSeries(c, isNdx) {
           idx = i;
         }
       }
+    } else if (corrAnchor.mode === 'close') {
+      idx = times.length - 1;
+    } else if (corrAnchor.mode === 'prior_close') {
+      if (currentCorrTf === '1D') {
+        idx = 0;
+      } else {
+        const latestDate = times[times.length - 1].slice(0, 10);
+        for (let i = times.length - 1; i >= 0; i--) {
+          if (times[i].slice(0, 10) < latestDate) {
+            idx = i;
+            break;
+          }
+        }
+        if (idx === -1) idx = 0;
+      }
+      const offRef = getOfficialPriorClose(isNdx);
+      if (offRef && offRef.spot && offRef.vol) {
+        corrAnchor.isOfficialPriorClose = true;
+        corrAnchor.spotBase = offRef.spot;
+        corrAnchor.volBase = offRef.vol;
+      }
     } else if (corrAnchor.time) {
       idx = findClosestTimeIndex(times, corrAnchor.time);
     }
     if (idx < 0 || idx >= times.length) idx = 0;
     corrAnchor.index = idx;
     corrAnchor.time = times[idx];
-    if (spotRaw[idx] !== undefined) corrAnchor.spotBase = spotRaw[idx];
-    if (volRaw[idx] !== undefined) corrAnchor.volBase = volRaw[idx];
+    if (!corrAnchor.isOfficialPriorClose) {
+      if (spotRaw[idx] !== undefined) corrAnchor.spotBase = spotRaw[idx];
+      if (volRaw[idx] !== undefined) corrAnchor.volBase = volRaw[idx];
+    }
   }
-  const s0 = spotRaw[idx];
-  const v0 = volRaw[idx];
+  const s0 = (corrAnchor.mode === 'prior_close' && corrAnchor.isOfficialPriorClose && corrAnchor.spotBase)
+    ? corrAnchor.spotBase
+    : spotRaw[idx];
+  const v0 = (corrAnchor.mode === 'prior_close' && corrAnchor.isOfficialPriorClose && corrAnchor.volBase)
+    ? corrAnchor.volBase
+    : volRaw[idx];
 
   const anchoredSpotPct = spotRaw.map(s => (s0 > 0 ? Math.round(((s - s0) / s0 * 100.0) * 10000) / 10000 : 0));
   const anchoredVolPt = volRaw.map(v => Math.round((v - v0) * 10000) / 10000);
@@ -1915,9 +1992,10 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
   }
 
   // Evaluate Post-Anchor Instantaneous Overvix Residual strictly from anchor point to latest bar
-  const { beta } = getActiveBetaAndIntercept(isNdx);
-  // Post-anchor residual has alpha = 0 (relative to anchor baseline)
-  const netResid = volNetPt + beta * spotNetPct;
+  const { beta, rawIntercept } = getActiveBetaAndIntercept(isNdx);
+  // When anchored to Prior Close, include the model intercept (alpha) to match the official session Overvix residual
+  const alpha = (corrAnchor.mode === 'prior_close') ? rawIntercept : 0;
+  const netResid = volNetPt - alpha + beta * spotNetPct;
   const thresh = isNdx ? currentNdxThreshold : currentThreshold;
   let residStatus = "NORMAL";
   let residBadgeClass = "bg-emerald-950 text-emerald-300 border border-emerald-800";
@@ -2247,7 +2325,8 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   // Red when Spot < Vol (Negative Overvix Residual: Vol spiked / panic)
   let dualRibbonTraces = null;
   if (isBetaScaled && isVolInverted && times.length > 0) {
-    const alpha = (!isAnchored && targetTf === '1D') ? rawIntercept : 0;
+    const isSessionBaseline = (corrAnchor.mode === 'prior_close' || (!isAnchored && targetTf === '1D'));
+    const alpha = isSessionBaseline ? rawIntercept : 0;
     const ribbonData = computeDualRibbonSeries(times, assetPct, volPt, beta, alpha);
     if (ribbonData && ribbonData.xArr.length > 0) {
       const traceVolRef1 = {
@@ -2306,8 +2385,9 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     const sPct = assetPct[i] || 0;
     const vPt = volPt[i] || 0;
     // Expected VIX move = alpha + slope * sPct = alpha - beta * sPct
-    // For 1D unanchored session baseline, alpha is the daily intercept from the baseline regression
-    const alpha = (!isAnchored && targetTf === '1D') ? rawIntercept : 0;
+    // For Prior Close anchor or 1D unanchored session baseline, alpha is the daily intercept from the baseline regression
+    const isSessionBaseline = (corrAnchor.mode === 'prior_close' || (!isAnchored && targetTf === '1D'));
+    const alpha = isSessionBaseline ? rawIntercept : 0;
     // Overvix residual = vPt - (alpha - beta * sPct) = vPt - alpha + beta * sPct
     const resid = vPt - alpha + beta * sPct;
     const residStr = (resid >= 0 ? `+${resid.toFixed(2)}` : resid.toFixed(2));
@@ -2337,7 +2417,8 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
 
     // Subplot 2: Instantaneous Overvix Residual Monitor
     const thresh = isNdx ? currentNdxThreshold : currentThreshold;
-    const alpha = (!isAnchored && targetTf === '1D') ? rawIntercept : 0;
+    const isSessionBaseline = (corrAnchor.mode === 'prior_close' || (!isAnchored && targetTf === '1D'));
+    const alpha = isSessionBaseline ? rawIntercept : 0;
 
     // Calculate instantaneous Overvix residual series:
     // r(t) = volPt(t) - alpha + beta * assetPct(t)
