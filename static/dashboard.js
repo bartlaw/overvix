@@ -685,7 +685,6 @@ function setupAnchorButtons() {
   const btnVolHigh = document.getElementById('btn-anchor-vol-high');
   const btnCustomToggle = document.getElementById('btn-anchor-custom-toggle');
   const btnApplyCustom = document.getElementById('btn-apply-custom-time');
-  const btnReset = document.getElementById('btn-anchor-reset');
   const customWrapper = document.getElementById('anchor-custom-wrapper');
   const timePicker = document.getElementById('anchor-time-picker');
 
@@ -728,9 +727,6 @@ function setupAnchorButtons() {
         }
       }
     });
-  }
-  if (btnReset) {
-    btnReset.addEventListener('click', () => setCorrAnchor('open'));
   }
 }
 

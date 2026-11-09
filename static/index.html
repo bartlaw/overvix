@@ -452,8 +452,6 @@
               <input type="text" id="anchor-time-picker" class="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-[11px] text-white font-mono focus:outline-none focus:border-cyan-500 w-24" placeholder="HH:MM" value="09:30">
               <button id="btn-apply-custom-time" class="px-2 py-0.5 bg-cyan-500 hover:bg-cyan-400 text-black font-bold rounded text-[10px] transition">Set</button>
             </div>
-
-            <button id="btn-anchor-reset" class="px-2 py-1 rounded text-[11px] text-slate-400 hover:text-red-400 transition" title="Reset anchor back to session baseline">✕ Reset</button>
           </div>
 
           <!-- Right: Real-Time Recovery Diagnostic Strip -->
@@ -791,7 +789,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v6.7 - change Open anchor label to None) -->
-  <script src="/static/dashboard.js?v=6.7"></script>
+  <!-- DASHBOARD SCRIPT (v6.8 - remove Reset button, None is the unanchored baseline toggle) -->
+  <script src="/static/dashboard.js?v=6.8"></script>
 </body>
 </html>
