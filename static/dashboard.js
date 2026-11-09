@@ -616,7 +616,11 @@ function switchTimeframe(tf, triggeredBySlider = false) {
       sliderCorrTimeframe.value = conf.step;
     }
     updateCorrSliderUI(tf);
-    syncCorrAnchorForTimeframe(tf);
+    if (tf === '1D') {
+      resetCorrAnchor(false);
+    } else {
+      syncCorrAnchorForTimeframe(tf);
+    }
     renderCorrelationChart(currentCorrMode, tf);
     updateCorrMetricDisplay();
   }
@@ -782,7 +786,11 @@ function switchCorrTf(tf, triggeredBySlider = false) {
     renderTermStructureChart(tf);
   }
 
-  syncCorrAnchorForTimeframe(tf);
+  if (tf === '1D') {
+    resetCorrAnchor(false);
+  } else {
+    syncCorrAnchorForTimeframe(tf);
+  }
   updateCorrMetricDisplay();
   renderCorrelationChart(currentCorrMode, tf);
 }
@@ -1545,6 +1553,22 @@ function getOfficialPriorClose(isNdx) {
   return null;
 }
 
+function resetCorrAnchor(triggerRender = true) {
+  corrAnchor.active = false;
+  corrAnchor.mode = 'open';
+  corrAnchor.time = null;
+  corrAnchor.index = -1;
+  corrAnchor.isOfficialPriorClose = false;
+  corrAnchor.targetDate = null;
+  corrAnchor.spotBase = null;
+  corrAnchor.volBase = null;
+  corrAnchor.label = 'Session Baseline';
+  updateAnchorUI();
+  if (triggerRender) {
+    renderCorrelationChart(currentCorrMode, currentCorrTf);
+  }
+}
+
 function setCorrAnchor(mode, targetTime = null) {
   const isNdx = (currentAssetPair === 'NDX');
   const c = isNdx ? (cachedCorrNdx[currentCorrTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[currentCorrTf] || cachedCorr['1D'] || cachedCorr);
@@ -1555,16 +1579,7 @@ function setCorrAnchor(mode, targetTime = null) {
   const volLabel = isNdx ? 'VXN' : 'VIX';
 
   if (mode === 'open') {
-    corrAnchor.active = false;
-    corrAnchor.mode = 'open';
-    corrAnchor.time = null;
-    corrAnchor.index = -1;
-    corrAnchor.isOfficialPriorClose = false;
-    corrAnchor.spotBase = null;
-    corrAnchor.volBase = null;
-    corrAnchor.label = 'Session Baseline';
-    updateAnchorUI();
-    renderCorrelationChart(currentCorrMode, currentCorrTf);
+    resetCorrAnchor(true);
     return;
   }
 
@@ -3707,6 +3722,7 @@ async function loadHistoricalSession(dateStr) {
     if (sliderCorrTimeframe) sliderCorrTimeframe.value = 0;
     updateTsSliderUI('1D');
     updateCorrSliderUI('1D');
+    resetCorrAnchor(false);
 
     if (tsLivePill) {
       tsLivePill.textContent = `${dateStr} 1m`;
