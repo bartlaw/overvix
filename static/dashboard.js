@@ -2899,6 +2899,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       x: [anchoredSeries.anchorTime],
       y: [0.0],
       mode: 'markers',
+      cliponaxis: false,
       name: '⚓ Anchor (0, 0)',
       marker: {
         color: '#00E5FF',
@@ -2917,6 +2918,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       x: [anchoredSeries.anchorTime],
       y: [0.0],
       mode: 'markers',
+      cliponaxis: false,
       name: '⚓ Anchor (0, 0)',
       marker: {
         color: '#00E5FF',
@@ -2953,6 +2955,8 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       plotTraces.push(traceAnchorOriginY3);
     }
 
+    const hasSpan = Boolean(dStart && dEnd && dStart !== dEnd);
+
     const layout = {
       paper_bgcolor: 'transparent',
       plot_bgcolor: 'transparent',
@@ -2965,6 +2969,9 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       xaxis: {
         anchor: 'y3',
         type: 'date',
+        // Lock axis bounds to exact [dStart, dEnd] so Plotly marker-padding autorange cannot trap range into overnight/weekend rangebreaks
+        range: hasSpan ? [dStart, dEnd] : undefined,
+        autorange: !hasSpan,
         rangebreaks: rangebreaks,
         tickformat: tickformat,
         title: { text: xTitle, font: { color: '#94A3B8', size: 10 } },
