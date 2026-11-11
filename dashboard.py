@@ -133,10 +133,12 @@ class DashboardState:
         self.es_daily_df: pd.DataFrame = pd.DataFrame()
         self.df_spx_vix_1d_gth: pd.DataFrame = pd.DataFrame()
         self.df_spx_vix_5d_gth: pd.DataFrame = pd.DataFrame()
+        self.df_spx_vix_10d_gth: pd.DataFrame = pd.DataFrame()
         self.df_spotvol_gth: pd.DataFrame = pd.DataFrame()
         self.gth_metrics: Dict[str, Any] = {}
         self.current_rolling_corr_gth: float = -0.75
         self.corr_5d_gth: float = -0.75
+        self.corr_10d_gth: float = -0.75
         self.gth_slope: Optional[float] = None
         self.gth_intercept: Optional[float] = None
         self.gth_r_squared: Optional[float] = None
@@ -152,6 +154,7 @@ class DashboardState:
         self.df_spotvol = pd.DataFrame()
         self.df_ts_1d = pd.DataFrame()       # Intraday 1-min bars for VIX/VIX3M
         self.df_ts_5d = pd.DataFrame()       # Recent 5-day 5-min bars for VIX/VIX3M
+        self.df_ts_10d = pd.DataFrame()      # Recent 10-day 5-min bars for VIX/VIX3M
         self.df_ts_1m = pd.DataFrame()       # 1-Month 30-min bars for VIX/VIX3M
         self.df_ts_3m = pd.DataFrame()       # 3-Month 30-min bars for VIX/VIX3M
         self.df_ts_6m = pd.DataFrame()       # 6-Month 30-min bars for VIX/VIX3M
@@ -161,6 +164,7 @@ class DashboardState:
 
         self.df_spx_vix_1d = pd.DataFrame()  # Intraday 1-min bars for SPX & VIX
         self.df_spx_vix_5d = pd.DataFrame()  # 5-day 5-min bars for SPX & VIX
+        self.df_spx_vix_10d = pd.DataFrame() # 10-day 5-min bars for SPX & VIX
         self.df_spx_vix_1m = pd.DataFrame()  # 1-Month 30-min bars for SPX & VIX
         self.df_spx_vix_3m = pd.DataFrame()  # 3-Month 30-min bars for SPX & VIX
         self.df_spx_vix_6m = pd.DataFrame()  # 6-Month 30-min bars for SPX & VIX
@@ -172,6 +176,7 @@ class DashboardState:
         self.df_spotvol_ndx = pd.DataFrame()
         self.df_ndx_vxn_1d = pd.DataFrame()  # Intraday 1-min bars for NDX & VXN
         self.df_ndx_vxn_5d = pd.DataFrame()  # 5-day 5-min bars for NDX & VXN
+        self.df_ndx_vxn_10d = pd.DataFrame() # 10-day 5-min bars for NDX & VXN
         self.df_ndx_vxn_1m = pd.DataFrame()  # 1-Month 30-min bars for NDX & VXN
         self.df_ndx_vxn_3m = pd.DataFrame()  # 3-Month 30-min bars for NDX & VXN
         self.df_ndx_vxn_6m = pd.DataFrame()  # 6-Month 30-min bars for NDX & VXN
@@ -181,6 +186,7 @@ class DashboardState:
 
         self.df_tech_vol_1d = pd.DataFrame() # 1-min bars for VXN - VIX & VXN / VIX
         self.df_tech_vol_5d = pd.DataFrame()
+        self.df_tech_vol_10d = pd.DataFrame()
         self.df_tech_vol_1m = pd.DataFrame()
         self.df_tech_vol_3m = pd.DataFrame()
         self.df_tech_vol_6m = pd.DataFrame()
@@ -230,6 +236,7 @@ class DashboardState:
         self.intraday_open_ratio: float = 0.0
         self.current_rolling_corr: float = -0.75
         self.corr_5d: float = -0.75
+        self.corr_10d: float = -0.75
         self.corr_1m: float = -0.75
         self.corr_3m: float = -0.75
         self.corr_6m: float = -0.75
@@ -240,6 +247,7 @@ class DashboardState:
         # Intraday stats (NDX / VXN)
         self.current_rolling_corr_ndx: float = -0.75
         self.corr_5d_ndx: float = -0.75
+        self.corr_10d_ndx: float = -0.75
         self.corr_1m_ndx: float = -0.75
         self.corr_3m_ndx: float = -0.75
         self.corr_6m_ndx: float = -0.75
@@ -522,6 +530,18 @@ def safe_to_series(bars, col_name: str) -> pd.Series:
     except Exception as e:
         print(f"[safe_to_series] Error parsing {col_name}: {e}")
         return pd.Series(dtype=float, name=col_name)
+
+
+def _slice_last_n_dates(s: pd.Series, n_days: int) -> pd.Series:
+    """Slice a timestamp-indexed series to its last N unique YYYY-MM-DD dates."""
+    if s is None or s.empty or n_days <= 0:
+        return pd.Series(dtype=float, name=getattr(s, 'name', None))
+    unique_dates = sorted({str(k)[:10] for k in s.index})
+    if len(unique_dates) <= n_days:
+        return s.copy()
+    cutoff_dates = set(unique_dates[-n_days:])
+    mask = [str(k)[:10] in cutoff_dates for k in s.index]
+    return s[mask].copy()
 
 
 def load_history_cache() -> Optional[Dict[str, Any]]:
@@ -1130,37 +1150,38 @@ async def _empty_bars():
 async def refresh_historical_data():
     """
     Fetch historical daily and intraday bars directly from IBKR for SPX, VIX, VIX3M, NDX, VXN, and ES
-    across all 8 supported multi-timeframe horizons + GTH (ES Basis-Adjusted + Spot VIX):
+    across all 9 supported multi-timeframe horizons + GTH (ES Basis-Adjusted + Spot VIX):
       - 1D / 1D_GTH: 1-minute intraday bars
-      - 5D / 5D_GTH: 5-minute weekly bars
+      - 5D / 5D_GTH: 5-minute weekly bars (sliced from 10D fetch)
+      - 10D / 10D_GTH: 5-minute 2-week bars
       - 1M, 3M, 6M, YTD, 1Y, MAX: Loaded instantly from disk cache (<0.01s) or hydrated in background
     """
     print("[IBKR] Fetching historical baseline & multi-timeframe datasets (Fast Startup + GTH)...")
     try:
         has_es = (state.es_contract is not None)
-        # 1. Fetch Intraday 1D/2D (1-min), 5D (5-min), & 1M daily settlement bars in parallel
+        # 1. Fetch Intraday 1D/2D (1-min), 10D (5-min, also sliced for 5D), & 1M daily settlement bars in parallel.
+        # VIX useRTH=False & useRTH=True return identical CBOE bars, so one 10D VIX request serves both RTH & GTH.
         (b2_spx, b2_vix_gth, b1_vix3m, b1_ndx, b1_vxn,
-         b5_spx, b5_vix, b5_vix3m, b5_ndx, b5_vxn,
-         b5_vix_gth, b_spx_d, b_vix_d,
-         b2_es, b5_es, b_es_d) = await asyncio.gather(
+         b10_spx, b10_vix_gth, b10_vix3m, b10_ndx, b10_vxn,
+         b_spx_d, b_vix_d,
+         b2_es, b10_es, b_es_d) = await asyncio.gather(
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '2 D', '1 min', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix_contract, '', '2 D', '1 min', 'TRADES', False, 1),
             state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '1 D', '1 min', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '1 D', '1 min', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '1 D', '1 min', 'TRADES', True, 1),
 
-            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '10 D', '5 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '12 D', '5 mins', 'TRADES', False, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '10 D', '5 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '10 D', '5 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '10 D', '5 mins', 'TRADES', True, 1),
 
-            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '5 D', '5 mins', 'TRADES', False, 1),
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '1 M', '1 day', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix_contract, '', '1 M', '1 day', 'TRADES', True, 1),
 
             state.ib.reqHistoricalDataAsync(state.es_contract, '', '2 D', '1 min', 'TRADES', False, 1) if has_es else _empty_bars(),
-            state.ib.reqHistoricalDataAsync(state.es_contract, '', '5 D', '5 mins', 'TRADES', False, 1) if has_es else _empty_bars(),
+            state.ib.reqHistoricalDataAsync(state.es_contract, '', '10 D', '5 mins', 'TRADES', False, 1) if has_es else _empty_bars(),
             state.ib.reqHistoricalDataAsync(state.es_contract, '', '1 M', '1 day', 'TRADES', True, 1) if has_es else _empty_bars(),
         )
 
@@ -1241,13 +1262,17 @@ async def refresh_historical_data():
         if need_background_hydration:
             asyncio.create_task(hydrate_deep_history_background(active_sess_date, today_et))
 
-        # 2B. Compute ES-SPX Official Settlement Basis & Stitch 1D_GTH / 5D_GTH
+        # 2B. Compute ES-SPX Official Settlement Basis & Stitch 1D_GTH / 5D_GTH / 10D_GTH
         s_spx_d = safe_to_series(b_spx_d, 'spx')
         s_vix_d = safe_to_series(b_vix_d, 'vix')
         s_es_d = safe_to_series(b_es_d, 'es')
         s_es_2d = safe_to_series(b2_es, 'es')
-        s_es_5d = safe_to_series(b5_es, 'es')
-        s_vix_5d_gth = safe_to_series(b5_vix_gth, 'vix')
+        s_spx_10d = safe_to_series(b10_spx, 'spx')
+        s_vix_10d = safe_to_series(b10_vix_gth, 'vix')
+        s_es_10d = safe_to_series(b10_es, 'es')
+        s_vix_gth_clean = filter_cboe_vix_gth(s_vix_10d)
+        s_vix_5d_gth = _slice_last_n_dates(s_vix_gth_clean, 5)
+        s_vix_10d_gth = _slice_last_n_dates(s_vix_gth_clean, 10)
 
         basis_info = compute_basis_maps(s_spx_d, s_vix_d, s_es_d, df_s2, s_es_2d, s_vix_2d_gth, now_et)
         basis_map = basis_info["basis_map"]
@@ -1286,11 +1311,18 @@ async def refresh_historical_data():
         state.current_rolling_corr_gth = gth_1d_pack["rolling_corr"]
 
         gth_5d_pack = build_gth_stitched_df(
-            safe_to_series(b5_spx, 'spx'), s_vix_5d_gth, s_es_5d, basis_map, sorted_basis_dates, spx_map, vix_map,
+            s_spx_10d, s_vix_5d_gth, s_es_10d, basis_map, sorted_basis_dates, spx_map, vix_map,
             is_1d=False, roll_win=78, min_p=20
         )
         state.df_spx_vix_5d_gth = gth_5d_pack["df"]
         state.corr_5d_gth = gth_5d_pack["rolling_corr"]
+
+        gth_10d_pack = build_gth_stitched_df(
+            s_spx_10d, s_vix_10d_gth, s_es_10d, basis_map, sorted_basis_dates, spx_map, vix_map,
+            is_1d=False, roll_win=78, min_p=20
+        )
+        state.df_spx_vix_10d_gth = gth_10d_pack["df"]
+        state.corr_10d_gth = gth_10d_pack["rolling_corr"]
 
         if win_info["is_vix_gth_window"] and dtime(3, 15) <= now_et.time() < dtime(9, 30):
             gth_target_date = today_et
@@ -1356,21 +1388,32 @@ async def refresh_historical_data():
         else:
             state.df_tech_vol_1d = pd.DataFrame()
 
-        # 4. Process 5D Bars (5-min)
+        # 4. Process 10D Bars & sliced 5D Bars (5-min)
+        s_vix3m_10d = safe_to_series(b10_vix3m, 'vix3m')
+        s_ndx_10d = safe_to_series(b10_ndx, 'ndx')
+        s_vxn_10d = safe_to_series(b10_vxn, 'vxn')
+
+        (state.df_ts_10d, state.df_spx_vix_10d, state.df_ndx_vxn_10d,
+         state.df_tech_vol_10d, state.corr_10d, state.corr_10d_ndx) = build_horizon_pack(
+            s_spx_10d, s_vix_10d, s_vix3m_10d, s_ndx_10d, s_vxn_10d, roll_win=78, min_p=20
+        )
         (state.df_ts_5d, state.df_spx_vix_5d, state.df_ndx_vxn_5d,
          state.df_tech_vol_5d, state.corr_5d, state.corr_5d_ndx) = build_horizon_pack(
-            b5_spx, b5_vix, b5_vix3m, b5_ndx, b5_vxn, roll_win=78, min_p=20
+            _slice_last_n_dates(s_spx_10d, 5), s_vix_10d,
+            _slice_last_n_dates(s_vix3m_10d, 5), _slice_last_n_dates(s_ndx_10d, 5),
+            _slice_last_n_dates(s_vxn_10d, 5), roll_win=78, min_p=20
         )
 
         state.hist_version += 1
         print(f"[IBKR] Baseline & multi-timeframe datasets successfully loaded (Version {state.hist_version}):")
-        print(f"       1D={len(state.df_ts_1d)} bars, 5D={len(state.df_ts_5d)} bars, 1M={len(state.df_ts_1m)} bars (30m), "
+        print(f"       1D={len(state.df_ts_1d)} bars, 5D={len(state.df_ts_5d)} bars, 10D={len(state.df_ts_10d)} bars, 1M={len(state.df_ts_1m)} bars (30m), "
               f"3M={len(state.df_ts_3m)} bars (30m), 6M={len(state.df_ts_6m)} bars (30m), YTD={len(state.df_ts_ytd)} bars, "
               f"1Y={len(state.df_ts_1y)} bars, MAX={len(state.df_ts_max)} bars.")
         if state.es_contract:
             basis_str = f"{state.es_spx_basis:+.2f} ({state.es_basis_source} {state.es_basis_date})" if state.es_spx_basis is not None else "N/A"
             print(f"[GTH] ES={state.es_contract.localSymbol}, Basis={basis_str}, "
-                  f"1D_GTH={len(state.df_spx_vix_1d_gth)} bars (session={state.gth_session_date}), 5D_GTH={len(state.df_spx_vix_5d_gth)} bars.")
+                  f"1D_GTH={len(state.df_spx_vix_1d_gth)} bars (session={state.gth_session_date}), "
+                  f"5D_GTH={len(state.df_spx_vix_5d_gth)} bars, 10D_GTH={len(state.df_spx_vix_10d_gth)} bars.")
 
     except Exception as ex:
         print(f"[IBKR Error] Historical data refresh failed: {ex}")
@@ -1797,6 +1840,7 @@ def compute_live_payload() -> Dict[str, Any]:
             "session_date": gth_sess_date,
             "rolling_corr": round(state.current_rolling_corr_gth, 3),
             "corr_5d": round(state.corr_5d_gth, 3),
+            "corr_10d": round(state.corr_10d_gth, 3),
             "model": {
                 "r_squared": round(state.gth_r_squared if (gth_status == "GTH_ACTIVE" and dtime(3, 15) <= now_et.time() < dtime(9, 30) and state.gth_r_squared is not None) else state.r_squared, 4),
                 "slope": round(state.gth_slope if (gth_status == "GTH_ACTIVE" and dtime(3, 15) <= now_et.time() < dtime(9, 30) and state.gth_slope is not None) else state.slope, 4),
@@ -1869,6 +1913,7 @@ def compute_live_payload() -> Dict[str, Any]:
         "correlation": {
             "rolling_corr": round(corr_val, 3),
             "corr_5d": round(state.corr_5d, 3),
+            "corr_10d": round(state.corr_10d, 3),
             "corr_1y": round(state.corr_1y, 3),
             "status": corr_status,
             "badge": corr_badge,
@@ -1914,6 +1959,7 @@ def compute_live_payload() -> Dict[str, Any]:
             "correlation": {
                 "rolling_corr": round(corr_ndx_val, 3),
                 "corr_5d": round(state.corr_5d_ndx, 3),
+                "corr_10d": round(state.corr_10d_ndx, 3),
                 "corr_1y": round(state.corr_1y_ndx, 3),
                 "status": ndx_corr_status,
                 "badge": ndx_corr_badge
@@ -2145,11 +2191,13 @@ async def get_bootstrap():
             res["is_gth"] = [int(v) for v in df['is_gth'].tolist()]
         return res
 
-    # Format SPX & VIX Correlation across 8 horizons (+ GTH-enabled 1D/5D)
+    # Format SPX & VIX Correlation across 9 horizons (+ GTH-enabled 1D/5D/10D)
     corr_1d = format_corr_df(state.df_spx_vix_1d, 'spx_pct', 'vix_pt')
     corr_1d_gth = format_corr_df(state.df_spx_vix_1d_gth, 'spx_pct', 'vix_pt')
     corr_5d = format_corr_df(state.df_spx_vix_5d, 'spx_pct', 'vix_pt')
     corr_5d_gth = format_corr_df(state.df_spx_vix_5d_gth, 'spx_pct', 'vix_pt')
+    corr_10d = format_corr_df(state.df_spx_vix_10d, 'spx_pct', 'vix_pt')
+    corr_10d_gth = format_corr_df(state.df_spx_vix_10d_gth, 'spx_pct', 'vix_pt')
     corr_1m = format_corr_df(state.df_spx_vix_1m, 'spx_pct', 'vix_pt')
     corr_3m = format_corr_df(state.df_spx_vix_3m, 'spx_pct', 'vix_pt')
     corr_6m = format_corr_df(state.df_spx_vix_6m, 'spx_pct', 'vix_pt')
@@ -2157,9 +2205,10 @@ async def get_bootstrap():
     corr_1y = format_corr_df(state.df_spx_vix_1y, 'spx_pct', 'vix_pt', is_daily=True)
     corr_max = format_corr_df(state.df_spx_vix_max, 'spx_pct', 'vix_pt', is_daily=True)
 
-    # Format NDX & VXN Correlation across 8 horizons
+    # Format NDX & VXN Correlation across 9 horizons
     corr_ndx_1d = format_corr_df(state.df_ndx_vxn_1d, 'ndx_pct', 'vxn_pt')
     corr_ndx_5d = format_corr_df(state.df_ndx_vxn_5d, 'ndx_pct', 'vxn_pt')
+    corr_ndx_10d = format_corr_df(state.df_ndx_vxn_10d, 'ndx_pct', 'vxn_pt')
     corr_ndx_1m = format_corr_df(state.df_ndx_vxn_1m, 'ndx_pct', 'vxn_pt')
     corr_ndx_3m = format_corr_df(state.df_ndx_vxn_3m, 'ndx_pct', 'vxn_pt')
     corr_ndx_6m = format_corr_df(state.df_ndx_vxn_6m, 'ndx_pct', 'vxn_pt')
@@ -2185,6 +2234,7 @@ async def get_bootstrap():
 
     ts_1d = format_ts_df(state.df_ts_1d)
     ts_5d = format_ts_df(state.df_ts_5d)
+    ts_10d = format_ts_df(state.df_ts_10d)
     ts_1m = format_ts_df(state.df_ts_1m)
     ts_3m = format_ts_df(state.df_ts_3m)
     ts_6m = format_ts_df(state.df_ts_6m)
@@ -2211,6 +2261,7 @@ async def get_bootstrap():
 
     tech_vol_1d = format_tech_vol_df(state.df_tech_vol_1d)
     tech_vol_5d = format_tech_vol_df(state.df_tech_vol_5d)
+    tech_vol_10d = format_tech_vol_df(state.df_tech_vol_10d)
     tech_vol_1m = format_tech_vol_df(state.df_tech_vol_1m)
     tech_vol_3m = format_tech_vol_df(state.df_tech_vol_3m)
     tech_vol_6m = format_tech_vol_df(state.df_tech_vol_6m)
@@ -2237,6 +2288,7 @@ async def get_bootstrap():
             "current_corr": round(state.current_rolling_corr_ndx, 3),
             "1D": corr_ndx_1d,
             "5D": corr_ndx_5d,
+            "10D": corr_ndx_10d,
             "1M": corr_ndx_1m,
             "3M": corr_ndx_3m,
             "6M": corr_ndx_6m,
@@ -2246,6 +2298,7 @@ async def get_bootstrap():
             "metrics": {
                 "1D": round(state.current_rolling_corr_ndx, 3),
                 "5D": round(state.corr_5d_ndx, 3),
+                "10D": round(state.corr_10d_ndx, 3),
                 "1M": round(state.corr_1m_ndx, 3),
                 "3M": round(state.corr_3m_ndx, 3),
                 "6M": round(state.corr_6m_ndx, 3),
@@ -2262,6 +2315,7 @@ async def get_bootstrap():
             "current_corr": round(state.current_rolling_corr_ndx, 3),
             "1D": corr_ndx_1d,
             "5D": corr_ndx_5d,
+            "10D": corr_ndx_10d,
             "1M": corr_ndx_1m,
             "3M": corr_ndx_3m,
             "6M": corr_ndx_6m,
@@ -2271,6 +2325,7 @@ async def get_bootstrap():
             "metrics": {
                 "1D": round(state.current_rolling_corr_ndx, 3),
                 "5D": round(state.corr_5d_ndx, 3),
+                "10D": round(state.corr_10d_ndx, 3),
                 "1M": round(state.corr_1m_ndx, 3),
                 "3M": round(state.corr_3m_ndx, 3),
                 "6M": round(state.corr_6m_ndx, 3),
@@ -2285,6 +2340,7 @@ async def get_bootstrap():
         **live["tech_vol"],
         "1D": tech_vol_1d,
         "5D": tech_vol_5d,
+        "10D": tech_vol_10d,
         "1M": tech_vol_1m,
         "3M": tech_vol_3m,
         "6M": tech_vol_6m,
@@ -2333,6 +2389,7 @@ async def get_bootstrap():
             **live["term_structure"],
             "1D": ts_1d,
             "5D": ts_5d,
+            "10D": ts_10d,
             "1M": ts_1m,
             "3M": ts_3m,
             "6M": ts_6m,
@@ -2354,6 +2411,8 @@ async def get_bootstrap():
             "1D_GTH": corr_1d_gth,
             "5D": corr_5d,
             "5D_GTH": corr_5d_gth,
+            "10D": corr_10d,
+            "10D_GTH": corr_10d_gth,
             "1M": corr_1m,
             "3M": corr_3m,
             "6M": corr_6m,
@@ -2363,6 +2422,7 @@ async def get_bootstrap():
             "metrics": {
                 "1D": round(state.current_rolling_corr, 3),
                 "5D": round(state.corr_5d, 3),
+                "10D": round(state.corr_10d, 3),
                 "1M": round(state.corr_1m, 3),
                 "3M": round(state.corr_3m, 3),
                 "6M": round(state.corr_6m, 3),
@@ -2373,6 +2433,7 @@ async def get_bootstrap():
             "metrics_gth": {
                 "1D": round(state.current_rolling_corr_gth, 3),
                 "5D": round(state.corr_5d_gth, 3),
+                "10D": round(state.corr_10d_gth, 3),
             }
         },
         "ndx": ndx_bootstrap,

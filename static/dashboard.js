@@ -32,8 +32,8 @@ let cachedIsRthActive = null;
 let cachedHistVersion = 0;
 let activeSocket = null;
 
-// Multi-Timeframe Configuration Suite across 8 stepped horizons
-const TF_STEPS = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', 'MAX'];
+// Multi-Timeframe Configuration Suite across 9 stepped horizons
+const TF_STEPS = ['1D', '5D', '10D', '1M', '3M', '6M', 'YTD', '1Y', 'MAX'];
 
 const TF_CONFIG = {
   '1D': {
@@ -70,8 +70,25 @@ const TF_CONFIG = {
     timeHoverFmt: '%b %d, %H:%M',
     rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
   },
-  '1M': {
+  '10D': {
     step: 2,
+    label: '10D',
+    badgeText: '10D &bull; 2-Week (5m)',
+    pillText: '2-Week 5m',
+    pillClass: 'bg-sky-950/80 text-sky-300 border-sky-800/60',
+    granularity: '5m',
+    tsSub: '10-Day Term Structure Progression & Ratio Shifts (5-min bars)',
+    corrSub: '5-Minute Normalized Overlay (Upper) & Instantaneous Overvix Residual (Lower)',
+    corrTraceName: 'Overvix Residual',
+    corrHoverLabel: 'Overvix Residual',
+    liveLabel: 'Latest Residual:',
+    xTitle: '10-Day Timeline (US/Eastern)',
+    tickformat: '%b %d',
+    timeHoverFmt: '%b %d, %H:%M',
+    rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
+  },
+  '1M': {
+    step: 3,
     label: '1M',
     badgeText: '1M &bull; 1-Month (30m)',
     pillText: '1-Month 30m',
@@ -88,7 +105,7 @@ const TF_CONFIG = {
     rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
   },
   '3M': {
-    step: 3,
+    step: 4,
     label: '3M',
     badgeText: '3M &bull; Quarterly (30m)',
     pillText: 'Quarterly 30m',
@@ -105,7 +122,7 @@ const TF_CONFIG = {
     rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
   },
   '6M': {
-    step: 4,
+    step: 5,
     label: '6M',
     badgeText: '6M &bull; Semi-Annual (30m)',
     pillText: 'Semi-Annual 30m',
@@ -122,7 +139,7 @@ const TF_CONFIG = {
     rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
   },
   'YTD': {
-    step: 5,
+    step: 6,
     label: 'YTD',
     badgeText: 'YTD &bull; Year-to-Date (1d)',
     pillText: 'YTD Daily',
@@ -139,7 +156,7 @@ const TF_CONFIG = {
     rangebreaks: [{ bounds: ['sat', 'mon'] }]
   },
   '1Y': {
-    step: 6,
+    step: 7,
     label: '1Y',
     badgeText: '1Y &bull; 1-Year Macro (1d)',
     pillText: '1-Year Daily',
@@ -156,7 +173,7 @@ const TF_CONFIG = {
     rangebreaks: [{ bounds: ['sat', 'mon'] }]
   },
   'MAX': {
-    step: 7,
+    step: 8,
     label: 'MAX',
     badgeText: 'MAX &bull; 2-Year Multi-Year (1d)',
     pillText: 'MAX 2-Year',
@@ -179,6 +196,7 @@ let cachedBootstrap = null;
 let cachedTs = {
   '1D': { times: [], vix: [], vix3m: [], ratio: [] },
   '5D': { times: [], vix: [], vix3m: [], ratio: [] },
+  '10D': { times: [], vix: [], vix3m: [], ratio: [] },
   '1M': { times: [], vix: [], vix3m: [], ratio: [] },
   '3M': { times: [], vix: [], vix3m: [], ratio: [] },
   '6M': { times: [], vix: [], vix3m: [], ratio: [] },
@@ -190,19 +208,21 @@ let cachedTrail = { x: [], y: [], times: [] };
 let cachedCorr = {
   '1D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '5D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  '10D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '1M': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '3M': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '6M': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   'YTD': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '1Y': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   'MAX': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
-  metrics: { '1D': -0.75, '5D': -0.75, '1M': -0.75, '3M': -0.75, '6M': -0.75, 'YTD': -0.75, '1Y': -0.75, 'MAX': -0.75 }
+  metrics: { '1D': -0.75, '5D': -0.75, '10D': -0.75, '1M': -0.75, '3M': -0.75, '6M': -0.75, 'YTD': -0.75, '1Y': -0.75, 'MAX': -0.75 }
 };
 
 // Cached Datasets (NDX & Tech Vol Spread)
 let cachedTechVol = {
   '1D': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
   '5D': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
+  '10D': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
   '1M': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
   '3M': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
   '6M': { times: [], spread: [], ratio: [], vxn: [], vix: [] },
@@ -213,18 +233,20 @@ let cachedTechVol = {
 let cachedCorrNdx = {
   '1D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '5D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
+  '10D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '1M': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '3M': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '6M': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   'YTD': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   '1Y': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   'MAX': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
-  metrics: { '1D': -0.75, '5D': -0.75, '1M': -0.75, '3M': -0.75, '6M': -0.75, 'YTD': -0.75, '1Y': -0.75, 'MAX': -0.75 }
+  metrics: { '1D': -0.75, '5D': -0.75, '10D': -0.75, '1M': -0.75, '3M': -0.75, '6M': -0.75, 'YTD': -0.75, '1Y': -0.75, 'MAX': -0.75 }
 };
 let cachedCorrGth = {
   '1D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], is_gth: [] },
   '5D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], is_gth: [] },
-  metrics: { '1D': -0.75, '5D': -0.75 }
+  '10D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], is_gth: [] },
+  metrics: { '1D': -0.75, '5D': -0.75, '10D': -0.75 }
 };
 let cachedTrailGth = { x: [], y: [], times: [], is_gth: [], session_date: null };
 let cachedLiveCorrGth = null;
@@ -420,7 +442,7 @@ const gthControlGroup = document.getElementById('gth-control-group');
 
 function isGthChartActive(tf = currentCorrTf) {
   if (currentAssetPair !== 'SPX' || currentViewMode !== 'live' || !isGthEnabled) return false;
-  if (tf !== '1D' && tf !== '5D') return false;
+  if (!['1D', '5D', '10D'].includes(tf)) return false;
   const ds = cachedCorrGth[tf];
   return Boolean(ds && ds.times && ds.times.length > 0);
 }
@@ -473,7 +495,7 @@ function updateGthToggleUI(data = lastLiveUpdatePayload || cachedBootstrap) {
     return;
   }
 
-  btnGthToggle.title = "Toggle Global Trading Hours (ES Futures Basis-Adjusted + Spot VIX, 03:15-16:15 ET) on SPX/VIX 1D & 5D";
+  btnGthToggle.title = "Toggle Global Trading Hours (ES Futures Basis-Adjusted + Spot VIX, 03:15-16:15 ET) on SPX/VIX 1D, 5D & 10D";
 
   if (isGthEnabled) {
     btnGthToggle.className = "px-2.5 py-1 rounded text-xs font-bold bg-indigo-500 text-white shadow-sm transition flex items-center space-x-1.5";
@@ -527,7 +549,7 @@ function setupGthToggle() {
     isGthEnabled = !isGthEnabled;
     userGthOverride = isGthEnabled ? 'on' : 'off';
 
-    if (isGthEnabled && currentCorrTf !== '1D' && currentCorrTf !== '5D') {
+    if (isGthEnabled && !['1D', '5D', '10D'].includes(currentCorrTf)) {
       switchCorrTf('1D');
     }
     if (corrAnchor.active) {
@@ -2531,7 +2553,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   const tickformat = conf.tickformat;
   let rangebreaks = conf.rangebreaks || [];
   if (gthChartOn) {
-    rangebreaks = (targetTf === '5D')
+    rangebreaks = (targetTf === '5D' || targetTf === '10D')
       ? [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 3.25] }, { pattern: 'hour', bounds: [9.25, 9.5] }]
       : [{ pattern: 'hour', bounds: [16.25, 3.25] }, { pattern: 'hour', bounds: [9.25, 9.5] }];
   }
@@ -3579,15 +3601,18 @@ function updateUI(data) {
   if (corr && cachedCorr.metrics) {
     cachedCorr.metrics['1D'] = corr.rolling_corr;
     if (corr.corr_5d !== undefined) cachedCorr.metrics['5D'] = corr.corr_5d;
+    if (corr.corr_10d !== undefined) cachedCorr.metrics['10D'] = corr.corr_10d;
     if (corr.corr_1y !== undefined) cachedCorr.metrics['1Y'] = corr.corr_1y;
   }
   if (data.gth && cachedCorrGth.metrics) {
     if (data.gth.rolling_corr !== undefined) cachedCorrGth.metrics['1D'] = data.gth.rolling_corr;
     if (data.gth.corr_5d !== undefined) cachedCorrGth.metrics['5D'] = data.gth.corr_5d;
+    if (data.gth.corr_10d !== undefined) cachedCorrGth.metrics['10D'] = data.gth.corr_10d;
   }
   if (ndx && ndx.correlation && cachedCorrNdx.metrics) {
     cachedCorrNdx.metrics['1D'] = ndx.correlation.rolling_corr;
     if (ndx.correlation.corr_5d !== undefined) cachedCorrNdx.metrics['5D'] = ndx.correlation.corr_5d;
+    if (ndx.correlation.corr_10d !== undefined) cachedCorrNdx.metrics['10D'] = ndx.correlation.corr_10d;
     if (ndx.correlation.corr_1y !== undefined) cachedCorrNdx.metrics['1Y'] = ndx.correlation.corr_1y;
   }
 
@@ -3943,7 +3968,7 @@ async function bootstrapData() {
     const inputWin = document.getElementById('input-window');
     if (inputWin && data.model) inputWin.value = data.model.window_days;
 
-    // Cache multi-timeframe datasets across all 8 horizons (1D, 5D, 1M, 3M, 6M, YTD, 1Y, MAX)
+    // Cache multi-timeframe datasets across all 9 horizons (1D, 5D, 10D, 1M, 3M, 6M, YTD, 1Y, MAX)
     TF_STEPS.forEach(tf => {
       if (data.term_structure && data.term_structure[tf]) {
         cachedTs[tf] = data.term_structure[tf];
@@ -3981,6 +4006,7 @@ async function bootstrapData() {
     if (data.intraday_correlation) {
       if (data.intraday_correlation['1D_GTH']) cachedCorrGth['1D'] = data.intraday_correlation['1D_GTH'];
       if (data.intraday_correlation['5D_GTH']) cachedCorrGth['5D'] = data.intraday_correlation['5D_GTH'];
+      if (data.intraday_correlation['10D_GTH']) cachedCorrGth['10D'] = data.intraday_correlation['10D_GTH'];
       if (data.intraday_correlation.metrics_gth) cachedCorrGth.metrics = data.intraday_correlation.metrics_gth;
     }
     if (data.overvix && data.overvix.intraday_trail_gth) {

@@ -70,7 +70,7 @@
 
       <!-- GTH (ES Basis-Adjusted + Spot VIX) Toggle & Basis Badge -->
       <div id="gth-control-group" class="flex items-center space-x-1.5 bg-slate-900/90 border border-slate-700/80 rounded-lg p-1 shadow-inner">
-        <button id="btn-gth-toggle" class="px-2.5 py-1 rounded text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1.5" title="Toggle Global Trading Hours (ES Futures Basis-Adjusted + Spot VIX, 03:15-16:15 ET) on SPX/VIX 1D & 5D">
+        <button id="btn-gth-toggle" class="px-2.5 py-1 rounded text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1.5" title="Toggle Global Trading Hours (ES Futures Basis-Adjusted + Spot VIX, 03:15-16:15 ET) on SPX/VIX 1D, 5D & 10D">
           <span id="gth-toggle-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
           <span>🌐 GTH</span>
           <span id="gth-mode-pill" class="hidden text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-950 text-indigo-300 border border-indigo-700/60">ES+VIX</span>
@@ -323,7 +323,7 @@
           </div>
           
           <!-- Timeframe Stepped Slider (Card 2: Term Structure) -->
-          <div class="timeframe-slider-wrapper flex flex-col bg-slate-950/80 px-3 py-1.5 rounded-lg border border-slate-800 min-w-[320px]">
+          <div class="timeframe-slider-wrapper flex flex-col bg-slate-950/80 px-3 py-1.5 rounded-lg border border-slate-800 min-w-[350px]">
             <div class="flex items-center justify-between mb-1">
               <div class="flex items-center space-x-1.5">
                 <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Horizon:</span>
@@ -337,18 +337,19 @@
               </label>
             </div>
             <div class="relative flex items-center py-0.5">
-              <input type="range" min="0" max="7" step="1" value="0" id="slider-ts-timeframe"
+              <input type="range" min="0" max="8" step="1" value="0" id="slider-ts-timeframe"
                      class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400 focus:outline-none">
             </div>
             <div id="ts-tick-labels" class="flex justify-between text-[10px] font-mono text-slate-400 mt-0.5 px-0.5">
               <span class="cursor-pointer hover:text-cyan-300 font-bold text-cyan-400 transition" data-step="0">1D</span>
               <span class="cursor-pointer hover:text-cyan-300 transition" data-step="1">5D</span>
-              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="2">1M</span>
-              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="3">3M</span>
-              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="4">6M</span>
-              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="5">YTD</span>
-              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="6">1Y</span>
-              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="7">MAX</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="2">10D</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="3">1M</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="4">3M</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="5">6M</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="6">YTD</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="7">1Y</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="8">MAX</span>
             </div>
           </div>
         </div>
@@ -388,8 +389,8 @@
 
         <!-- Right: Fixed Horizon Slider & Display Mode Controls (Anchored Right) -->
         <div class="ml-auto flex items-center gap-2 flex-shrink-0">
-          <!-- Timeframe Stepped Slider (Fixed 290px width - zero resize shift) -->
-          <div class="timeframe-slider-wrapper flex flex-col bg-slate-950/80 px-3 py-1 rounded-lg border border-slate-800 w-[290px] flex-shrink-0">
+          <!-- Timeframe Stepped Slider (Fixed 325px width - zero resize shift) -->
+          <div class="timeframe-slider-wrapper flex flex-col bg-slate-950/80 px-3 py-1 rounded-lg border border-slate-800 w-[325px] flex-shrink-0">
             <div class="flex items-center justify-between mb-0.5">
               <div class="flex items-center space-x-1.5">
                 <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Horizon:</span>
@@ -399,18 +400,19 @@
               </div>
             </div>
             <div class="relative flex items-center py-0.5">
-              <input type="range" min="0" max="7" step="1" value="0" id="slider-corr-timeframe"
+              <input type="range" min="0" max="8" step="1" value="0" id="slider-corr-timeframe"
                      class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400 focus:outline-none">
             </div>
             <div id="corr-tick-labels" class="flex justify-between text-[10px] font-mono text-slate-400 mt-0.5 px-0.5">
               <span class="cursor-pointer hover:text-cyan-300 font-bold text-cyan-400 transition" data-step="0">1D</span>
               <span class="cursor-pointer hover:text-cyan-300 transition" data-step="1">5D</span>
-              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="2">1M</span>
-              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="3">3M</span>
-              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="4">6M</span>
-              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="5">YTD</span>
-              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="6">1Y</span>
-              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="7">MAX</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="2">10D</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="3">1M</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="4">3M</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="5">6M</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="6">YTD</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="7">1Y</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="8">MAX</span>
             </div>
           </div>
 
@@ -804,7 +806,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v7.2 - Range-Locked Correlation X-Axis Across Rangebreaks) -->
-  <script src="/static/dashboard.js?v=7.2"></script>
+  <!-- DASHBOARD SCRIPT (v7.3 - Add 10D 5-Min Horizon Across Sliders, RTH & GTH) -->
+  <script src="/static/dashboard.js?v=7.3"></script>
 </body>
 </html>
