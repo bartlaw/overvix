@@ -820,7 +820,7 @@ function setupTrailButtons() {
 function getHistoricalDotHoverTemplate(assetLabel, volLabel) {
   const hint = (spotVolClickAction === 'load')
     ? '👉 Click to Load 1m Day Archive'
-    : '👉 Click to Anchor Residual Monitor (Auto-Range)';
+    : '👉 Click to Anchor at Prev Day Close';
   const color = (spotVolClickAction === 'load') ? '#FBBF24' : '#00E5FF';
   return `<b>%{text}</b><br>${assetLabel} Move: %{x:.2f}%<br>${volLabel} Move: %{y:.2f} pts<br><span style="color:${color};font-size:10px">${hint}</span><extra></extra>`;
 }
@@ -1446,6 +1446,59 @@ function ensureCorrRangeCoversTarget(targetStr, isNdx) {
   return true;
 }
 
+function getSpotVolDates(isNdx) {
+  if (cachedBootstrap) {
+    if (isNdx && cachedBootstrap.ndx && cachedBootstrap.ndx.overvix && Array.isArray(cachedBootstrap.ndx.overvix.dates)) {
+      return cachedBootstrap.ndx.overvix.dates;
+    }
+    const useGthModel = !isNdx && !cachedBootstrap.is_historical && isGthEnabled
+      && cachedBootstrap.session_status === 'GTH_ACTIVE'
+      && cachedBootstrap.overvix && cachedBootstrap.overvix.gth_model
+      && Array.isArray(cachedBootstrap.overvix.gth_model.dates)
+      && cachedBootstrap.overvix.gth_model.dates.length > 0;
+    if (useGthModel) {
+      return cachedBootstrap.overvix.gth_model.dates;
+    }
+    if (!isNdx && cachedBootstrap.overvix && Array.isArray(cachedBootstrap.overvix.dates)) {
+      return cachedBootstrap.overvix.dates;
+    }
+  }
+  const overvixEl = document.getElementById('overvix-chart');
+  if (overvixEl && overvixEl.data && overvixEl.data[0] && Array.isArray(overvixEl.data[0].text)) {
+    return overvixEl.data[0].text;
+  }
+  return [];
+}
+
+/** Resolve the immediately preceding trading session date before targetDateStr. */
+function findPreviousTradingDate(targetDateStr, isNdx) {
+  const isoTarget = extractIsoDate(targetDateStr);
+  if (!isoTarget) return null;
+
+  let bestPrev = null;
+  const considerDateList = (list) => {
+    if (!Array.isArray(list)) return;
+    for (let i = 0; i < list.length; i++) {
+      const iso = extractIsoDate(String(list[i]));
+      if (iso && iso < isoTarget && (!bestPrev || iso > bestPrev)) {
+        bestPrev = iso;
+      }
+    }
+  };
+
+  considerDateList(getSpotVolDates(isNdx));
+  if (cachedBootstrap && !isNdx && cachedBootstrap.overvix) {
+    considerDateList(cachedBootstrap.overvix.dates);
+  }
+  for (const tf of TF_STEPS) {
+    const ds = getCorrDataset(isNdx, tf);
+    if (ds && ds.times) {
+      considerDateList(ds.times);
+    }
+  }
+  return bestPrev;
+}
+
 function handleHistoricalDotClick(dateStr) {
   if (spotVolClickAction === 'load') {
     loadHistoricalSession(dateStr);
@@ -1457,19 +1510,12 @@ function handleHistoricalDotClick(dateStr) {
   }
 
   const isNdx = (currentAssetPair === 'NDX');
-  ensureCorrRangeCoversTarget(dateStr, isNdx);
+  const clickedDate = extractIsoDate(dateStr) || dateStr;
+  // Daily Spot-Vol dots represent moves from the prior session's close to clickedDate close
+  const anchorDate = findPreviousTradingDate(clickedDate, isNdx) || clickedDate;
+  ensureCorrRangeCoversTarget(anchorDate, isNdx);
 
-  const c = getCorrDataset(isNdx, currentCorrTf);
-  const times = (c && c.times) ? c.times : [];
-
-  // Route immediately preceding completed session to official prior close when available
-  const latestDate = times.length > 0 ? times[times.length - 1].slice(0, 10) : '';
-  const isPriorSession = (dateStr < latestDate && !times.some(t => t.slice(0, 10) > dateStr && t.slice(0, 10) < latestDate));
-  if (isPriorSession) {
-    setCorrAnchor('prior_close');
-  } else {
-    setCorrAnchor('date_close', dateStr);
-  }
+  setCorrAnchor('date_close', anchorDate);
   highlightAnchorScroll();
 }
 
@@ -1994,7 +2040,10 @@ function setCorrAnchor(mode, targetTime = null) {
     }
   } else if (mode === 'date_close' && targetTime) {
     const latestDate = times.length > 0 ? times[times.length - 1].slice(0, 10) : '';
-    const isPriorSession = (targetTime < latestDate && !times.some(t => t.slice(0, 10) > targetTime && t.slice(0, 10) < latestDate));
+    const svDates = getSpotVolDates(isNdx);
+    const lastSvDate = svDates.length > 0 ? extractIsoDate(String(svDates[svDates.length - 1])) : null;
+    const isPriorSession = (targetTime < latestDate && !times.some(t => t.slice(0, 10) > targetTime && t.slice(0, 10) < latestDate))
+      && (!lastSvDate || targetTime === lastSvDate);
     if (isPriorSession) {
       setCorrAnchor('prior_close');
       return;

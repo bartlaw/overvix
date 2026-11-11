@@ -302,7 +302,7 @@
           <!-- Card 1 Header Controls: Compact Selection Action Switch & Trail View Mode -->
           <div class="flex items-center gap-1.5 flex-shrink-0">
             <!-- Scatter Selection Action Switch -->
-            <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-[10px] font-medium whitespace-nowrap" title="Choose whether clicking a point on Spot-Vol Regression sets the Residual Monitor anchor (expanding range if needed) or loads that day's 1-min archive">
+            <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-[10px] font-medium whitespace-nowrap" title="Choose whether clicking a day on Spot-Vol Regression sets the Residual Monitor anchor to the prior trading day's close (expanding range if needed) or loads that day's 1-min archive">
               <button id="btn-spotvol-click-anchor" class="px-1.5 py-1 rounded-md text-[10px] font-semibold bg-cyan-500 text-black shadow-sm transition whitespace-nowrap">Set Anchor</button>
               <button id="btn-spotvol-click-load" class="px-1.5 py-1 rounded-md text-[10px] font-semibold text-slate-400 hover:text-white transition whitespace-nowrap">Load Day</button>
             </div>
@@ -815,7 +815,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v7.5 - Compact Single-Row Card 1 Header Switch) -->
-  <script src="/static/dashboard.js?v=7.5"></script>
+  <!-- DASHBOARD SCRIPT (v7.6 - Anchor Spot-Vol Day Selection to Prior Day Close) -->
+  <script src="/static/dashboard.js?v=7.6"></script>
 </body>
 </html>
