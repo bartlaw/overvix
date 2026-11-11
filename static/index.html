@@ -299,11 +299,21 @@
             <p id="spotvol-sub" class="text-xs text-slate-400">SPX % vs VIX Point Move with +2.0 pt Threshold &amp; Today's Intraday Path</p>
           </div>
 
-          <!-- Trail View Mode Selector -->
-          <div class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium">
-            <button id="btn-trail-both" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition">Both</button>
-            <button id="btn-trail-today" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">Today Only</button>
-            <button id="btn-trail-60d" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">60D Only</button>
+          <!-- Card 1 Header Controls: Selection Action Switch & Trail View Mode -->
+          <div class="flex flex-wrap items-center gap-2">
+            <!-- Scatter Selection Action Switch -->
+            <div class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium" title="Choose whether clicking a point on Spot-Vol Regression sets the Residual Monitor anchor (expanding range if needed) or loads that day's 1-min archive">
+              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider px-1">Select:</span>
+              <button id="btn-spotvol-click-anchor" class="px-2 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition">Set Anchor</button>
+              <button id="btn-spotvol-click-load" class="px-2 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">Load Day</button>
+            </div>
+
+            <!-- Trail View Mode Selector -->
+            <div class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium">
+              <button id="btn-trail-both" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition">Both</button>
+              <button id="btn-trail-today" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">Today Only</button>
+              <button id="btn-trail-60d" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">60D Only</button>
+            </div>
           </div>
         </div>
 
@@ -806,7 +816,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v7.3 - Add 10D 5-Min Horizon Across Sliders, RTH & GTH) -->
-  <script src="/static/dashboard.js?v=7.3"></script>
+  <!-- DASHBOARD SCRIPT (v7.4 - Spot-Vol Selection Mode Switch & Anchor Auto-Range) -->
+  <script src="/static/dashboard.js?v=7.4"></script>
 </body>
 </html>

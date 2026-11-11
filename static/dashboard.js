@@ -12,6 +12,7 @@ let currentNdxThreshold = 2.5;
 let currentThreshold = 2.0;
 let currentTimeframe = '1D'; // '1D', '5D', '1Y'
 let currentTrailMode = 'both'; // 'both', 'today', '60d'
+let spotVolClickAction = 'anchor'; // 'anchor' | 'load'
 let currentCorrMode = 'dual'; // 'dual', 'corr_only'
 let isVolInverted = true; // Invert volatility axis on correlation overlay for lockstep tracking
 let isBetaScaled = true;  // Beta-locked scale mode (1% Spot = |Slope| pts Vol)
@@ -801,16 +802,56 @@ function switchTimeframe(tf, triggeredBySlider = false) {
   renderTermStructureChart(tf);
 }
 
-// Trail Mode Selector (Overvix Chart)
+// Trail Mode & Spot-Vol Click Action Selectors (Card 1)
 const btnTrailBoth = document.getElementById('btn-trail-both');
 const btnTrailToday = document.getElementById('btn-trail-today');
 const btnTrail60D = document.getElementById('btn-trail-60d');
 const trailLivePill = document.getElementById('trail-live-pill');
+const btnSpotVolClickAnchor = document.getElementById('btn-spotvol-click-anchor');
+const btnSpotVolClickLoad = document.getElementById('btn-spotvol-click-load');
 
 function setupTrailButtons() {
   btnTrailBoth.addEventListener('click', () => switchTrailMode('both'));
   btnTrailToday.addEventListener('click', () => switchTrailMode('today'));
   btnTrail60D.addEventListener('click', () => switchTrailMode('60d'));
+  setupSpotVolClickSwitch();
+}
+
+function getHistoricalDotHoverTemplate(assetLabel, volLabel) {
+  const hint = (spotVolClickAction === 'load')
+    ? '👉 Click to Load 1m Day Archive'
+    : '👉 Click to Anchor Residual Monitor (Auto-Range)';
+  const color = (spotVolClickAction === 'load') ? '#FBBF24' : '#00E5FF';
+  return `<b>%{text}</b><br>${assetLabel} Move: %{x:.2f}%<br>${volLabel} Move: %{y:.2f} pts<br><span style="color:${color};font-size:10px">${hint}</span><extra></extra>`;
+}
+
+function setupSpotVolClickSwitch() {
+  if (btnSpotVolClickAnchor) {
+    btnSpotVolClickAnchor.addEventListener('click', () => switchSpotVolClickAction('anchor'));
+  }
+  if (btnSpotVolClickLoad) {
+    btnSpotVolClickLoad.addEventListener('click', () => switchSpotVolClickAction('load'));
+  }
+}
+
+function switchSpotVolClickAction(action) {
+  spotVolClickAction = (action === 'load') ? 'load' : 'anchor';
+  const activeCls = "px-2 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
+  const idleCls = "px-2 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition";
+  if (btnSpotVolClickAnchor) {
+    btnSpotVolClickAnchor.className = (spotVolClickAction === 'anchor') ? activeCls : idleCls;
+  }
+  if (btnSpotVolClickLoad) {
+    btnSpotVolClickLoad.className = (spotVolClickAction === 'load') ? activeCls : idleCls;
+  }
+
+  const overvixEl = document.getElementById('overvix-chart');
+  if (overvixEl && overvixEl.data && overvixEl.data.length > 0) {
+    const isNdx = (currentAssetPair === 'NDX');
+    const assetLabel = isNdx ? 'NDX' : 'SPX';
+    const volLabel = isNdx ? 'VXN' : 'VIX';
+    Plotly.restyle('overvix-chart', { hovertemplate: getHistoricalDotHoverTemplate(assetLabel, volLabel) }, [0]);
+  }
 }
 
 function switchTrailMode(mode) {
@@ -1184,7 +1225,7 @@ function renderOvervixChart(bootstrap) {
         opacity: 0.85,
         line: { color: isNdx ? '#9333EA' : '#B39F50', width: 0.75 }
       },
-      hovertemplate: `<b>%{text}</b><br>${assetLabel} Move: %{x:.2f}%<br>${volLabel} Move: %{y:.2f} pts<br><span style="color:#C084FC;font-size:10px">👉 Click to Anchor / Inspect Date</span><extra></extra>`,
+      hovertemplate: getHistoricalDotHoverTemplate(assetLabel, volLabel),
       visible: currentTrailMode === 'today' ? false : true
     },
     // 1: Regression Trendline
@@ -1337,35 +1378,98 @@ function attachOvervixChartClickListener() {
   });
 }
 
+function extractIsoDate(targetStr) {
+  if (typeof targetStr !== 'string') return null;
+  const match = targetStr.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+function datasetCoversDate(c, targetDate) {
+  if (!c || !c.times || c.times.length === 0 || !targetDate) return false;
+  const firstDate = String(c.times[0]).slice(0, 10);
+  const lastDate = String(c.times[c.times.length - 1]).slice(0, 10);
+  return targetDate >= firstDate && targetDate <= lastDate;
+}
+
+function findBestHorizonForDate(targetDate, isNdx) {
+  if (!targetDate) return currentCorrTf;
+  const currentDs = getCorrDataset(isNdx, currentCorrTf);
+  if (datasetCoversDate(currentDs, targetDate)) {
+    return currentCorrTf;
+  }
+
+  let bestTf = null;
+  let bestFirstDate = '';
+  for (const tf of TF_STEPS) {
+    const ds = getCorrDataset(isNdx, tf);
+    if (!datasetCoversDate(ds, targetDate)) continue;
+    const firstDate = String(ds.times[0]).slice(0, 10);
+    if (bestTf === null || firstDate > bestFirstDate) {
+      bestTf = tf;
+      bestFirstDate = firstDate;
+    }
+  }
+  return bestTf || currentCorrTf;
+}
+
+function ensureCorrRangeCoversTarget(targetStr, isNdx) {
+  const targetDate = extractIsoDate(targetStr);
+  if (!targetDate) return false;
+
+  const bestTf = findBestHorizonForDate(targetDate, isNdx);
+  if (!bestTf || bestTf === currentCorrTf) return false;
+
+  const conf = TF_CONFIG[bestTf] || TF_CONFIG['5D'];
+  currentCorrTf = bestTf;
+  if (sliderCorrTimeframe && sliderCorrTimeframe.value != conf.step) {
+    sliderCorrTimeframe.value = conf.step;
+  }
+  updateCorrSliderUI(bestTf);
+
+  if (chkSyncTimeframe && chkSyncTimeframe.checked) {
+    currentTimeframe = bestTf;
+    if (sliderTsTimeframe && sliderTsTimeframe.value != conf.step) {
+      sliderTsTimeframe.value = conf.step;
+    }
+    updateTsSliderUI(bestTf);
+    renderTermStructureChart(bestTf);
+  }
+  updateCorrMetricDisplay();
+
+  if (corrSliderBadge) {
+    corrSliderBadge.classList.add('ring-2', 'ring-cyan-400', 'animate-pulse');
+    setTimeout(() => {
+      corrSliderBadge.classList.remove('ring-2', 'ring-cyan-400', 'animate-pulse');
+    }, 2000);
+  }
+  return true;
+}
+
 function handleHistoricalDotClick(dateStr) {
-  // 1. If 1D chart is selected, clicking any historical session dot loads that historical day's 1-min intraday replay
-  if (currentCorrTf === '1D') {
+  if (spotVolClickAction === 'load') {
     loadHistoricalSession(dateStr);
     return;
   }
 
-  // 2. Multi-day horizon (5D, 1M, 3M, 6M, 1Y):
+  if (currentViewMode === 'historical') {
+    returnToLiveMode();
+  }
+
   const isNdx = (currentAssetPair === 'NDX');
+  ensureCorrRangeCoversTarget(dateStr, isNdx);
+
   const c = getCorrDataset(isNdx, currentCorrTf);
   const times = (c && c.times) ? c.times : [];
 
-  // If dateStr is the immediately preceding session in the multi-day timeline, route to official prior close (-2.11 pts)
+  // Route immediately preceding completed session to official prior close when available
   const latestDate = times.length > 0 ? times[times.length - 1].slice(0, 10) : '';
   const isPriorSession = (dateStr < latestDate && !times.some(t => t.slice(0, 10) > dateStr && t.slice(0, 10) < latestDate));
   if (isPriorSession) {
     setCorrAnchor('prior_close');
-    highlightAnchorScroll();
-    return;
-  }
-
-  const hasDateInCurrentTf = times.some(t => t.startsWith(dateStr));
-  if (hasDateInCurrentTf) {
-    setCorrAnchor('date_close', dateStr);
-    highlightAnchorScroll();
   } else {
-    // Outside current multi-day timeframe -> load historical session
-    loadHistoricalSession(dateStr);
+    setCorrAnchor('date_close', dateStr);
   }
+  highlightAnchorScroll();
 }
 
 function highlightAnchorScroll() {
@@ -1826,17 +1930,22 @@ function resetCorrAnchor(triggerRender = true) {
 
 function setCorrAnchor(mode, targetTime = null) {
   const isNdx = (currentAssetPair === 'NDX');
+
+  if (mode === 'open') {
+    resetCorrAnchor(true);
+    return;
+  }
+
+  if ((mode === 'date_close' || mode === 'custom') && targetTime) {
+    ensureCorrRangeCoversTarget(targetTime, isNdx);
+  }
+
   const c = getCorrDataset(isNdx, currentCorrTf);
   const times = c.times || [];
   if (!times || times.length === 0) return;
 
   const assetLabel = isNdx ? 'NDX' : 'SPX';
   const volLabel = isNdx ? 'VXN' : 'VIX';
-
-  if (mode === 'open') {
-    resetCorrAnchor(true);
-    return;
-  }
 
   const raw = getRawSpotVolSeries(c, isNdx);
   const spotRaw = raw.spot;
