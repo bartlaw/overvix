@@ -118,6 +118,10 @@ class DashboardState:
         self.vxn_ticker = None
         self.es_ticker = None
 
+        # Fallback real-time 1-min bar streams for indices without reqMktData ticks (e.g. NDX/VXN/VIX3M)
+        self.live_bars: Dict[str, Any] = {}
+        self.live_bars_date: Optional[str] = None
+
         # ES Futures & GTH State
         self.latest_es_close: float = 0.0
         self.es_spx_basis: Optional[float] = None
@@ -295,6 +299,110 @@ def get_current_price(ticker, fallback_price: float = 0.0):
     return fallback_price, "HIST"
 
 
+LIVE_TICK_SOURCES = ("LIVE LAST", "LIVE MKT", "LIVE MID")
+
+
+def _format_bar_dt_et(dt_val) -> str:
+    """Normalize an IBKR bar timestamp (datetime or date) to 'YYYY-MM-DD HH:MM' in US/Eastern."""
+    if hasattr(dt_val, 'hour'):
+        dt_obj = pd.to_datetime(dt_val)
+        if dt_obj.tz is None:
+            dt_obj = dt_obj.tz_localize('UTC')
+        return dt_obj.tz_convert('America/New_York').strftime('%Y-%m-%d %H:%M')
+    return str(dt_val)[:10]
+
+
+def cancel_live_bar_streams():
+    """Cancel any active keepUpToDate historical bar streams without raising on disconnect."""
+    if state.ib is not None:
+        for bars in list(state.live_bars.values()):
+            try:
+                if bars is not None:
+                    state.ib.cancelHistoricalData(bars)
+            except Exception:
+                pass
+    state.live_bars.clear()
+
+
+async def subscribe_live_bar_streams(today_et: Optional[str] = None):
+    """Subscribe keepUpToDate=True 1-min streams for RTH indices whose reqMktData ticker lacks live ticks."""
+    if not state.ib or not state.ib.isConnected():
+        return
+    now_et = datetime.now(ET_TZ)
+    today_str = today_et or now_et.strftime('%Y-%m-%d')
+    cancel_live_bar_streams()
+    state.live_bars_date = today_str
+
+    specs = [
+        ('spx', state.spx_contract, state.spx_ticker, state.latest_spx_close),
+        ('vix', state.vix_contract, state.vix_ticker, state.latest_vix_close),
+        ('vix3m', state.vix3m_contract, state.vix3m_ticker, state.latest_vix3m_close),
+        ('ndx', state.ndx_contract, state.ndx_ticker, state.latest_ndx_close),
+        ('vxn', state.vxn_contract, state.vxn_ticker, state.latest_vxn_close),
+    ]
+    targets = []
+    for key, contract, ticker, fb in specs:
+        if contract is None:
+            continue
+        _, src = get_current_price(ticker, fb)
+        if src not in LIVE_TICK_SOURCES:
+            targets.append((key, contract))
+
+    if not targets:
+        return
+
+    results = await asyncio.gather(
+        *[
+            state.ib.reqHistoricalDataAsync(c, '', '300 S', '1 min', 'TRADES', True, 1, keepUpToDate=True)
+            for _, c in targets
+        ],
+        return_exceptions=True
+    )
+    subscribed = []
+    for (key, _), res in zip(targets, results):
+        if isinstance(res, Exception) or not res:
+            continue
+        state.live_bars[key] = res
+        subscribed.append(key.upper())
+    if subscribed:
+        print(f"[IBKR] Active keepUpToDate 1-min bar fallback streams: {', '.join(subscribed)}")
+
+
+def resolve_live_price(key: str, ticker, fallback_price: float, df_1d: pd.DataFrame, col_name: str, today_et: str, is_live_rth: bool):
+    """Resolve current price, falling back to today's keepUpToDate or 1-min bar when reqMktData has no live tick."""
+    val, src = get_current_price(ticker, fallback_price)
+    if not is_live_rth or src in LIVE_TICK_SOURCES:
+        return val, src
+
+    candidates = []
+    bars = state.live_bars.get(key)
+    if bars:
+        try:
+            last_bar = bars[-1]
+            bar_val = float(last_bar.close)
+            bar_dt = _format_bar_dt_et(last_bar.date)
+            if bar_dt[:10] == today_et and math.isfinite(bar_val) and bar_val > 0:
+                candidates.append((bar_dt, 1, bar_val, "LIVE BAR"))
+        except Exception:
+            pass
+
+    if df_1d is not None and not df_1d.empty and col_name in df_1d.columns:
+        try:
+            df_dt = str(df_1d.index[-1])[:16]
+            df_val = float(df_1d[col_name].iloc[-1])
+            if df_dt[:10] == today_et and math.isfinite(df_val) and df_val > 0:
+                candidates.append((df_dt, 0, df_val, "BAR 1M"))
+        except Exception:
+            pass
+
+    if candidates:
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        _, _, best_val, best_src = candidates[-1]
+        return best_val, best_src
+
+    return val, src
+
+
 async def resolve_front_es_contract(ib_client) -> Optional[Any]:
     """Resolve and qualify the active front-month CME ES quarterly future, rolling <=2 days before expiry."""
     if Future is None or ib_client is None:
@@ -406,15 +514,19 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
     if state.es_contract:
         state.es_ticker = state.ib.reqMktData(state.es_contract, '', False, False)
 
-    for _ in range(10):
+    for _ in range(8):
         await asyncio.sleep(0.2)
-        p1, _ = get_current_price(state.spx_ticker, state.latest_spx_close)
-        p2, _ = get_current_price(state.vix_ticker, state.latest_vix_close)
-        p3, _ = get_current_price(state.vix3m_ticker, state.latest_vix3m_close)
-        p4, _ = get_current_price(state.ndx_ticker, state.latest_ndx_close)
-        p5, _ = get_current_price(state.vxn_ticker, state.latest_vxn_close)
-        if p1 > 0 and p2 > 0 and p3 > 0 and p4 > 0 and p5 > 0:
+        _, s1 = get_current_price(state.spx_ticker, state.latest_spx_close)
+        _, s2 = get_current_price(state.vix_ticker, state.latest_vix_close)
+        _, s3 = get_current_price(state.vix3m_ticker, state.latest_vix3m_close)
+        _, s4 = get_current_price(state.ndx_ticker, state.latest_ndx_close)
+        _, s5 = get_current_price(state.vxn_ticker, state.latest_vxn_close)
+        if all(s in LIVE_TICK_SOURCES for s in (s1, s2, s3, s4, s5)):
             break
+
+    now_init_et = datetime.now(ET_TZ)
+    if classify_market_window(now_init_et)["is_rth_window"]:
+        await subscribe_live_bar_streams(now_init_et.strftime('%Y-%m-%d'))
 
     print(" IBKR Engine initialized and streaming successfully.\n")
     return True
@@ -1425,6 +1537,12 @@ def compute_live_payload() -> Dict[str, Any]:
     intraday term structure ratio stats, rolling correlation, master confluence signal,
     and ES-based Global Trading Hours (GTH) monitoring for SPX & VIX.
     """
+    now_et = datetime.now(ET_TZ)
+    today_et = now_et.strftime('%Y-%m-%d')
+    is_weekday = (now_et.weekday() < 5)
+    win = classify_market_window(now_et)
+    is_rth_time = win["is_rth_window"]
+
     spx_curr, spx_src = get_current_price(state.spx_ticker, state.latest_spx_close)
     vix_curr, vix_src = get_current_price(state.vix_ticker, state.latest_vix_close)
     vix3m_curr, vix3m_src = get_current_price(state.vix3m_ticker, state.latest_vix3m_close)
@@ -1432,17 +1550,18 @@ def compute_live_payload() -> Dict[str, Any]:
     vxn_curr, vxn_src = get_current_price(state.vxn_ticker, state.latest_vxn_close)
     es_curr, es_src = get_current_price(state.es_ticker, state.eod_es_close or state.latest_es_close)
 
-    now_et = datetime.now(ET_TZ)
-    today_et = now_et.strftime('%Y-%m-%d')
-    is_weekday = (now_et.weekday() < 5)
-    win = classify_market_window(now_et)
-    is_rth_time = win["is_rth_window"]
-
     # A live RTH trading session is active only during RTH hours AND when today's session has actually begun
     is_live_rth = is_rth_time and (
         ("LIVE" in spx_src or "LIVE" in ndx_src) or
         (state.active_session_date == today_et)
     )
+
+    if is_live_rth:
+        spx_curr, spx_src = resolve_live_price('spx', state.spx_ticker, state.latest_spx_close, state.df_spx_vix_1d, 'spx', today_et, True)
+        vix_curr, vix_src = resolve_live_price('vix', state.vix_ticker, state.latest_vix_close, state.df_spx_vix_1d, 'vix', today_et, True)
+        vix3m_curr, vix3m_src = resolve_live_price('vix3m', state.vix3m_ticker, state.latest_vix3m_close, state.df_ts_1d, 'vix3m', today_et, True)
+        ndx_curr, ndx_src = resolve_live_price('ndx', state.ndx_ticker, state.latest_ndx_close, state.df_ndx_vxn_1d, 'ndx', today_et, True)
+        vxn_curr, vxn_src = resolve_live_price('vxn', state.vxn_ticker, state.latest_vxn_close, state.df_ndx_vxn_1d, 'vxn', today_et, True)
 
     live_vix_val, live_vix_src = vix_curr, vix_src
     is_premarket_hour = is_weekday and (now_et.time() < dtime(9, 30))
@@ -2047,6 +2166,10 @@ async def broadcast_loop():
                     try:
                         print(f"[Intraday Sync] Refreshing historical data at {now_et.strftime('%H:%M:%S')} ET...")
                         await refresh_historical_data()
+                        if win_loop["is_rth_window"] and state.live_bars_date != today_et:
+                            await subscribe_live_bar_streams(today_et)
+                        elif not win_loop["is_rth_window"] and state.live_bars:
+                            cancel_live_bar_streams()
                     except Exception as e:
                         print(f"[Intraday Sync Error] {e}")
 
@@ -2091,6 +2214,7 @@ async def lifespan(app: FastAPI):
     if state.ib and state.ib.isConnected():
         print("[IBKR] Unsubscribing market data and disconnecting...")
         try:
+            cancel_live_bar_streams()
             if state.spx_contract: state.ib.cancelMktData(state.spx_contract)
             if state.vix_contract: state.ib.cancelMktData(state.vix_contract)
             if state.vix3m_contract: state.ib.cancelMktData(state.vix3m_contract)

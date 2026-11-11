@@ -4039,15 +4039,37 @@ function updateUI(data) {
     if (isNdx && ndx && data.is_rth_active) {
       let cr = cachedCorrNdx['1D'];
       if (!cr || !cr.times) {
-        cachedCorrNdx['1D'] = { times: [], ndx_pct: [], vxn_pt: [], rolling_corr: [] };
+        cachedCorrNdx['1D'] = { times: [], ndx_pct: [], vxn_pt: [], rolling_corr: [], spot_raw: [], vol_raw: [], ndx_raw: [], vxn_raw: [] };
         cr = cachedCorrNdx['1D'];
       }
       const ndxPct = ndx.market ? ndx.market.pct_change : 0;
+      const ndxCurrVal = ndx.market ? ndx.market.current : null;
       const vxnPt = (ndx.market && ndx.market.vxn) ? ndx.market.vxn.pt_change : 0;
+      const vxnCurrVal = (ndx.market && ndx.market.vxn) ? ndx.market.vxn.current : null;
       const corrVal = ndx.correlation ? ndx.correlation.rolling_corr : -0.75;
 
       const pctArr = cr.ndx_pct || cr.spx_pct;
       const ptArr = cr.vxn_pt || cr.vix_pt;
+      const syncRawArrays = (mode) => {
+        const pairs = [
+          [ndxCurrVal, ['spot_raw', 'ndx_raw']],
+          [vxnCurrVal, ['vol_raw', 'vxn_raw']]
+        ];
+        pairs.forEach(([val, keys]) => {
+          if (val === null || val === undefined) return;
+          keys.forEach(k => {
+            if (!Array.isArray(cr[k])) return;
+            if (mode === 'reset') {
+              cr[k].length = 0;
+              cr[k].push(val);
+            } else if (mode === 'replace' && cr[k].length > 0) {
+              cr[k][cr[k].length - 1] = val;
+            } else {
+              cr[k].push(val);
+            }
+          });
+        });
+      };
 
       if (cr.times.length > 0) {
         const lastT = cr.times[cr.times.length - 1];
@@ -4057,23 +4079,27 @@ function updateUI(data) {
             pctArr[pctArr.length - 1] = ndxPct;
             ptArr[ptArr.length - 1] = vxnPt;
             cr.rolling_corr[cr.rolling_corr.length - 1] = corrVal;
+            syncRawArrays('replace');
           } else {
             cr.times.push(liveDt);
             pctArr.push(ndxPct);
             ptArr.push(vxnPt);
             cr.rolling_corr.push(corrVal);
+            syncRawArrays('push');
           }
         } else {
           cr.times = [liveDt];
           pctArr.length = 0; pctArr.push(ndxPct);
           ptArr.length = 0; ptArr.push(vxnPt);
           cr.rolling_corr = [corrVal];
+          syncRawArrays('reset');
         }
       } else {
         cr.times.push(liveDt);
         pctArr.push(ndxPct);
         ptArr.push(vxnPt);
         cr.rolling_corr.push(corrVal);
+        syncRawArrays('push');
       }
 
       renderCorrelationChart('dual', currentCorrTf);
