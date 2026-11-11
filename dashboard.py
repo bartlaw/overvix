@@ -2070,6 +2070,12 @@ async def get_index():
     return FileResponse(index_file)
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def get_favicon():
+    favicon_file = os.path.join(static_dir, 'favicon.ico')
+    return FileResponse(favicon_file)
+
+
 @app.get("/api/bootstrap")
 async def get_bootstrap():
     """

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="rimGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+  </defs>
+  <!-- Dark obsidian rounded square with cyan-to-amber rim -->
+  <rect x="1.5" y="1.5" width="61" height="61" rx="13.5" ry="13.5" fill="#0b1220" stroke="url(#rimGrad)" stroke-width="3" />
+  <!-- Cyan 'O' (Spot/SPX) + Amber 'V' (Volatility/VIX) -->
+  <path fill="#00e5ff" fill-rule="evenodd" d="
+    M 20 17
+    C 26.8 17 30.8 22.2 30.8 32
+    C 30.8 41.8 26.8 47 20 47
+    C 13.2 47 9.2 41.8 9.2 32
+    C 9.2 22.2 13.2 17 20 17 Z
+    M 20 23
+    C 16.8 23 15.2 26.1 15.2 32
+    C 15.2 37.9 16.8 41 20 41
+    C 23.2 41 24.8 37.9 24.8 32
+    C 24.8 26.1 23.2 23 20 23 Z
+  " />
+  <path fill="#f59e0b" d="M 32.5 17 H 39.2 L 44 36.2 L 48.8 17 H 55.5 L 47 47 H 41 Z" />
+</svg>
