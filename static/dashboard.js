@@ -221,6 +221,17 @@ let cachedCorrNdx = {
   'MAX': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] },
   metrics: { '1D': -0.75, '5D': -0.75, '1M': -0.75, '3M': -0.75, '6M': -0.75, 'YTD': -0.75, '1Y': -0.75, 'MAX': -0.75 }
 };
+let cachedCorrGth = {
+  '1D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], is_gth: [] },
+  '5D': { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], is_gth: [] },
+  metrics: { '1D': -0.75, '5D': -0.75 }
+};
+let cachedTrailGth = { x: [], y: [], times: [], is_gth: [], session_date: null };
+let cachedLiveCorrGth = null;
+let isGthEnabled = false;
+let userGthOverride = null; // null = auto during GTH/overnight, 'on'/'off' once toggled
+let cachedGthSessionDate = null;
+let cachedGthStatus = null;
 let currentCorrTf = '1D';
 
 // Recovery Anchor State for Dynamic Correlation & Divergence Monitor
@@ -398,9 +409,147 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// Asset Pair Switcher (SPX/VIX vs NDX/VXN)
+// Asset Pair Switcher (SPX/VIX vs NDX/VXN) & GTH Toggle
 const btnAssetSpx = document.getElementById('btn-asset-spx');
 const btnAssetNdx = document.getElementById('btn-asset-ndx');
+const btnGthToggle = document.getElementById('btn-gth-toggle');
+const gthToggleDot = document.getElementById('gth-toggle-dot');
+const gthModePill = document.getElementById('gth-mode-pill');
+const gthBasisBadge = document.getElementById('gth-basis-badge');
+const gthControlGroup = document.getElementById('gth-control-group');
+
+function isGthChartActive(tf = currentCorrTf) {
+  if (currentAssetPair !== 'SPX' || currentViewMode !== 'live' || !isGthEnabled) return false;
+  if (tf !== '1D' && tf !== '5D') return false;
+  const ds = cachedCorrGth[tf];
+  return Boolean(ds && ds.times && ds.times.length > 0);
+}
+
+function getCorrDataset(isNdx, tf = currentCorrTf) {
+  if (isNdx) {
+    return cachedCorrNdx[tf] || cachedCorrNdx['1D'] || cachedCorrNdx;
+  }
+  if (isGthChartActive(tf)) {
+    return cachedCorrGth[tf];
+  }
+  return cachedCorr[tf] || cachedCorr['1D'] || cachedCorr;
+}
+
+function applyAutoGthDefault(data) {
+  if (!data || currentViewMode !== 'live') return;
+  if (userGthOverride !== null) {
+    isGthEnabled = (userGthOverride === 'on');
+    return;
+  }
+  const st = data.session_status;
+  const gthAvail = Boolean(data.gth && data.gth.available);
+  if (gthAvail && (st === 'GTH_ACTIVE' || st === 'OVERNIGHT_ES_ONLY')) {
+    isGthEnabled = true;
+  } else if (st === 'REGULAR_RTH') {
+    isGthEnabled = false;
+  }
+}
+
+function updateGthToggleUI(data = lastLiveUpdatePayload || cachedBootstrap) {
+  if (!btnGthToggle) return;
+  const isSpxLive = (currentAssetPair === 'SPX' && currentViewMode === 'live');
+  const gth = data ? data.gth : null;
+  const st = data ? data.session_status : null;
+
+  if (gthControlGroup) {
+    gthControlGroup.className = isSpxLive
+      ? "flex items-center space-x-1.5 bg-slate-900/90 border border-slate-700/80 rounded-lg p-1 shadow-inner"
+      : "flex items-center space-x-1.5 bg-slate-900/90 border border-slate-800/60 rounded-lg p-1 shadow-inner opacity-45 pointer-events-none";
+  }
+
+  btnGthToggle.disabled = !isSpxLive;
+
+  if (!isSpxLive) {
+    btnGthToggle.className = "px-2.5 py-1 rounded text-xs font-semibold text-slate-500 flex items-center space-x-1.5 cursor-not-allowed";
+    btnGthToggle.title = "GTH ES+VIX monitoring applies to live SPX/VIX only";
+    if (gthToggleDot) gthToggleDot.className = "w-2 h-2 rounded-full bg-slate-600";
+    if (gthModePill) gthModePill.classList.add('hidden');
+    if (gthBasisBadge) gthBasisBadge.classList.add('hidden');
+    return;
+  }
+
+  btnGthToggle.title = "Toggle Global Trading Hours (ES Futures Basis-Adjusted + Spot VIX, 03:15-16:15 ET) on SPX/VIX 1D & 5D";
+
+  if (isGthEnabled) {
+    btnGthToggle.className = "px-2.5 py-1 rounded text-xs font-bold bg-indigo-500 text-white shadow-sm transition flex items-center space-x-1.5";
+    if (gthToggleDot) {
+      if (st === 'GTH_ACTIVE') {
+        gthToggleDot.className = "w-2 h-2 rounded-full bg-emerald-300 animate-pulse";
+      } else if (st === 'OVERNIGHT_ES_ONLY') {
+        gthToggleDot.className = "w-2 h-2 rounded-full bg-amber-300 animate-pulse";
+      } else {
+        gthToggleDot.className = "w-2 h-2 rounded-full bg-cyan-200";
+      }
+    }
+    if (gthModePill) {
+      gthModePill.classList.remove('hidden');
+      if (st === 'GTH_ACTIVE') {
+        gthModePill.textContent = "ES+VIX LIVE";
+        gthModePill.className = "text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-600/60";
+      } else if (st === 'OVERNIGHT_ES_ONLY') {
+        gthModePill.textContent = "ES LIVE";
+        gthModePill.className = "text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-950/90 text-amber-300 border border-amber-600/60";
+      } else {
+        gthModePill.textContent = "ES+VIX";
+        gthModePill.className = "text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-950 text-indigo-200 border border-indigo-400/50";
+      }
+    }
+  } else {
+    btnGthToggle.className = "px-2.5 py-1 rounded text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1.5";
+    if (gthToggleDot) gthToggleDot.className = (st === 'GTH_ACTIVE' || st === 'OVERNIGHT_ES_ONLY')
+      ? "w-2 h-2 rounded-full bg-indigo-400 animate-pulse"
+      : "w-2 h-2 rounded-full bg-slate-500";
+    if (gthModePill) gthModePill.classList.add('hidden');
+  }
+
+  if (gthBasisBadge) {
+    if (gth && gth.basis !== null && gth.basis !== undefined) {
+      const sign = gth.basis >= 0 ? '+' : '';
+      const sym = gth.es_symbol || 'ES';
+      gthBasisBadge.textContent = `${sym} Basis: ${sign}${gth.basis.toFixed(2)}`;
+      gthBasisBadge.title = `${gth.basis_source || 'RTH Close'} (${gth.basis_date || ''}) — Synthetic SPX = ES - Basis`;
+      gthBasisBadge.classList.remove('hidden');
+    } else {
+      gthBasisBadge.classList.add('hidden');
+    }
+  }
+}
+
+function setupGthToggle() {
+  if (!btnGthToggle) return;
+  btnGthToggle.addEventListener('click', () => {
+    if (currentAssetPair !== 'SPX' || currentViewMode !== 'live') return;
+    isGthEnabled = !isGthEnabled;
+    userGthOverride = isGthEnabled ? 'on' : 'off';
+
+    if (isGthEnabled && currentCorrTf !== '1D' && currentCorrTf !== '5D') {
+      switchCorrTf('1D');
+    }
+    if (corrAnchor.active) {
+      if (currentCorrTf === '1D') {
+        resetCorrAnchor(false);
+      } else {
+        syncCorrAnchorForTimeframe(currentCorrTf);
+      }
+    }
+
+    const activeData = lastLiveUpdatePayload || cachedBootstrap;
+    updateGthToggleUI(activeData);
+    if (cachedBootstrap) {
+      renderOvervixChart(cachedBootstrap);
+    }
+    renderCorrelationChart(currentCorrMode, currentCorrTf);
+    updateCorrMetricDisplay();
+    if (activeData) {
+      updateUI(activeData);
+    }
+  });
+}
 
 function setupAssetSwitcher() {
   if (btnAssetSpx) btnAssetSpx.addEventListener('click', () => switchAssetPair('SPX'));
@@ -462,6 +611,7 @@ function switchAssetPair(pair) {
 
   // Re-render charts and UI immediately from cache
   const activeData = (currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap;
+  updateGthToggleUI(lastLiveUpdatePayload || activeData);
   if (activeData) {
     renderOvervixChart(activeData);
     renderTermStructureChart(currentTimeframe);
@@ -798,6 +948,10 @@ function getActiveBetaAndIntercept(isNdx) {
     if (isNdx && cachedBootstrap.ndx && cachedBootstrap.ndx.model) {
       if (typeof cachedBootstrap.ndx.model.slope === 'number') rawSlope = cachedBootstrap.ndx.model.slope;
       if (typeof cachedBootstrap.ndx.model.intercept === 'number') rawIntercept = cachedBootstrap.ndx.model.intercept;
+    } else if (!isNdx && isGthChartActive() && cachedBootstrap.session_status === 'GTH_ACTIVE' && cachedBootstrap.overvix && cachedBootstrap.overvix.gth_model) {
+      const gm = cachedBootstrap.overvix.gth_model;
+      if (typeof gm.slope === 'number') rawSlope = gm.slope;
+      if (typeof gm.intercept === 'number') rawIntercept = gm.intercept;
     } else if (cachedBootstrap.model) {
       if (typeof cachedBootstrap.model.slope === 'number') rawSlope = cachedBootstrap.model.slope;
       if (typeof cachedBootstrap.model.intercept === 'number') rawIntercept = cachedBootstrap.model.intercept;
@@ -813,7 +967,7 @@ function getActiveBetaAndIntercept(isNdx) {
 function updateCorrMetricDisplay() {
   const isNdx = (currentAssetPair === 'NDX');
   const targetTf = currentCorrTf;
-  const c = isNdx ? (cachedCorrNdx[targetTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[targetTf] || cachedCorr['1D'] || cachedCorr);
+  const c = getCorrDataset(isNdx, targetTf);
   if (!c) return;
   const anchoredSeries = computeAnchoredSeries(c, isNdx);
   const times = anchoredSeries.times || [];
@@ -869,20 +1023,33 @@ function updateCorrMetricDisplay() {
 
 function renderOvervixChart(bootstrap) {
   const isNdx = (currentAssetPair === 'NDX');
+  const gthMode = (!isNdx && !bootstrap.is_historical && isGthEnabled);
+  const gthObj = (gthMode && bootstrap.gth) ? bootstrap.gth : null;
+  const gthModel = (gthMode && bootstrap.session_status === 'GTH_ACTIVE' && bootstrap.overvix && bootstrap.overvix.gth_model)
+    ? bootstrap.overvix.gth_model
+    : null;
   const targetData = (isNdx && bootstrap.ndx && bootstrap.ndx.overvix) ? bootstrap.ndx : bootstrap;
   const assetLabel = isNdx ? 'NDX' : 'SPX';
   const volLabel = isNdx ? 'VXN' : 'VIX';
 
-  const xHist = (targetData.overvix && targetData.overvix.x_history) ? targetData.overvix.x_history : [];
-  const yHist = (targetData.overvix && targetData.overvix.y_history) ? targetData.overvix.y_history : [];
-  const dates = (targetData.overvix && targetData.overvix.dates) ? targetData.overvix.dates : [];
-  const slope = (targetData.model && targetData.model.slope) || 0;
-  const intercept = (targetData.model && targetData.model.intercept) || 0;
+  const xHist = gthModel
+    ? (gthModel.x_history || [])
+    : ((targetData.overvix && targetData.overvix.x_history) ? targetData.overvix.x_history : []);
+  const yHist = gthModel
+    ? (gthModel.y_history || [])
+    : ((targetData.overvix && targetData.overvix.y_history) ? targetData.overvix.y_history : []);
+  const dates = gthModel
+    ? (gthModel.dates || [])
+    : ((targetData.overvix && targetData.overvix.dates) ? targetData.overvix.dates : []);
+  const slope = gthModel ? (gthModel.slope || 0) : ((targetData.model && targetData.model.slope) || 0);
+  const intercept = gthModel ? (gthModel.intercept || 0) : ((targetData.model && targetData.model.intercept) || 0);
   const assetDefaultThresh = isNdx ? currentNdxThreshold : currentSpxThreshold;
   const threshold = (targetData.model && targetData.model.threshold_pts) || assetDefaultThresh;
 
-  // Intraday Trail Data
-  const trail = (targetData.overvix && targetData.overvix.intraday_trail) ? targetData.overvix.intraday_trail : { x: [], y: [], times: [] };
+  // Intraday Trail Data (prefer GTH+RTH trail when SPX GTH mode is active and populated)
+  const gthTrail = (gthMode && bootstrap.overvix && bootstrap.overvix.intraday_trail_gth) ? bootstrap.overvix.intraday_trail_gth : null;
+  const rthTrail = (targetData.overvix && targetData.overvix.intraday_trail) ? targetData.overvix.intraday_trail : { x: [], y: [], times: [] };
+  const trail = (gthTrail && gthTrail.x && gthTrail.x.length > 0) ? gthTrail : rthTrail;
   cachedTrail = trail;
 
   // Compute Trendline & Overvix Band
@@ -896,10 +1063,20 @@ function renderOvervixChart(bootstrap) {
 
   let currX = 0;
   let currY = 0;
+  const isGthLiveActive = Boolean(gthMode && bootstrap.session_status === 'GTH_ACTIVE' && gthObj && gthObj.current_point && gthObj.current_point.y !== null);
+  const isOvernightEs = Boolean(gthMode && bootstrap.session_status === 'OVERNIGHT_ES_ONLY' && gthObj && gthObj.current_point);
+
   if (bootstrap.is_historical && trail.x && trail.x.length > 0) {
     currX = trail.x[trail.x.length - 1];
     currY = trail.y[trail.y.length - 1];
-  } else if (targetData.current_point && targetData.current_point.x !== undefined && targetData.current_point.y !== undefined) {
+  } else if (isGthLiveActive) {
+    currX = gthObj.current_point.x;
+    currY = gthObj.current_point.y;
+  } else if (isOvernightEs && trail.x && trail.x.length > 0) {
+    // Overnight ES-Only: pin Overvix beacon to last complete session tip (never plot frozen VIX vs ES move)
+    currX = trail.x[trail.x.length - 1];
+    currY = trail.y[trail.y.length - 1];
+  } else if (targetData.current_point && targetData.current_point.x !== undefined && targetData.current_point.y !== undefined && targetData.current_point.y !== null) {
     currX = targetData.current_point.x;
     currY = targetData.current_point.y;
   } else if (targetData.market && targetData.market.pct_change !== undefined) {
@@ -915,11 +1092,26 @@ function renderOvervixChart(bootstrap) {
   // Update subtitle & card target dynamically
   const spSub = document.getElementById('spotvol-sub');
   if (spSub) {
-    spSub.textContent = `${assetLabel} % vs ${volLabel} Point Move with +${threshold.toFixed(1)} pt Threshold & Intraday Path`;
+    spSub.textContent = gthMode
+      ? `SPX (ES Adj) % vs VIX Point Move with +${threshold.toFixed(1)} pt Threshold & GTH+RTH Path`
+      : `${assetLabel} % vs ${volLabel} Point Move with +${threshold.toFixed(1)} pt Threshold & Intraday Path`;
   }
   const dispEl = document.getElementById('disp-thresh-pts');
   if (dispEl) dispEl.textContent = threshold.toFixed(1);
-  const isOvervixed = targetData.overvix ? targetData.overvix.is_overvixed : false;
+  const isOvervixed = isGthLiveActive
+    ? (gthObj.overvix ? gthObj.overvix.is_overvixed : false)
+    : (targetData.overvix ? targetData.overvix.is_overvixed : false);
+
+  const trailSessionDate = (gthMode && trail.session_date) ? trail.session_date : bootstrap.session_date;
+  const showLiveBeacon = (bootstrap.is_rth_active === true) || isGthLiveActive;
+  const beaconName = isGthLiveActive
+    ? "Live GTH Point"
+    : ((bootstrap.is_historical || !showLiveBeacon) ? "Session Close Point" : "Live Point");
+  const beaconHover = isGthLiveActive
+    ? `<b>Live GTH Point (${gthObj.es_symbol || 'ES'} Adj + VIX)</b><br>SPX (ES Adj): %{x:+.2f}%<br>VIX Move: %{y:+.2f} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`
+    : ((bootstrap.is_historical || !showLiveBeacon)
+      ? `<b>Session Close (${trailSessionDate || 'Prior'})</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Official Close</span><extra></extra>`
+      : `<b>Live Current Point</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`);
 
   const traces = [
     // 0: Historical 60D Spot-Vol Points
@@ -972,9 +1164,9 @@ function renderOvervixChart(bootstrap) {
       y: trail.y || [],
       text: trail.times || [],
       mode: 'lines+markers',
-      name: bootstrap.is_historical ? `${bootstrap.session_date} Path` : (bootstrap.session_date ? `Session ${bootstrap.session_date} Path` : "Intraday Path"),
-      line: { color: '#00E5FF', width: 1.8, shape: 'spline' },
-      marker: { color: '#00E5FF', size: 4, opacity: 0.8 },
+      name: bootstrap.is_historical ? `${bootstrap.session_date} Path` : (trailSessionDate ? `Session ${trailSessionDate} Path${gthMode ? ' (GTH+RTH)' : ''}` : "Intraday Path"),
+      line: { color: isGthLiveActive ? '#818CF8' : '#00E5FF', width: 1.8, shape: 'spline' },
+      marker: { color: isGthLiveActive ? '#818CF8' : '#00E5FF', size: 4, opacity: 0.8 },
       hovertemplate: `<b>%{text}</b><br>${assetLabel}: %{x:.2f}%<br>${volLabel}: %{y:.2f} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`,
       visible: currentTrailMode === '60d' ? false : true
     },
@@ -983,21 +1175,48 @@ function renderOvervixChart(bootstrap) {
       x: [currX],
       y: [currY],
       mode: 'markers',
-      name: (bootstrap.is_historical || bootstrap.is_rth_active === false) ? "Session Close Point" : "Live Point",
+      name: beaconName,
       marker: {
-        color: isOvervixed ? '#FF1744' : '#00E5FF',
+        color: isOvervixed ? '#FF1744' : (isGthLiveActive ? '#818CF8' : '#00E5FF'),
         size: 14,
         line: { color: '#FFFFFF', width: 2 }
       },
-      hovertemplate: (bootstrap.is_historical || bootstrap.is_rth_active === false)
-        ? `<b>Session Close (${bootstrap.session_date || 'Prior'})</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Official Close</span><extra></extra>`
-        : `<b>Live Current Point</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`
+      hovertemplate: beaconHover
     }
   ];
 
-  const sessionPeriodLabel = (bootstrap.is_historical && bootstrap.session_date) 
-    ? bootstrap.session_date 
-    : (bootstrap.is_rth_active === false && bootstrap.session_date ? bootstrap.session_date : 'Today');
+  const ovShapes = [];
+  const ovAnnotations = [];
+  if (isOvernightEs && gthObj && gthObj.current_point && typeof gthObj.current_point.x === 'number') {
+    const esX = gthObj.current_point.x;
+    ovShapes.push({
+      type: 'line',
+      xref: 'x',
+      yref: 'paper',
+      x0: esX,
+      x1: esX,
+      y0: 0,
+      y1: 1,
+      line: { color: 'rgba(245, 158, 11, 0.55)', width: 1.5, dash: 'dot' }
+    });
+    ovAnnotations.push({
+      xref: 'x',
+      yref: 'paper',
+      x: esX,
+      y: 0.98,
+      text: `Overnight ES: ${esX >= 0 ? '+' : ''}${esX.toFixed(2)}% (VIX @ ${gthObj.vix_opens_at || '03:15 ET'})`,
+      showarrow: false,
+      font: { color: '#FBBF24', size: 10, family: 'monospace' },
+      bgcolor: 'rgba(15, 23, 42, 0.9)',
+      bordercolor: 'rgba(245, 158, 11, 0.5)',
+      borderwidth: 1,
+      borderpad: 3
+    });
+  }
+
+  const sessionPeriodLabel = (bootstrap.is_historical && bootstrap.session_date)
+    ? bootstrap.session_date
+    : (isGthLiveActive ? `GTH ${trailSessionDate || 'Today'}` : (!showLiveBeacon && trailSessionDate ? trailSessionDate : 'Today'));
 
   const layout = {
     paper_bgcolor: 'transparent',
@@ -1007,7 +1226,7 @@ function renderOvervixChart(bootstrap) {
     hoverdistance: 35,
     margin: { l: 50, r: 20, t: 25, b: 45 },
     xaxis: {
-      title: { text: `${assetLabel} % Change (${sessionPeriodLabel})`, font: { color: '#94A3B8', size: 11 } },
+      title: { text: `${assetLabel}${gthMode ? ' (ES Adj)' : ''} % Change (${sessionPeriodLabel})`, font: { color: '#94A3B8', size: 11 } },
       gridcolor: '#1e293b',
       zerolinecolor: '#334155',
       zerolinewidth: 1,
@@ -1026,6 +1245,8 @@ function renderOvervixChart(bootstrap) {
       y: 1.15,
       font: { color: '#94A3B8', size: 10 }
     },
+    shapes: ovShapes,
+    annotations: ovAnnotations,
     showlegend: true
   };
 
@@ -1064,7 +1285,7 @@ function attachOvervixChartClickListener() {
     if (curveNum === 4 && pt.text) {
       let targetTime = pt.text;
       const isNdx = (currentAssetPair === 'NDX');
-      const c = isNdx ? (cachedCorrNdx[currentCorrTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[currentCorrTf] || cachedCorr['1D'] || cachedCorr);
+      const c = getCorrDataset(isNdx, currentCorrTf);
       const times = (c && c.times) ? c.times : [];
       const sessDate = (cachedBootstrap && cachedBootstrap.session_date) 
         ? cachedBootstrap.session_date 
@@ -1093,7 +1314,7 @@ function handleHistoricalDotClick(dateStr) {
 
   // 2. Multi-day horizon (5D, 1M, 3M, 6M, 1Y):
   const isNdx = (currentAssetPair === 'NDX');
-  const c = isNdx ? (cachedCorrNdx[currentCorrTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[currentCorrTf] || cachedCorr['1D'] || cachedCorr);
+  const c = getCorrDataset(isNdx, currentCorrTf);
   const times = (c && c.times) ? c.times : [];
 
   // If dateStr is the immediately preceding session in the multi-day timeline, route to official prior close (-2.11 pts)
@@ -1527,6 +1748,12 @@ function findClosestTimeIndex(times, target) {
 }
 
 function getOfficialPriorClose(isNdx) {
+  if (!isNdx && isGthChartActive(currentCorrTf) && cachedBootstrap && cachedBootstrap.overvix && cachedBootstrap.overvix.gth_model) {
+    const gm = cachedBootstrap.overvix.gth_model;
+    if (gm.ref_spx && gm.ref_vix) {
+      return { spot: gm.ref_spx, vol: gm.ref_vix };
+    }
+  }
   if (cachedBootstrap && cachedBootstrap.reference_closes) {
     const rc = cachedBootstrap.reference_closes;
     return isNdx
@@ -1567,7 +1794,7 @@ function resetCorrAnchor(triggerRender = true) {
 
 function setCorrAnchor(mode, targetTime = null) {
   const isNdx = (currentAssetPair === 'NDX');
-  const c = isNdx ? (cachedCorrNdx[currentCorrTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[currentCorrTf] || cachedCorr['1D'] || cachedCorr);
+  const c = getCorrDataset(isNdx, currentCorrTf);
   const times = c.times || [];
   if (!times || times.length === 0) return;
 
@@ -1751,7 +1978,7 @@ function computeAnchoredCorrelation(spotRaw, volRaw, anchorIdx) {
 function syncCorrAnchorForTimeframe(tf) {
   if (!corrAnchor.active) return;
   const isNdx = (currentAssetPair === 'NDX');
-  const c = isNdx ? (cachedCorrNdx[tf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[tf] || cachedCorr['1D'] || cachedCorr);
+  const c = getCorrDataset(isNdx, tf);
   const times = c.times || [];
   if (!times || times.length === 0) return;
 
@@ -2235,7 +2462,8 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     targetTf = modeOrTf;
   }
   const isNdx = (currentAssetPair === 'NDX');
-  const c = isNdx ? (cachedCorrNdx[targetTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[targetTf] || cachedCorr['1D'] || cachedCorr);
+  const gthChartOn = (!isNdx && isGthChartActive(targetTf));
+  const c = getCorrDataset(isNdx, targetTf);
   const times = c.times || [];
   const rollingCorr = c.rolling_corr || [];
 
@@ -2287,9 +2515,19 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   const dEnd = times.length > 0 ? times[times.length - 1] : '';
 
   const conf = TF_CONFIG[targetTf] || TF_CONFIG['1D'];
-  const xTitle = conf.xTitle;
+  const xTitle = gthChartOn
+    ? `${conf.xTitle} — Extended GTH (ES Basis-Adj 03:15–09:15 & 16:00–16:15 ET)`
+    : conf.xTitle;
   const tickformat = conf.tickformat;
-  const rangebreaks = conf.rangebreaks || [];
+  let rangebreaks = conf.rangebreaks || [];
+  if (gthChartOn) {
+    rangebreaks = (targetTf === '5D')
+      ? [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 3.25] }, { pattern: 'hour', bounds: [9.25, 9.5] }]
+      : [{ pattern: 'hour', bounds: [16.25, 3.25] }, { pattern: 'hour', bounds: [9.25, 9.5] }];
+  }
+  if (corrTfPill) {
+    corrTfPill.textContent = gthChartOn ? `${conf.pillText} • ES+VIX` : conf.pillText;
+  }
   const timeHoverFmt = conf.timeHoverFmt;
   let assetHoverLabel = isAnchored ? `${assetLabel} from Anchor` : `${assetLabel} Move (${conf.label})`;
   let volHoverLabel = isAnchored ? `${volLabel} from Anchor` : `${volLabel} Move (${conf.label})`;
@@ -2298,9 +2536,93 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   const volColor = '#F59E0B';
   const residColor = isNdx ? '#C084FC' : '#00E5FF';
 
-  // Common anchor shapes & annotations
-  const anchorShapes = isAnchored && anchoredSeries.anchorTime ? [
-    {
+  // Common anchor shapes & annotations (+ GTH shaded spans & 09:30 RTH dividers)
+  const anchorShapes = [];
+  const anchorAnnotations = [];
+
+  if (gthChartOn && times.length > 0) {
+    const byDate = {};
+    for (let i = 0; i < times.length; i++) {
+      const t = times[i];
+      const d = t.slice(0, 10);
+      const hhmm = t.slice(11, 16);
+      if (!byDate[d]) {
+        byDate[d] = { firstPre: null, lastPre: null, firstRth: null, firstCurb: null, lastCurb: null };
+      }
+      const entry = byDate[d];
+      if (hhmm < '09:30') {
+        if (!entry.firstPre) entry.firstPre = t;
+        entry.lastPre = t;
+      } else if (hhmm < '16:00') {
+        if (!entry.firstRth) entry.firstRth = t;
+      } else {
+        if (!entry.firstCurb) entry.firstCurb = t;
+        entry.lastCurb = t;
+      }
+    }
+
+    const datesList = Object.keys(byDate).sort();
+    datesList.forEach(d => {
+      const e = byDate[d];
+      if (e.firstPre) {
+        const preEnd = e.firstRth || e.lastPre;
+        anchorShapes.push({
+          type: 'rect',
+          xref: 'x',
+          yref: 'paper',
+          x0: e.firstPre,
+          x1: preEnd,
+          y0: 0,
+          y1: 1,
+          fillcolor: 'rgba(99, 102, 241, 0.08)',
+          line: { width: 0 },
+          layer: 'below'
+        });
+        if (e.firstRth) {
+          anchorShapes.push({
+            type: 'line',
+            xref: 'x',
+            yref: 'paper',
+            x0: e.firstRth,
+            x1: e.firstRth,
+            y0: 0,
+            y1: 1,
+            line: { color: 'rgba(148, 163, 184, 0.42)', width: 1, dash: 'dot' }
+          });
+          if (targetTf === '1D') {
+            anchorAnnotations.push({
+              xref: 'x',
+              yref: 'paper',
+              x: e.firstRth,
+              y: 1.01,
+              text: 'RTH Open (Cash)',
+              showarrow: false,
+              xanchor: 'left',
+              font: { color: '#94A3B8', size: 9, family: 'monospace' },
+              bgcolor: 'rgba(15, 23, 42, 0.8)'
+            });
+          }
+        }
+      }
+      if (e.firstCurb && e.lastCurb) {
+        anchorShapes.push({
+          type: 'rect',
+          xref: 'x',
+          yref: 'paper',
+          x0: e.firstCurb,
+          x1: e.lastCurb,
+          y0: 0,
+          y1: 1,
+          fillcolor: 'rgba(99, 102, 241, 0.08)',
+          line: { width: 0 },
+          layer: 'below'
+        });
+      }
+    });
+  }
+
+  if (isAnchored && anchoredSeries.anchorTime) {
+    anchorShapes.push({
       type: 'line',
       xref: 'x',
       yref: 'paper',
@@ -2313,8 +2635,8 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         width: 2,
         dash: 'dashdot'
       }
-    }
-  ] : [];
+    });
+  }
 
   const anchorTimeFormatted = anchoredSeries.anchorTime 
     ? (targetTf === '1D' 
@@ -2322,8 +2644,8 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         : (anchoredSeries.anchorTime.length > 10 ? anchoredSeries.anchorTime.slice(5) : anchoredSeries.anchorTime))
     : '';
 
-  const anchorAnnotations = isAnchored && anchoredSeries.anchorTime ? [
-    {
+  if (isAnchored && anchoredSeries.anchorTime) {
+    anchorAnnotations.push({
       xref: 'x',
       yref: 'paper',
       x: anchoredSeries.anchorTime,
@@ -2335,8 +2657,8 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       bordercolor: '#00E5FF',
       borderwidth: 1,
       borderpad: 3
-    }
-  ] : [];
+    });
+  }
 
   // 60-Day Macro Baseline Spot-Vol Slope & Intercept from Overvix model
   const { beta, rawSlope, rawIntercept } = getActiveBetaAndIntercept(isNdx);
@@ -2355,21 +2677,22 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       : '-';
     const s = assetPct[i];
     const sStr = (typeof s === 'number' && !isNaN(s)) ? (s >= 0 ? `+${s.toFixed(2)}` : s.toFixed(2)) : '-';
-    return [raw, sStr];
+    const gthTag = (gthChartOn && c.is_gth && c.is_gth[i] === 1) ? ' [ES-Adj]' : '';
+    return [raw, sStr, gthTag];
   });
 
   const traceAsset = {
     x: times,
     y: assetPct,
     customdata: assetCustomdata,
-    name: isAnchored ? `${assetLabel} % (Anchored)` : `${assetLabel} % Move`,
+    name: isAnchored ? `${assetLabel} % (Anchored)` : `${assetLabel} % Move${gthChartOn ? ' (ES-Adj+RTH)' : ''}`,
     mode: 'lines',
     line: { color: assetColor, width: 1.8 },
     xaxis: 'x',
     yaxis: 'y',
     hovertemplate: isAnchored 
-      ? `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{customdata[1]}%<br>Price: %{customdata[0]}<extra></extra>`
-      : `<b>%{x|${timeHoverFmt}}</b><br>${assetHoverLabel}: %{customdata[1]}%<extra></extra>`
+      ? `<b>%{x|${timeHoverFmt}}%{customdata[2]}</b><br>${assetHoverLabel}: %{customdata[1]}%<br>Price: %{customdata[0]}<extra></extra>`
+      : `<b>%{x|${timeHoverFmt}}%{customdata[2]}</b><br>${assetHoverLabel}: %{customdata[1]}%<extra></extra>`
   };
 
   // Shaded Divergence Ribbon: dual-color fill area between Spot % and Vol (in % units) when Beta Scaled and Invert Vol are active
@@ -2765,7 +3088,7 @@ function attachCorrelationChartClickListener() {
 
         // Secondary fallback: proportional index across session times
         const isNdx = (currentAssetPair === 'NDX');
-        const c = isNdx ? (cachedCorrNdx[currentCorrTf] || cachedCorrNdx['1D'] || cachedCorrNdx) : (cachedCorr[currentCorrTf] || cachedCorr['1D'] || cachedCorr);
+        const c = getCorrDataset(isNdx, currentCorrTf);
         const times = (c && c.times) ? c.times : [];
         if (times.length > 0) {
           lastAnchorClickTimestamp = Date.now();
@@ -2787,27 +3110,38 @@ function updateUI(data) {
   if (!data.is_historical) {
     lastLiveUpdatePayload = data;
 
-    // Detect session rollover, RTH open transition, or periodic historical bar update
+    // Detect session rollover, RTH open transition, GTH session transition, or periodic historical bar update
     if (currentViewMode === 'live') {
       const incomingDate = data.session_date;
       const incomingRth = data.is_rth_active;
       const incomingHistVer = data.hist_version;
+      const incomingGthDate = data.gth ? data.gth.session_date : null;
+      const incomingGthStatus = data.session_status;
 
       const sessionRolled = cachedActiveSessionDate && incomingDate && (incomingDate !== cachedActiveSessionDate);
       const rthOpened = (cachedIsRthActive === false && incomingRth === true);
+      const gthRolled = Boolean(incomingGthDate && cachedGthSessionDate && incomingGthDate !== cachedGthSessionDate);
+      const gthOpened = Boolean(cachedGthStatus && cachedGthStatus !== 'GTH_ACTIVE' && incomingGthStatus === 'GTH_ACTIVE');
       const histUpdated = (cachedHistVersion !== undefined && incomingHistVer !== undefined && incomingHistVer > cachedHistVersion);
 
-      if (sessionRolled || rthOpened || histUpdated) {
-        console.log(`[Auto-Sync] Triggering dashboard refresh: sessionRolled=${sessionRolled}, rthOpened=${rthOpened}, histUpdated=${histUpdated}`);
+      if (sessionRolled || rthOpened || gthRolled || gthOpened || histUpdated) {
+        console.log(`[Auto-Sync] Triggering dashboard refresh: sessionRolled=${sessionRolled}, rthOpened=${rthOpened}, gthRolled=${gthRolled}, gthOpened=${gthOpened}, histUpdated=${histUpdated}`);
         cachedActiveSessionDate = incomingDate;
         cachedIsRthActive = incomingRth;
+        if (incomingGthDate) cachedGthSessionDate = incomingGthDate;
+        if (incomingGthStatus) cachedGthStatus = incomingGthStatus;
         if (incomingHistVer !== undefined) cachedHistVersion = incomingHistVer;
         bootstrapData();
         return;
       }
       if (incomingDate) cachedActiveSessionDate = incomingDate;
       if (incomingRth !== undefined) cachedIsRthActive = incomingRth;
+      if (incomingGthDate) cachedGthSessionDate = incomingGthDate;
+      if (incomingGthStatus) cachedGthStatus = incomingGthStatus;
       if (incomingHistVer !== undefined) cachedHistVersion = incomingHistVer;
+
+      applyAutoGthDefault(data);
+      updateGthToggleUI(data);
     }
 
     // When viewing a historical session archive, maintain connection pill status but preserve historical data on charts
@@ -2909,7 +3243,35 @@ function updateUI(data) {
 
   } else {
     // SPX Mode Confluence & Audio
-    if (conf.is_dual_alert) {
+    const gth = data.gth;
+    const useGthBanner = (!data.is_historical && isGthEnabled && gth && (data.session_status === 'GTH_ACTIVE' || data.session_status === 'OVERNIGHT_ES_ONLY'));
+
+    if (useGthBanner && data.session_status === 'GTH_ACTIVE') {
+      const gOv = gth.overvix || {};
+      const gConf = gth.confluence || {};
+      if (gOv.is_overvixed) {
+        confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-amber-950/80 border border-amber-600 beacon-alert transition duration-300";
+        confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-500 text-black";
+        confBadge.textContent = "⚠️ GTH OVERVIX TRIGGER";
+        confDesc.textContent = gConf.description || `GTH Spot-Vol Shock: VIX is ${fmtPts(gOv.residual_pts)} pts above expected trendline.`;
+        if (!lastOvervixSignal) playAlertSound('overvix');
+      } else {
+        confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-indigo-950/40 border border-indigo-700/70 transition duration-300";
+        confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-indigo-600 text-white";
+        confBadge.textContent = "🌐 GTH LIVE (ES+VIX)";
+        confDesc.textContent = gConf.description || "Extended-hours Spot-Vol monitoring live via basis-adjusted ES futures & Spot VIX.";
+      }
+      lastOvervixSignal = Boolean(gOv.is_overvixed);
+      lastInversionSignal = false;
+    } else if (useGthBanner && data.session_status === 'OVERNIGHT_ES_ONLY') {
+      const gConf = gth.confluence || {};
+      confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-slate-900 border border-amber-800/60 transition duration-300";
+      confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-950 text-amber-300 border border-amber-700/70";
+      confBadge.textContent = `🌙 OVERNIGHT ES LIVE | VIX @ ${gth.vix_opens_at || '03:15 ET'}`;
+      confDesc.textContent = gConf.description || `Synthetic SPX live via ${gth.es_symbol || 'ES'}. Overvix residual calculations paused while Spot VIX is closed.`;
+      lastOvervixSignal = false;
+      lastInversionSignal = false;
+    } else if (conf.is_dual_alert) {
       confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-red-950/90 border border-red-700 beacon-alert transition duration-300";
       confBadge.className = "px-2.5 py-1 rounded text-xs font-black uppercase tracking-wider bg-red-600 text-white animate-pulse";
       confBadge.textContent = "🚨 CAPITULATION ALERT";
@@ -2936,13 +3298,15 @@ function updateUI(data) {
       confDesc.textContent = `Volatility term structure in contango (${fmtNum(ts.ratio, 4)}). Normal spot-vol pricing (${fmtPts(ov.residual_pts)} pts).`;
     }
 
-    if (conf.is_dual_alert && (!lastOvervixSignal || !lastInversionSignal)) {
-      playAlertSound('dual');
-    } else if (ov.is_overvixed && !lastOvervixSignal) {
-      playAlertSound('overvix');
+    if (!useGthBanner) {
+      if (conf.is_dual_alert && (!lastOvervixSignal || !lastInversionSignal)) {
+        playAlertSound('dual');
+      } else if (ov.is_overvixed && !lastOvervixSignal) {
+        playAlertSound('overvix');
+      }
+      lastOvervixSignal = ov.is_overvixed;
+      lastInversionSignal = ts.is_inverted;
     }
-    lastOvervixSignal = ov.is_overvixed;
-    lastInversionSignal = ts.is_inverted;
   }
 
   // 4. KPI Cards
@@ -2959,15 +3323,21 @@ function updateUI(data) {
     const ndxMod = ndx.model || mod;
 
     document.getElementById('lbl-kpi-asset').textContent = "NASDAQ 100";
+    document.getElementById('tag-kpi-asset').textContent = "Index";
     document.getElementById('kpi-spx-price').textContent = fmtNum(ndxMkt.current);
     spxPctEl.textContent = fmtPct(ndxMkt.pct_change);
     spxPctEl.className = `text-xs font-mono font-medium mt-0.5 ${ndxMkt.pct_change >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
+    const spxSubElNdx = document.getElementById('kpi-spx-sub');
+    if (spxSubElNdx) spxSubElNdx.classList.add('hidden');
 
     document.getElementById('lbl-kpi-vol').textContent = "VXN (30-Day)";
+    document.getElementById('tag-kpi-vol').textContent = "Spot";
     document.getElementById('kpi-vix-price').textContent = fmtNum(ndxMkt.vxn ? ndxMkt.vxn.current : 0);
     const vxnPt = ndxMkt.vxn ? ndxMkt.vxn.pt_change : 0;
     vixPtEl.textContent = `${fmtPts(vxnPt)} pts`;
     vixPtEl.className = `text-xs font-mono font-medium mt-0.5 ${vxnPt >= 0 ? 'text-red-400' : 'text-emerald-400'}`;
+    const vixSubElNdx = document.getElementById('kpi-vix-sub');
+    if (vixSubElNdx) vixSubElNdx.classList.add('hidden');
 
     document.getElementById('lbl-kpi-sec-vol').textContent = "Tech Spread (VXN-VIX)";
     document.getElementById('tag-kpi-sec-vol').textContent = "Spread";
@@ -3024,18 +3394,69 @@ function updateUI(data) {
 
   } else {
     // SPX Mode
-    document.getElementById('lbl-kpi-asset').textContent = "SPX 500";
-    document.getElementById('kpi-spx-price').textContent = fmtNum(mkt.spx.current);
-    spxPctEl.textContent = fmtPct(mkt.spx.pct_change);
-    spxPctEl.className = `text-xs font-mono font-medium mt-0.5 ${mkt.spx.pct_change >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
+    const gth = data.gth;
+    const useGthKpi = (!data.is_historical && isGthEnabled && gth && (data.session_status === 'GTH_ACTIVE' || data.session_status === 'OVERNIGHT_ES_ONLY'));
+    const spxSubEl = document.getElementById('kpi-spx-sub');
+    const vixSubEl = document.getElementById('kpi-vix-sub');
+    const tagAssetEl = document.getElementById('tag-kpi-asset');
+    const tagVolEl = document.getElementById('tag-kpi-vol');
+    const tagSecVolEl = document.getElementById('tag-kpi-sec-vol');
 
-    document.getElementById('lbl-kpi-vol').textContent = "VIX (30-Day)";
-    document.getElementById('kpi-vix-price').textContent = fmtNum(mkt.vix.current);
-    vixPtEl.textContent = `${fmtPts(mkt.vix.pt_change)} pts`;
-    vixPtEl.className = `text-xs font-mono font-medium mt-0.5 ${mkt.vix.pt_change >= 0 ? 'text-red-400' : 'text-emerald-400'}`;
+    if (useGthKpi) {
+      document.getElementById('lbl-kpi-asset').textContent = "SPX (ES Adj)";
+      if (tagAssetEl) tagAssetEl.textContent = `${gth.es_symbol || 'ES'} Synth`;
+      document.getElementById('kpi-spx-price').textContent = fmtNum(gth.synthetic_spx);
+      spxPctEl.textContent = fmtPct(gth.spx_pct_change);
+      spxPctEl.className = `text-xs font-mono font-medium mt-0.5 ${gth.spx_pct_change >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
+      if (spxSubEl && gth.es_price !== null && gth.basis !== null) {
+        const bSign = gth.basis >= 0 ? '+' : '';
+        spxSubEl.textContent = `${gth.es_symbol || 'ES'}: ${fmtNum(gth.es_price)} | Basis: ${bSign}${fmtNum(gth.basis)}`;
+        spxSubEl.classList.remove('hidden');
+      }
 
-    document.getElementById('lbl-kpi-sec-vol').textContent = "VIX3M (90-Day)";
-    document.getElementById('tag-kpi-sec-vol').textContent = "3M";
+      document.getElementById('lbl-kpi-vol').textContent = "VIX (30-Day)";
+      document.getElementById('kpi-vix-price').textContent = fmtNum(gth.vix);
+      if (data.session_status === 'GTH_ACTIVE') {
+        if (tagVolEl) tagVolEl.textContent = "GTH Live";
+        vixPtEl.textContent = `${fmtPts(gth.vix_pt_change)} pts`;
+        vixPtEl.className = `text-xs font-mono font-medium mt-0.5 ${gth.vix_pt_change >= 0 ? 'text-red-400' : 'text-emerald-400'}`;
+        if (vixSubEl) {
+          vixSubEl.textContent = "CBOE Extended Hours";
+          vixSubEl.className = "text-[10px] font-mono text-indigo-300/80 mt-0.5";
+          vixSubEl.classList.remove('hidden');
+        }
+      } else {
+        if (tagVolEl) tagVolEl.textContent = "Closed";
+        vixPtEl.textContent = "0.00 pts (Close)";
+        vixPtEl.className = "text-xs font-mono font-medium mt-0.5 text-slate-400";
+        if (vixSubEl) {
+          vixSubEl.textContent = `CLOSED (Opens ${gth.vix_opens_at || '03:15 ET'})`;
+          vixSubEl.className = "text-[10px] font-mono text-amber-300/90 mt-0.5";
+          vixSubEl.classList.remove('hidden');
+        }
+      }
+
+      document.getElementById('lbl-kpi-sec-vol').textContent = "VIX3M (90-Day)";
+      if (tagSecVolEl) tagSecVolEl.textContent = "3M (RTH Close)";
+    } else {
+      document.getElementById('lbl-kpi-asset').textContent = "SPX 500";
+      if (tagAssetEl) tagAssetEl.textContent = "Index";
+      document.getElementById('kpi-spx-price').textContent = fmtNum(mkt.spx.current);
+      spxPctEl.textContent = fmtPct(mkt.spx.pct_change);
+      spxPctEl.className = `text-xs font-mono font-medium mt-0.5 ${mkt.spx.pct_change >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
+      if (spxSubEl) spxSubEl.classList.add('hidden');
+
+      document.getElementById('lbl-kpi-vol').textContent = "VIX (30-Day)";
+      if (tagVolEl) tagVolEl.textContent = "Spot";
+      document.getElementById('kpi-vix-price').textContent = fmtNum(mkt.vix.current);
+      vixPtEl.textContent = `${fmtPts(mkt.vix.pt_change)} pts`;
+      vixPtEl.className = `text-xs font-mono font-medium mt-0.5 ${mkt.vix.pt_change >= 0 ? 'text-red-400' : 'text-emerald-400'}`;
+      if (vixSubEl) vixSubEl.classList.add('hidden');
+
+      document.getElementById('lbl-kpi-sec-vol').textContent = "VIX3M (90-Day)";
+      if (tagSecVolEl) tagSecVolEl.textContent = "3M";
+    }
+
     document.getElementById('kpi-vix3m-price').textContent = fmtNum(mkt.vix3m.current);
     const vix3mPtEl = document.getElementById('kpi-vix3m-pt');
     vix3mPtEl.textContent = `${fmtPts(mkt.vix3m.pt_change)} pts`;
@@ -3055,34 +3476,49 @@ function updateUI(data) {
       ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 uppercase font-semibold border border-emerald-800';
     }
 
-    document.getElementById('lbl-kpi-expected').textContent = "Expected ΔVIX";
-    document.getElementById('kpi-expected-vix').textContent = `${fmtPts(ov.expected_vix_pt)} pts`;
-    document.getElementById('lbl-kpi-exp-sub').textContent = "Spot-Vol Model";
+    const activeMod = (useGthKpi && gth.model) ? gth.model : mod;
+    if (useGthKpi && data.session_status === 'OVERNIGHT_ES_ONLY') {
+      document.getElementById('lbl-kpi-expected').textContent = "Expected ΔVIX";
+      document.getElementById('kpi-expected-vix').textContent = "--.-- pts";
+      document.getElementById('lbl-kpi-exp-sub').textContent = `VIX @ ${gth.vix_opens_at || '03:15 ET'}`;
 
-    document.getElementById('lbl-kpi-residual').textContent = "Overvix Residual";
-    residualEl.textContent = `${fmtPts(ov.residual_pts)} pts`;
-    if (ov.is_overvixed) {
-      residualEl.className = 'text-xl font-bold font-mono tracking-tight text-red-500 animate-pulse';
-      overvixStatusBadge.textContent = '🚨 OVERVIXED';
-      overvixStatusBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-950 text-red-300 border border-red-700 font-bold uppercase';
-      cardOvervix.className = 'bg-red-950/30 border border-red-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
-    } else {
-      residualEl.className = 'text-xl font-bold font-mono tracking-tight text-cyan-400';
-      overvixStatusBadge.textContent = 'NORMAL';
-      overvixStatusBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase';
+      document.getElementById('lbl-kpi-residual').textContent = "Overvix Residual";
+      residualEl.textContent = "PAUSED";
+      residualEl.className = 'text-xl font-bold font-mono tracking-tight text-amber-300';
+      overvixStatusBadge.textContent = 'VIX CLOSED';
+      overvixStatusBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-semibold uppercase';
       cardOvervix.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
+    } else {
+      const activeOv = (useGthKpi && gth.overvix && gth.overvix.residual_pts !== null) ? gth.overvix : ov;
+      document.getElementById('lbl-kpi-expected').textContent = "Expected ΔVIX";
+      document.getElementById('kpi-expected-vix').textContent = `${fmtPts(activeOv.expected_vix_pt)} pts`;
+      document.getElementById('lbl-kpi-exp-sub').textContent = useGthKpi ? "GTH Spot-Vol Model" : "Spot-Vol Model";
+
+      document.getElementById('lbl-kpi-residual').textContent = "Overvix Residual";
+      residualEl.textContent = `${fmtPts(activeOv.residual_pts)} pts`;
+      if (activeOv.is_overvixed) {
+        residualEl.className = 'text-xl font-bold font-mono tracking-tight text-red-500 animate-pulse';
+        overvixStatusBadge.textContent = '🚨 OVERVIXED';
+        overvixStatusBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-950 text-red-300 border border-red-700 font-bold uppercase';
+        cardOvervix.className = 'bg-red-950/30 border border-red-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
+      } else {
+        residualEl.className = useGthKpi ? 'text-xl font-bold font-mono tracking-tight text-indigo-300' : 'text-xl font-bold font-mono tracking-tight text-cyan-400';
+        overvixStatusBadge.textContent = useGthKpi ? 'GTH NORMAL' : 'NORMAL';
+        overvixStatusBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase';
+        cardOvervix.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
+      }
     }
 
-    const spxThresh = (mod && mod.threshold_pts) || currentSpxThreshold;
+    const spxThresh = (activeMod && activeMod.threshold_pts) || currentSpxThreshold;
     const dispThreshSpxEl = document.getElementById('disp-thresh-pts');
     if (dispThreshSpxEl) dispThreshSpxEl.textContent = spxThresh.toFixed(1);
 
     // Model Parameters Strip (SPX)
-    document.getElementById('param-window').textContent = mod.window_days;
-    document.getElementById('param-r2').textContent = fmtNum(mod.r_squared, 4);
-    document.getElementById('param-slope').textContent = fmtNum(mod.slope, 4);
-    document.getElementById('param-volslope').textContent = fmtNum(mod.vol_slope, 4);
-    document.getElementById('param-intercept').textContent = fmtNum(mod.intercept, 4);
+    document.getElementById('param-window').textContent = activeMod.window_days;
+    document.getElementById('param-r2').textContent = fmtNum(activeMod.r_squared, 4);
+    document.getElementById('param-slope').textContent = fmtNum(activeMod.slope, 4);
+    document.getElementById('param-volslope').textContent = fmtNum(activeMod.vol_slope, 4);
+    document.getElementById('param-intercept').textContent = fmtNum(activeMod.intercept, 4);
   }
 
   // Intraday Session Stats for middle chart (Term Structure or Tech Vol)
@@ -3128,18 +3564,28 @@ function updateUI(data) {
     if (corr.corr_5d !== undefined) cachedCorr.metrics['5D'] = corr.corr_5d;
     if (corr.corr_1y !== undefined) cachedCorr.metrics['1Y'] = corr.corr_1y;
   }
+  if (data.gth && cachedCorrGth.metrics) {
+    if (data.gth.rolling_corr !== undefined) cachedCorrGth.metrics['1D'] = data.gth.rolling_corr;
+    if (data.gth.corr_5d !== undefined) cachedCorrGth.metrics['5D'] = data.gth.corr_5d;
+  }
   if (ndx && ndx.correlation && cachedCorrNdx.metrics) {
     cachedCorrNdx.metrics['1D'] = ndx.correlation.rolling_corr;
     if (ndx.correlation.corr_5d !== undefined) cachedCorrNdx.metrics['5D'] = ndx.correlation.corr_5d;
     if (ndx.correlation.corr_1y !== undefined) cachedCorrNdx.metrics['1Y'] = ndx.correlation.corr_1y;
   }
+
   // Update Overvix Residual Metric & Status Pill
   updateCorrMetricDisplay();
 
   // Time & Tags
   const now = new Date();
+  const isGthUi = (!isNdx && isGthEnabled && data.gth && (data.session_status === 'GTH_ACTIVE' || data.session_status === 'OVERNIGHT_ES_ONLY'));
   if (data.is_historical) {
     document.getElementById('last-update-time').textContent = `Session: ${data.session_date}`;
+  } else if (isGthUi && data.session_status === 'GTH_ACTIVE') {
+    document.getElementById('last-update-time').textContent = `GTH Live: ${data.timestamp ? data.timestamp + ' ET' : now.toLocaleTimeString()} (RTH 09:30 ET)`;
+  } else if (isGthUi && data.session_status === 'OVERNIGHT_ES_ONLY') {
+    document.getElementById('last-update-time').textContent = `ES Live: ${data.timestamp ? data.timestamp + ' ET' : now.toLocaleTimeString()} | VIX @ ${data.gth.vix_opens_at || '03:15 ET'}`;
   } else if (data.premarket && data.premarket.is_premarket) {
     const gthVix = (data.premarket.gth_vix !== undefined) ? ` | GTH VIX: ${data.premarket.gth_vix}` : '';
     document.getElementById('last-update-time').textContent = `Pre-Market (RTH 09:30 ET)${gthVix}`;
@@ -3155,6 +3601,12 @@ function updateUI(data) {
     if (data.is_rth_active) {
       headerModeBadge.textContent = "IBKR Live";
       headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-semibold";
+    } else if (!isNdx && isGthEnabled && data.session_status === 'GTH_ACTIVE') {
+      headerModeBadge.textContent = "GTH Live (ES+VIX)";
+      headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-950/90 text-indigo-300 border border-indigo-700/70 font-semibold";
+    } else if (!isNdx && isGthEnabled && data.session_status === 'OVERNIGHT_ES_ONLY') {
+      headerModeBadge.textContent = `Overnight ES (${data.gth ? (data.gth.es_symbol || 'ES') : 'ES'})`;
+      headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60 font-semibold";
     } else if (data.premarket && data.premarket.is_premarket) {
       headerModeBadge.textContent = `PRE-MARKET (${data.session_date || 'Prior'})`;
       headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60 font-semibold";
@@ -3173,20 +3625,26 @@ function updateUI(data) {
 
   // Real-Time Plotly Chart Updates
   // 5. Update Overvix / Over-VXN Plotly Chart Real-Time
-  const activePt = (isNdx && ndx && ndx.current_point) ? ndx.current_point : data.current_point;
-  const isTargetOvervixed = (isNdx && ndx && ndx.overvix) ? ndx.overvix.is_overvixed : ov.is_overvixed;
-  if (activePt) {
-    const isLiveRth = (data.is_rth_active === true);
-    const pointLabel = isLiveRth ? "Live Point" : "Session Close Point";
+  const isSpxGthLive = (!isNdx && isGthEnabled && data.session_status === 'GTH_ACTIVE' && data.gth && data.gth.current_point && data.gth.current_point.y !== null);
+  const activePt = (isNdx && ndx && ndx.current_point)
+    ? ndx.current_point
+    : (isSpxGthLive ? data.gth.current_point : data.current_point);
+  const isTargetOvervixed = (isNdx && ndx && ndx.overvix)
+    ? ndx.overvix.is_overvixed
+    : (isSpxGthLive && data.gth.overvix ? data.gth.overvix.is_overvixed : ov.is_overvixed);
+
+  if (activePt && activePt.y !== null) {
+    const isLivePoint = (data.is_rth_active === true) || isSpxGthLive;
+    const pointLabel = isSpxGthLive ? "Live GTH Point" : (isLivePoint ? "Live Point" : "Session Close Point");
     Plotly.restyle('overvix-chart', {
       x: [[activePt.x]],
       y: [[activePt.y]],
       name: [pointLabel],
-      'marker.color': [isTargetOvervixed ? '#FF1744' : '#00E5FF']
+      'marker.color': [isTargetOvervixed ? '#FF1744' : (isSpxGthLive ? '#818CF8' : '#00E5FF')]
     }, [5]);
 
-    // Dynamically append live point to intraday trail during RTH
-    if (isLiveRth && cachedTrail && data.datetime) {
+    // Dynamically append live point to intraday trail during RTH or GTH_ACTIVE
+    if (isLivePoint && cachedTrail && data.datetime) {
       if (!cachedTrail.x) cachedTrail.x = [];
       if (!cachedTrail.y) cachedTrail.y = [];
       if (!cachedTrail.times) cachedTrail.times = [];
@@ -3207,6 +3665,15 @@ function updateUI(data) {
         text: [cachedTrail.times]
       }, [4]);
     }
+  } else if (!isNdx && isGthEnabled && data.session_status === 'OVERNIGHT_ES_ONLY' && data.gth && data.gth.current_point && typeof data.gth.current_point.x === 'number') {
+    // Update the overnight ES reference vertical hairline in Chart 1 without plotting a bogus Y residual
+    const esX = data.gth.current_point.x;
+    Plotly.relayout('overvix-chart', {
+      'shapes[0].x0': esX,
+      'shapes[0].x1': esX,
+      'annotations[0].x': esX,
+      'annotations[0].text': `Overnight ES: ${esX >= 0 ? '+' : ''}${esX.toFixed(2)}% (VIX @ ${data.gth.vix_opens_at || '03:15 ET'})`
+    });
   }
 
   // 6. Update Intraday Term Structure / Tech Vol Real-Time (when 1D is active)
@@ -3309,12 +3776,58 @@ function updateUI(data) {
     }
   }
 
-  // 7. Update Intraday Correlation Real-Time (when 1D is active and market is open)
-  if (currentCorrTf === '1D' && data.datetime && data.is_rth_active) {
+  // 7. Update Intraday Correlation Real-Time (when 1D is active and market or GTH is live)
+  const isSpxGthLiveCorr = (!isNdx && data.session_status === 'GTH_ACTIVE' && data.gth && data.gth.is_gth_active && data.gth.vix_pt_change !== undefined);
+  if (currentCorrTf === '1D' && data.datetime && (data.is_rth_active || isSpxGthLiveCorr)) {
     const liveDt = data.datetime;
     const liveDate = liveDt.slice(0, 10);
 
-    if (isNdx && ndx) {
+    const appendCorrPoint = (crObj, pctVal, ptVal, corrVal, spotRawVal, volRawVal, gthFlag) => {
+      if (!crObj.times) crObj.times = [];
+      if (!crObj.spx_pct) crObj.spx_pct = [];
+      if (!crObj.vix_pt) crObj.vix_pt = [];
+      if (!crObj.rolling_corr) crObj.rolling_corr = [];
+      if (crObj.times.length > 0) {
+        const lastT = crObj.times[crObj.times.length - 1];
+        const lastDate = lastT.slice(0, 10);
+        if (liveDate === lastDate) {
+          if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
+            crObj.spx_pct[crObj.spx_pct.length - 1] = pctVal;
+            crObj.vix_pt[crObj.vix_pt.length - 1] = ptVal;
+            crObj.rolling_corr[crObj.rolling_corr.length - 1] = corrVal;
+            if (crObj.spot_raw) crObj.spot_raw[crObj.spot_raw.length - 1] = spotRawVal;
+            if (crObj.vol_raw) crObj.vol_raw[crObj.vol_raw.length - 1] = volRawVal;
+            if (crObj.is_gth && gthFlag !== undefined) crObj.is_gth[crObj.is_gth.length - 1] = gthFlag;
+          } else {
+            crObj.times.push(liveDt);
+            crObj.spx_pct.push(pctVal);
+            crObj.vix_pt.push(ptVal);
+            crObj.rolling_corr.push(corrVal);
+            if (crObj.spot_raw) crObj.spot_raw.push(spotRawVal);
+            if (crObj.vol_raw) crObj.vol_raw.push(volRawVal);
+            if (crObj.is_gth && gthFlag !== undefined) crObj.is_gth.push(gthFlag);
+          }
+        } else {
+          crObj.times = [liveDt];
+          crObj.spx_pct = [pctVal];
+          crObj.vix_pt = [ptVal];
+          crObj.rolling_corr = [corrVal];
+          if (crObj.spot_raw) crObj.spot_raw = [spotRawVal];
+          if (crObj.vol_raw) crObj.vol_raw = [volRawVal];
+          if (crObj.is_gth && gthFlag !== undefined) crObj.is_gth = [gthFlag];
+        }
+      } else {
+        crObj.times.push(liveDt);
+        crObj.spx_pct.push(pctVal);
+        crObj.vix_pt.push(ptVal);
+        crObj.rolling_corr.push(corrVal);
+        if (crObj.spot_raw) crObj.spot_raw.push(spotRawVal);
+        if (crObj.vol_raw) crObj.vol_raw.push(volRawVal);
+        if (crObj.is_gth && gthFlag !== undefined) crObj.is_gth.push(gthFlag);
+      }
+    };
+
+    if (isNdx && ndx && data.is_rth_active) {
       let cr = cachedCorrNdx['1D'];
       if (!cr || !cr.times) {
         cachedCorrNdx['1D'] = { times: [], ndx_pct: [], vxn_pt: [], rolling_corr: [] };
@@ -3342,7 +3855,6 @@ function updateUI(data) {
             cr.rolling_corr.push(corrVal);
           }
         } else {
-          // New date session: reset 1D to today
           cr.times = [liveDt];
           pctArr.length = 0; pctArr.push(ndxPct);
           ptArr.length = 0; ptArr.push(vxnPt);
@@ -3356,40 +3868,17 @@ function updateUI(data) {
       }
 
       renderCorrelationChart('dual', currentCorrTf);
-    } else {
-      let cr = cachedCorr['1D'];
-      if (!cr || !cr.times) {
-        cachedCorr['1D'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [] };
-        cr = cachedCorr['1D'];
+    } else if (!isNdx) {
+      if (data.is_rth_active) {
+        if (!cachedCorr['1D']) cachedCorr['1D'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], spot_raw: [], vol_raw: [] };
+        appendCorrPoint(cachedCorr['1D'], mkt.spx.pct_change, mkt.vix.pt_change, corr ? corr.rolling_corr : -0.75, mkt.spx.current, mkt.vix.current, undefined);
       }
-      if (cr.times.length > 0) {
-        const lastT = cr.times[cr.times.length - 1];
-        const lastDate = lastT.slice(0, 10);
-        if (liveDate === lastDate) {
-          if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
-            cr.spx_pct[cr.spx_pct.length - 1] = mkt.spx.pct_change;
-            cr.vix_pt[cr.vix_pt.length - 1] = mkt.vix.pt_change;
-            if (corr) cr.rolling_corr[cr.rolling_corr.length - 1] = corr.rolling_corr;
-          } else {
-            cr.times.push(liveDt);
-            cr.spx_pct.push(mkt.spx.pct_change);
-            cr.vix_pt.push(mkt.vix.pt_change);
-            if (corr) cr.rolling_corr.push(corr.rolling_corr);
-          }
-        } else {
-          // New date session: reset 1D to today
-          cr.times = [liveDt];
-          cr.spx_pct = [mkt.spx.pct_change];
-          cr.vix_pt = [mkt.vix.pt_change];
-          cr.rolling_corr = [corr ? corr.rolling_corr : -0.75];
-        }
-      } else {
-        cr.times.push(liveDt);
-        cr.spx_pct.push(mkt.spx.pct_change);
-        cr.vix_pt.push(mkt.vix.pt_change);
-        if (corr) cr.rolling_corr.push(corr.rolling_corr);
+      if (!cachedCorrGth['1D']) cachedCorrGth['1D'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], spot_raw: [], vol_raw: [], is_gth: [] };
+      if (isSpxGthLiveCorr) {
+        appendCorrPoint(cachedCorrGth['1D'], data.gth.spx_pct_change, data.gth.vix_pt_change, data.gth.rolling_corr || -0.75, data.gth.synthetic_spx, data.gth.vix, 1);
+      } else if (data.is_rth_active) {
+        appendCorrPoint(cachedCorrGth['1D'], mkt.spx.pct_change, mkt.vix.pt_change, (data.gth && data.gth.rolling_corr) ? data.gth.rolling_corr : (corr ? corr.rolling_corr : -0.75), mkt.spx.current, mkt.vix.current, 0);
       }
-
       renderCorrelationChart('dual', currentCorrTf);
     }
   }
@@ -3407,7 +3896,10 @@ async function bootstrapData() {
     cachedBootstrap = data;
     cachedActiveSessionDate = data.session_date;
     cachedIsRthActive = data.is_rth_active;
+    cachedGthSessionDate = data.gth ? data.gth.session_date : null;
+    cachedGthStatus = data.session_status;
     if (data.hist_version !== undefined) cachedHistVersion = data.hist_version;
+    applyAutoGthDefault(data);
 
     if (data.model && data.model.threshold_pts) {
       currentSpxThreshold = data.model.threshold_pts;
@@ -3461,10 +3953,19 @@ async function bootstrapData() {
     if (data.intraday_correlation && data.intraday_correlation.metrics) {
       cachedCorr.metrics = data.intraday_correlation.metrics;
     }
+    if (data.intraday_correlation) {
+      if (data.intraday_correlation['1D_GTH']) cachedCorrGth['1D'] = data.intraday_correlation['1D_GTH'];
+      if (data.intraday_correlation['5D_GTH']) cachedCorrGth['5D'] = data.intraday_correlation['5D_GTH'];
+      if (data.intraday_correlation.metrics_gth) cachedCorrGth.metrics = data.intraday_correlation.metrics_gth;
+    }
+    if (data.overvix && data.overvix.intraday_trail_gth) {
+      cachedTrailGth = data.overvix.intraday_trail_gth;
+    }
     if (data.ndx && data.ndx.correlation && data.ndx.correlation.metrics) {
       cachedCorrNdx.metrics = data.ndx.correlation.metrics;
     }
 
+    updateGthToggleUI(data);
     renderOvervixChart(data);
     renderTermStructureChart(currentTimeframe);
     renderCorrelationChart(currentCorrMode, currentCorrTf);
@@ -3656,6 +4157,7 @@ async function loadHistoricalSession(dateStr) {
     cachedLiveBootstrap = JSON.parse(JSON.stringify(cachedBootstrap));
     cachedLiveTs = JSON.parse(JSON.stringify(cachedTs));
     cachedLiveCorr = JSON.parse(JSON.stringify(cachedCorr));
+    cachedLiveCorrGth = JSON.parse(JSON.stringify(cachedCorrGth));
     cachedLiveTechVol = JSON.parse(JSON.stringify(cachedTechVol));
     cachedLiveCorrNdx = JSON.parse(JSON.stringify(cachedCorrNdx));
   }
@@ -3742,6 +4244,7 @@ async function loadHistoricalSession(dateStr) {
     renderTermStructureChart('1D');
     renderCorrelationChart(currentCorrMode, '1D');
     updateCorrMetricDisplay();
+    updateGthToggleUI(data);
     updateUI(data);
 
   } catch (e) {
@@ -3793,9 +4296,11 @@ function returnToLiveMode() {
     cachedBootstrap = cachedLiveBootstrap;
     cachedTs = cachedLiveTs;
     cachedCorr = cachedLiveCorr;
+    if (cachedLiveCorrGth) cachedCorrGth = cachedLiveCorrGth;
     if (cachedLiveTechVol) cachedTechVol = cachedLiveTechVol;
     if (cachedLiveCorrNdx) cachedCorrNdx = cachedLiveCorrNdx;
 
+    updateGthToggleUI(lastLiveUpdatePayload || cachedBootstrap);
     renderOvervixChart(cachedBootstrap);
     renderTermStructureChart(currentTimeframe);
     renderCorrelationChart(currentCorrMode, currentCorrTf);
@@ -3813,6 +4318,7 @@ window.addEventListener('DOMContentLoaded', () => {
   setupTrailButtons();
   setupCorrButtons();
   setupAssetSwitcher();
+  setupGthToggle();
   initHistoricalControls();
   bootstrapData();
 });

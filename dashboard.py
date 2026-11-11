@@ -52,13 +52,14 @@ except RuntimeError:
 
 # Import IBKR library (prefer ib_async, fallback to ib_insync)
 try:
-    from ib_async import IB, Index, util
+    from ib_async import IB, Index, Future, util
 except ImportError:
     try:
-        from ib_insync import IB, Index, util
+        from ib_insync import IB, Index, Future, util
     except ImportError:
         IB = None
         Index = None
+        Future = None
         util = None
 
 from session_history import (
@@ -83,6 +84,7 @@ DEFAULT_THRESHOLD_PTS = DEFAULT_SPX_THRESHOLD_PTS
 DEFAULT_UPDATE_INTERVAL = 1.0
 COMMON_IBKR_PORTS = [7496, 7497, 4001, 4002]
 CACHE_PATH = os.path.join(os.path.dirname(__file__), 'data', 'history_cache.pkl')
+ET_TZ = pytz.timezone('US/Eastern')
 
 
 # ==============================================================================
@@ -106,6 +108,7 @@ class DashboardState:
         self.vix3m_contract = None
         self.ndx_contract = None
         self.vxn_contract = None
+        self.es_contract = None
 
         # Tickers
         self.spx_ticker = None
@@ -113,6 +116,37 @@ class DashboardState:
         self.vix3m_ticker = None
         self.ndx_ticker = None
         self.vxn_ticker = None
+        self.es_ticker = None
+
+        # ES Futures & GTH State
+        self.latest_es_close: float = 0.0
+        self.es_spx_basis: Optional[float] = None
+        self.es_basis_source: str = ""
+        self.es_basis_date: Optional[str] = None
+        self.eod_spx_close: Optional[float] = None
+        self.eod_es_close: Optional[float] = None
+        self.eod_vix_close: Optional[float] = None
+        self.eod_es_spx_basis: Optional[float] = None
+        self.gth_session_date: Optional[str] = None
+        self.last_gth_bar_refresh_ts: float = 0.0
+        self.last_eod_basis_sync_date: Optional[str] = None
+        self.es_daily_df: pd.DataFrame = pd.DataFrame()
+        self.df_spx_vix_1d_gth: pd.DataFrame = pd.DataFrame()
+        self.df_spx_vix_5d_gth: pd.DataFrame = pd.DataFrame()
+        self.df_spotvol_gth: pd.DataFrame = pd.DataFrame()
+        self.gth_metrics: Dict[str, Any] = {}
+        self.current_rolling_corr_gth: float = -0.75
+        self.corr_5d_gth: float = -0.75
+        self.gth_slope: Optional[float] = None
+        self.gth_intercept: Optional[float] = None
+        self.gth_r_squared: Optional[float] = None
+        self.gth_vol_slope: Optional[float] = None
+        self.daily_basis_map: Dict[str, float] = {}
+        self.daily_spx_close_map: Dict[str, float] = {}
+        self.daily_es_close_map: Dict[str, float] = {}
+        self.daily_vix_close_map: Dict[str, float] = {}
+        self.gth_ref_spx: float = 0.0
+        self.gth_ref_vix: float = 0.0
 
         # Historical datasets (SPX & VIX)
         self.df_spotvol = pd.DataFrame()
@@ -253,6 +287,44 @@ def get_current_price(ticker, fallback_price: float = 0.0):
     return fallback_price, "HIST"
 
 
+async def resolve_front_es_contract(ib_client) -> Optional[Any]:
+    """Resolve and qualify the active front-month CME ES quarterly future, rolling <=2 days before expiry."""
+    if Future is None or ib_client is None:
+        return None
+    try:
+        details = await ib_client.reqContractDetailsAsync(Future(symbol='ES', exchange='CME', currency='USD'))
+        if not details:
+            return None
+        today_et = datetime.now(ET_TZ).strftime('%Y-%m-%d')
+        candidates = []
+        for d in details:
+            c = d.contract
+            exp_raw = str(getattr(c, 'lastTradeDateOrContractMonth', '') or '')
+            if len(exp_raw) < 8:
+                continue
+            exp_iso = f"{exp_raw[:4]}-{exp_raw[4:6]}-{exp_raw[6:8]}"
+            mult = str(getattr(c, 'multiplier', '') or '')
+            if mult and mult != '50':
+                continue
+            candidates.append((exp_iso, c))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0])
+        cutoff_iso = (pd.Timestamp(today_et) + pd.Timedelta(days=2)).strftime('%Y-%m-%d')
+        chosen = None
+        for exp_iso, c in candidates:
+            if exp_iso >= cutoff_iso:
+                chosen = c
+                break
+        if chosen is None:
+            chosen = candidates[-1][1]
+        await ib_client.qualifyContractsAsync(chosen)
+        return chosen
+    except Exception as e:
+        print(f"[IBKR] Warning: Failed to resolve ES futures contract: {e}")
+        return None
+
+
 async def connect_and_init_ibkr(host: str, port: int, client_id: int):
     """
     Connect to IBKR, qualify contracts, fetch historical bars, and subscribe to market data.
@@ -291,8 +363,11 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
     state.ndx_contract = Index('NDX', 'NASDAQ', 'USD')
     state.vxn_contract = Index('VXN', 'CBOE', 'USD')
 
-    print("[IBKR] Qualifying index contracts (SPX, VIX, VIX3M, NDX, VXN)...")
-    await state.ib.qualifyContractsAsync(state.spx_contract, state.vix_contract, state.ndx_contract, state.vxn_contract)
+    print("[IBKR] Qualifying index contracts (SPX, VIX, VIX3M, NDX, VXN) & resolving ES future...")
+    _, state.es_contract = await asyncio.gather(
+        state.ib.qualifyContractsAsync(state.spx_contract, state.vix_contract, state.ndx_contract, state.vxn_contract),
+        resolve_front_es_contract(state.ib)
+    )
     try:
         await state.ib.qualifyContractsAsync(state.vix3m_contract)
     except Exception:
@@ -305,17 +380,23 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
     print(f" VIX3M: conId={state.vix3m_contract.conId}, symbol={state.vix3m_contract.symbol}")
     print(f" NDX: conId={state.ndx_contract.conId}, symbol={state.ndx_contract.symbol}")
     print(f" VXN: conId={state.vxn_contract.conId}, symbol={state.vxn_contract.symbol}")
+    if state.es_contract:
+        print(f" ES: conId={state.es_contract.conId}, localSymbol={state.es_contract.localSymbol}, exp={state.es_contract.lastTradeDateOrContractMonth}")
+    else:
+        print(" ES: Unavailable (GTH ES+VIX monitoring disabled)")
 
     # 2. Fetch Historical Bars (Spot-Vol, Intraday 1D, Weekly 5D, Macro 1Y, Intraday Correlation)
     await refresh_historical_data()
 
     # 3. Subscribe to Real-Time Streaming Tickers
-    print("[IBKR] Subscribing to live market data streams (SPX, VIX, VIX3M, NDX, VXN)...")
+    print("[IBKR] Subscribing to live market data streams (SPX, VIX, VIX3M, NDX, VXN, ES)...")
     state.spx_ticker = state.ib.reqMktData(state.spx_contract, '', False, False)
     state.vix_ticker = state.ib.reqMktData(state.vix_contract, '', False, False)
     state.vix3m_ticker = state.ib.reqMktData(state.vix3m_contract, '', False, False)
     state.ndx_ticker = state.ib.reqMktData(state.ndx_contract, '', False, False)
     state.vxn_ticker = state.ib.reqMktData(state.vxn_contract, '', False, False)
+    if state.es_contract:
+        state.es_ticker = state.ib.reqMktData(state.es_contract, '', False, False)
 
     for _ in range(10):
         await asyncio.sleep(0.2)
@@ -558,6 +639,285 @@ def build_from_daily_df(df_pool: pd.DataFrame, roll_win=20, min_p=5):
     return df_ts, df_sv, df_nv, df_tv, corr_val, corr_ndx_val
 
 
+def classify_market_window(now_et: datetime) -> Dict[str, Any]:
+    """Classify Eastern Time market hours across Cash RTH, CBOE VIX GTH, and CME ES Globex."""
+    wd = now_et.weekday()  # 0=Mon .. 6=Sun
+    t = now_et.time()
+
+    is_es_window = False
+    if wd < 4:  # Mon-Thu: Globex pauses daily 17:00-18:00 ET
+        is_es_window = not (dtime(17, 0) <= t < dtime(18, 0))
+    elif wd == 4:  # Fri: closes 17:00 ET
+        is_es_window = (t < dtime(17, 0))
+    elif wd == 6:  # Sun: opens 18:00 ET
+        is_es_window = (t >= dtime(18, 0))
+
+    is_rth_window = (wd < 5) and (dtime(9, 30) <= t < dtime(16, 0))
+    is_vix_gth_window = (wd < 5) and (
+        (dtime(3, 15) <= t < dtime(9, 15)) or (dtime(16, 0) <= t < dtime(16, 15))
+    )
+    vix_opens_at = "09:30 ET" if ((wd < 5) and (dtime(9, 15) <= t < dtime(9, 30))) else "03:15 ET"
+
+    return {
+        "is_rth_window": is_rth_window,
+        "is_vix_gth_window": is_vix_gth_window,
+        "is_es_window": is_es_window,
+        "vix_opens_at": vix_opens_at,
+    }
+
+
+def filter_cboe_vix_gth(series_vix: pd.Series) -> pd.Series:
+    """Keep strictly active CBOE VIX printing minutes (03:15-09:15 and 09:30-16:15 ET)."""
+    if series_vix is None or series_vix.empty:
+        return pd.Series(dtype=float, name='vix')
+    mask = []
+    for k in series_vix.index:
+        s = str(k)
+        hhmm = s[11:16] if len(s) >= 16 else ""
+        active = (('03:15' <= hhmm < '09:15') or ('09:30' <= hhmm < '16:15'))
+        mask.append(active)
+    res = series_vix[mask].copy()
+    res.name = 'vix'
+    return res
+
+
+def compute_basis_maps(
+    s_spx_daily: pd.Series,
+    s_vix_daily: pd.Series,
+    s_es_daily: pd.Series,
+    s_spx_intraday: pd.Series,
+    s_es_intraday: pd.Series,
+    s_vix_intraday: pd.Series,
+    now_et: datetime,
+) -> Dict[str, Any]:
+    """
+    Build official RTH closing Settlement Basis (ES_RTH_close - SPX_RTH_close) per session date.
+    Never treats today's partial intraday daily bar (< 16:00 ET) as a closing settlement.
+    Uses median of the final 5 cash RTH minutes as fallback immediately after 16:00 ET.
+    """
+    today_et = now_et.strftime('%Y-%m-%d')
+    rth_finished_today = (now_et.time() >= dtime(16, 0))
+
+    def to_completed_map(s: pd.Series) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        if s is None or s.empty:
+            return out
+        for k, v in s.items():
+            d_str = str(k)[:10]
+            if d_str < today_et or (d_str == today_et and rth_finished_today):
+                if pd.notna(v) and float(v) > 0:
+                    out[d_str] = float(v)
+        return out
+
+    spx_map = to_completed_map(s_spx_daily)
+    vix_map = to_completed_map(s_vix_daily)
+    es_map = to_completed_map(s_es_daily)
+
+    basis_map: Dict[str, float] = {}
+    basis_src_map: Dict[str, str] = {}
+    for d_str in sorted(set(spx_map.keys()) & set(es_map.keys())):
+        basis_map[d_str] = round(es_map[d_str] - spx_map[d_str], 4)
+        basis_src_map[d_str] = "RTH Settlement"
+
+    # Fallback: intraday RTH tail (15:55-15:59 or final 5 overlapping RTH bars) for completed days lacking daily settlement
+    if s_spx_intraday is not None and not s_spx_intraday.empty:
+        spx_dates = sorted(set(str(k)[:10] for k in s_spx_intraday.index))
+        for d_str in spx_dates:
+            if not (d_str < today_et or (d_str == today_et and rth_finished_today)):
+                continue
+            s_day = s_spx_intraday.loc[[str(k)[:10] == d_str for k in s_spx_intraday.index]]
+            if not s_day.empty and d_str not in spx_map:
+                spx_map[d_str] = float(s_day.iloc[-1])
+
+            if s_vix_intraday is not None and not s_vix_intraday.empty and d_str not in vix_map:
+                v_day = s_vix_intraday.loc[[(str(k)[:10] == d_str and '09:30' <= str(k)[11:16] < '16:15') for k in s_vix_intraday.index]]
+                if not v_day.empty:
+                    vix_map[d_str] = float(v_day.iloc[-1])
+
+            if s_es_intraday is not None and not s_es_intraday.empty and d_str not in basis_map:
+                es_rth = s_es_intraday.loc[[(str(k)[:10] == d_str and '09:30' <= str(k)[11:16] < '16:00') for k in s_es_intraday.index]]
+                joined = pd.concat([s_day, es_rth], axis=1).dropna()
+                if not joined.empty:
+                    tail = joined.tail(5)
+                    basis_map[d_str] = round(float(np.median(tail['es'] - tail['spx'])), 4)
+                    basis_src_map[d_str] = "RTH Tail Median"
+                    if d_str not in es_map:
+                        es_map[d_str] = float(es_rth.iloc[-1])
+
+    sorted_basis_dates = sorted(basis_map.keys())
+    latest_completed_date = sorted_basis_dates[-1] if sorted_basis_dates else None
+    return {
+        "spx_map": spx_map,
+        "vix_map": vix_map,
+        "es_map": es_map,
+        "basis_map": basis_map,
+        "basis_src_map": basis_src_map,
+        "sorted_basis_dates": sorted_basis_dates,
+        "latest_completed_date": latest_completed_date,
+    }
+
+
+def _prior_basis_for_date(d_str: str, basis_map: Dict[str, float], sorted_basis_dates: List[str]) -> Optional[float]:
+    prev_dates = [d for d in sorted_basis_dates if d < d_str]
+    if prev_dates:
+        return basis_map[prev_dates[-1]]
+    if sorted_basis_dates:
+        return basis_map[sorted_basis_dates[0]]
+    return None
+
+
+def build_gth_stitched_df(
+    s_spx: pd.Series,
+    s_vix_gth: pd.Series,
+    s_es_gth: pd.Series,
+    basis_map: Dict[str, float],
+    sorted_basis_dates: List[str],
+    spx_close_map: Dict[str, float],
+    vix_close_map: Dict[str, float],
+    is_1d: bool = True,
+    roll_win: int = 30,
+    min_p: int = 10,
+) -> Dict[str, Any]:
+    """
+    Stitch active CBOE GTH VIX bars (03:15-09:15 & 16:00-16:15) with basis-adjusted ES
+    and native cash SPX RTH bars (09:30-16:00).
+    For 03:15-09:15 on date D, subtracts prior session basis(D-1).
+    For 16:00-16:15 curb on date D, subtracts same-day basis(D).
+    """
+    empty_res = {
+        "df": pd.DataFrame(),
+        "session_date": None,
+        "ref_spx": 0.0,
+        "ref_vix": 0.0,
+        "rolling_corr": -0.75,
+    }
+    if s_vix_gth is None or s_vix_gth.empty:
+        return empty_res
+
+    s_vix_clean = filter_cboe_vix_gth(s_vix_gth).sort_index()
+    if s_vix_clean.empty:
+        return empty_res
+
+    session_date = None
+    if is_1d:
+        session_date = str(s_vix_clean.index[-1])[:10]
+        s_vix_clean = s_vix_clean.loc[[str(k)[:10] == session_date for k in s_vix_clean.index]]
+        if s_vix_clean.empty:
+            return empty_res
+
+    s_spx_idx = s_spx.dropna().sort_index() if (s_spx is not None and not s_spx.empty) else pd.Series(dtype=float)
+    s_es_idx = s_es_gth.dropna().sort_index() if (s_es_gth is not None and not s_es_gth.empty) else pd.Series(dtype=float)
+
+    rows = []
+    for k, vix_val in s_vix_clean.items():
+        ts = str(k)
+        d_str = ts[:10]
+        hhmm = ts[11:16]
+        prior_basis = _prior_basis_for_date(d_str, basis_map, sorted_basis_dates)
+        eod_basis = basis_map.get(d_str, prior_basis)
+
+        if '09:30' <= hhmm < '16:00' and ts in s_spx_idx.index:
+            spx_val = float(s_spx_idx.loc[ts])
+            is_gth_bar = 0
+        elif '16:00' <= hhmm < '16:15':
+            if ts not in s_es_idx.index or eod_basis is None:
+                continue
+            spx_val = float(s_es_idx.loc[ts]) - float(eod_basis)
+            is_gth_bar = 1
+        else:
+            if ts not in s_es_idx.index or prior_basis is None:
+                continue
+            spx_val = float(s_es_idx.loc[ts]) - float(prior_basis)
+            is_gth_bar = 1
+
+        rows.append({
+            "date": ts,
+            "spx": spx_val,
+            "vix": float(vix_val),
+            "is_gth": int(is_gth_bar),
+        })
+
+    if not rows:
+        return empty_res
+
+    df = pd.DataFrame(rows).drop_duplicates(subset=['date']).set_index('date').sort_index()
+
+    if is_1d and session_date:
+        prev_spx_dates = [d for d in sorted(spx_close_map.keys()) if d < session_date]
+        prev_vix_dates = [d for d in sorted(vix_close_map.keys()) if d < session_date]
+        ref_s = float(spx_close_map[prev_spx_dates[-1]]) if prev_spx_dates else float(df['spx'].iloc[0])
+        ref_v = float(vix_close_map[prev_vix_dates[-1]]) if prev_vix_dates else float(df['vix'].iloc[0])
+    else:
+        ref_s = float(df['spx'].iloc[0])
+        ref_v = float(df['vix'].iloc[0])
+
+    df['spx_pct'] = (df['spx'] - ref_s) / ref_s * 100.0
+    df['vix_pt'] = df['vix'] - ref_v
+    df['spx_ret'] = np.log(df['spx'] / df['spx'].shift(1))
+    df['vix_ret'] = np.log(df['vix'] / df['vix'].shift(1))
+    df['rolling_corr'] = df['spx_ret'].rolling(roll_win, min_periods=min_p).corr(df['vix_ret']).fillna(-0.75)
+
+    return {
+        "df": df,
+        "session_date": session_date,
+        "ref_spx": ref_s,
+        "ref_vix": ref_v,
+        "rolling_corr": float(df['rolling_corr'].iloc[-1]),
+    }
+
+
+def compute_gth_spotvol_baseline(
+    df_daily: pd.DataFrame,
+    s_spx_d: pd.Series,
+    s_vix_d: pd.Series,
+    gth_target_date: Optional[str],
+    now_et: datetime,
+):
+    """Compute Spot-Vol regression parameters strictly prior to gth_target_date using up-to-date daily closes."""
+    base_df = pd.DataFrame(columns=['spx', 'vix'])
+    if df_daily is not None and not df_daily.empty:
+        col_spx = 'spx_close' if 'spx_close' in df_daily.columns else 'spx'
+        col_vix = 'vix_close' if 'vix_close' in df_daily.columns else 'vix'
+        if col_spx in df_daily.columns and col_vix in df_daily.columns:
+            base_df = df_daily[[col_spx, col_vix]].dropna().rename(columns={col_spx: 'spx', col_vix: 'vix'}).copy()
+            base_df.index = [str(d)[:10] for d in base_df.index]
+
+    fresh_df = pd.concat([s_spx_d, s_vix_d], axis=1).dropna() if (s_spx_d is not None and not s_spx_d.empty and s_vix_d is not None and not s_vix_d.empty) else pd.DataFrame()
+    if not fresh_df.empty:
+        fresh_df.index = [str(d)[:10] for d in fresh_df.index]
+        today_et = now_et.strftime('%Y-%m-%d')
+        if now_et.time() < dtime(16, 0):
+            fresh_df = fresh_df.loc[[d < today_et for d in fresh_df.index]]
+        for d_idx, row in fresh_df.iterrows():
+            base_df.loc[d_idx, ['spx', 'vix']] = [float(row['spx']), float(row['vix'])]
+
+    base_df = base_df.sort_index()
+    if gth_target_date:
+        base_df = base_df.loc[[d < gth_target_date for d in base_df.index]]
+
+    if len(base_df) < 3:
+        state.df_spotvol_gth = state.df_spotvol.copy()
+        state.gth_slope = state.slope
+        state.gth_intercept = state.intercept
+        state.gth_r_squared = state.r_squared
+        state.gth_vol_slope = state.vol_slope
+        return
+
+    df_sv = base_df.rename(columns={'spx': 'spx_close', 'vix': 'vix_close'}).copy()
+    df_sv['spx_pct'] = df_sv['spx_close'].pct_change() * 100.0
+    df_sv['vix_pt'] = df_sv['vix_close'].diff()
+    df_sv = df_sv.dropna()
+    state.df_spotvol_gth = df_sv.iloc[-state.window_days:].copy()
+
+    x = state.df_spotvol_gth['spx_pct'].values
+    y = state.df_spotvol_gth['vix_pt'].values
+    slope, intercept, r_val, _, _ = stats.linregress(x, y)
+    state.gth_slope = float(slope)
+    state.gth_intercept = float(intercept)
+    state.gth_r_squared = float(r_val ** 2)
+    state.gth_vol_slope = float(1.0 / slope) if slope != 0 else 0.0
+
+
 def compute_spotvol_baselines(df_daily: pd.DataFrame, active_sess_date: Optional[str], today_et: str):
     col_spx = 'spx_close' if 'spx_close' in df_daily.columns else 'spx'
     col_vix = 'vix_close' if 'vix_close' in df_daily.columns else 'vix'
@@ -763,21 +1123,28 @@ async def hydrate_deep_history_background(active_sess_date: Optional[str], today
         print(f"[Background Cache Error] Failed hydrating deep history: {e}")
 
 
+async def _empty_bars():
+    return []
+
+
 async def refresh_historical_data():
     """
-    Fetch historical daily and intraday bars directly from IBKR for SPX, VIX, VIX3M, NDX, VXN
-    across all 8 supported multi-timeframe horizons:
-      - 1D: 1-minute intraday bars (today's active session)
-      - 5D: 5-minute weekly bars (~390 bars)
+    Fetch historical daily and intraday bars directly from IBKR for SPX, VIX, VIX3M, NDX, VXN, and ES
+    across all 8 supported multi-timeframe horizons + GTH (ES Basis-Adjusted + Spot VIX):
+      - 1D / 1D_GTH: 1-minute intraday bars
+      - 5D / 5D_GTH: 5-minute weekly bars
       - 1M, 3M, 6M, YTD, 1Y, MAX: Loaded instantly from disk cache (<0.01s) or hydrated in background
     """
-    print("[IBKR] Fetching historical baseline & multi-timeframe datasets (Fast Startup)...")
+    print("[IBKR] Fetching historical baseline & multi-timeframe datasets (Fast Startup + GTH)...")
     try:
-        # 1. Fetch Intraday 1D (1-min) & 5D (5-min) bars in parallel
-        (b1_spx, b1_vix, b1_vix3m, b1_ndx, b1_vxn,
-         b5_spx, b5_vix, b5_vix3m, b5_ndx, b5_vxn) = await asyncio.gather(
-            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '1 D', '1 min', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '1 D', '1 min', 'TRADES', True, 1),
+        has_es = (state.es_contract is not None)
+        # 1. Fetch Intraday 1D/2D (1-min), 5D (5-min), & 1M daily settlement bars in parallel
+        (b2_spx, b2_vix_gth, b1_vix3m, b1_ndx, b1_vxn,
+         b5_spx, b5_vix, b5_vix3m, b5_ndx, b5_vxn,
+         b5_vix_gth, b_spx_d, b_vix_d,
+         b2_es, b5_es, b_es_d) = await asyncio.gather(
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '2 D', '1 min', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '2 D', '1 min', 'TRADES', False, 1),
             state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '1 D', '1 min', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '1 D', '1 min', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '1 D', '1 min', 'TRADES', True, 1),
@@ -787,18 +1154,27 @@ async def refresh_historical_data():
             state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '5 D', '5 mins', 'TRADES', True, 1),
+
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '5 D', '5 mins', 'TRADES', False, 1),
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '1 M', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '1 M', '1 day', 'TRADES', True, 1),
+
+            state.ib.reqHistoricalDataAsync(state.es_contract, '', '2 D', '1 min', 'TRADES', False, 1) if has_es else _empty_bars(),
+            state.ib.reqHistoricalDataAsync(state.es_contract, '', '5 D', '5 mins', 'TRADES', False, 1) if has_es else _empty_bars(),
+            state.ib.reqHistoricalDataAsync(state.es_contract, '', '1 M', '1 day', 'TRADES', True, 1) if has_es else _empty_bars(),
         )
 
         # Pre-market / GTH Session Synchronization:
-        now_et = datetime.now(pytz.timezone('US/Eastern'))
+        now_et = datetime.now(ET_TZ)
         today_et = now_et.strftime('%Y-%m-%d')
         is_rth_now = (now_et.weekday() < 5) and (dtime(9, 30) <= now_et.time() < dtime(16, 15))
+        win_info = classify_market_window(now_et)
 
-        df_s1_raw = util.df(b1_spx) if b1_spx else None
+        df_s2 = safe_to_series(b2_spx, 'spx')
         df_n1_raw = util.df(b1_ndx) if b1_ndx else None
         active_sess_date = None
-        if df_s1_raw is not None and not df_s1_raw.empty and 'date' in df_s1_raw.columns:
-            active_sess_date = str(df_s1_raw['date'].iloc[-1])[:10]
+        if not df_s2.empty:
+            active_sess_date = str(df_s2.index[-1])[:10]
         elif df_n1_raw is not None and not df_n1_raw.empty and 'date' in df_n1_raw.columns:
             active_sess_date = str(df_n1_raw['date'].iloc[-1])[:10]
 
@@ -807,26 +1183,36 @@ async def refresh_historical_data():
 
         state.active_session_date = active_sess_date
 
-        if active_sess_date and not is_rth_now:
-            df_v1_raw = util.df(b1_vix) if b1_vix else None
-            if df_v1_raw is not None and not df_v1_raw.empty and 'date' in df_v1_raw.columns:
-                vix_date = str(df_v1_raw['date'].iloc[-1])[:10]
-                if vix_date != active_sess_date:
-                    print(f"[Session Alignment] SPX/NDX are on session {active_sess_date}, but VIX returned pre-market GTH bars on {vix_date}. Aligning VIX to {active_sess_date} session close...")
-                    clean_dt = active_sess_date.replace('-', '')
-                    b1_vix = await state.ib.reqHistoricalDataAsync(
-                        state.vix_contract, endDateTime=f"{clean_dt} 23:00:00", durationStr='1 D',
-                        barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
-                    )
+        df_s1 = df_s2.loc[[str(k)[:10] == active_sess_date for k in df_s2.index]] if (active_sess_date and not df_s2.empty) else pd.Series(dtype=float, name='spx')
+
+        s_vix_2d_gth = safe_to_series(b2_vix_gth, 'vix')
+        if active_sess_date and not s_vix_2d_gth.empty:
+            df_v1 = s_vix_2d_gth.loc[[
+                (str(k)[:10] == active_sess_date and '09:30' <= str(k)[11:16] < '16:15')
+                for k in s_vix_2d_gth.index
+            ]]
+            df_v1.name = 'vix'
+        else:
+            df_v1 = pd.Series(dtype=float, name='vix')
+
+        if active_sess_date and df_v1.empty:
+            clean_dt = active_sess_date.replace('-', '')
+            b1_vix_fb = await state.ib.reqHistoricalDataAsync(
+                state.vix_contract, endDateTime=f"{clean_dt} 23:00:00", durationStr='1 D',
+                barSizeSetting='1 min', whatToShow='TRADES', useRTH=True, formatDate=1
+            )
+            df_v1 = safe_to_series(b1_vix_fb, 'vix')
 
         # 2. Check disk cache for multi-timeframe pools
         cache_data = load_history_cache()
         need_background_hydration = False
+        daily_ref_df = pd.DataFrame()
 
         if cache_data and 'dfs_pool' in cache_data and 'df_daily' in cache_data and not cache_data['df_daily'].empty:
             print("[IBKR] Loading deep multi-timeframe history from local disk cache (<0.01s)...")
             cached_dfs = cache_data['dfs_pool']
             cached_df_daily = cache_data['df_daily']
+            daily_ref_df = cached_df_daily
             compute_spotvol_baselines(cached_df_daily, active_sess_date, today_et)
             apply_multi_timeframe_pool(cached_dfs, cached_df_daily, active_sess_date, today_et)
             if cache_data.get('cache_date') < today_et:
@@ -848,14 +1234,72 @@ async def refresh_historical_data():
             df_vx4m = safe_to_series(vxn_d, 'vxn')
             df_daily_init = pd.concat([df_s4m, df_v4m, df_v34m, df_n4m, df_vx4m], axis=1).dropna()
             state.df_daily = df_daily_init
+            daily_ref_df = df_daily_init
             compute_spotvol_baselines(df_daily_init, active_sess_date, today_et)
             need_background_hydration = True
 
         if need_background_hydration:
             asyncio.create_task(hydrate_deep_history_background(active_sess_date, today_et))
 
+        # 2B. Compute ES-SPX Official Settlement Basis & Stitch 1D_GTH / 5D_GTH
+        s_spx_d = safe_to_series(b_spx_d, 'spx')
+        s_vix_d = safe_to_series(b_vix_d, 'vix')
+        s_es_d = safe_to_series(b_es_d, 'es')
+        s_es_2d = safe_to_series(b2_es, 'es')
+        s_es_5d = safe_to_series(b5_es, 'es')
+        s_vix_5d_gth = safe_to_series(b5_vix_gth, 'vix')
+
+        basis_info = compute_basis_maps(s_spx_d, s_vix_d, s_es_d, df_s2, s_es_2d, s_vix_2d_gth, now_et)
+        basis_map = basis_info["basis_map"]
+        spx_map = basis_info["spx_map"]
+        vix_map = basis_info["vix_map"]
+        es_map = basis_info["es_map"]
+        sorted_basis_dates = basis_info["sorted_basis_dates"]
+        latest_comp_date = basis_info["latest_completed_date"]
+
+        state.daily_basis_map = basis_map
+        state.daily_spx_close_map = spx_map
+        state.daily_es_close_map = es_map
+        state.daily_vix_close_map = vix_map
+        state.es_daily_df = pd.DataFrame({'es': s_es_d}) if not s_es_d.empty else pd.DataFrame()
+
+        if latest_comp_date:
+            state.eod_spx_close = spx_map.get(latest_comp_date)
+            state.eod_es_close = es_map.get(latest_comp_date)
+            state.eod_vix_close = vix_map.get(latest_comp_date)
+            state.eod_es_spx_basis = basis_map.get(latest_comp_date)
+            state.es_spx_basis = state.eod_es_spx_basis
+            state.es_basis_source = basis_info["basis_src_map"].get(latest_comp_date, "")
+            state.es_basis_date = latest_comp_date
+            state.latest_es_close = float(es_map.get(latest_comp_date, 0.0) or 0.0)
+            if now_et.time() >= dtime(16, 15) and latest_comp_date == today_et and state.es_basis_source == "RTH Settlement":
+                state.last_eod_basis_sync_date = today_et
+
+        gth_1d_pack = build_gth_stitched_df(
+            df_s2, s_vix_2d_gth, s_es_2d, basis_map, sorted_basis_dates, spx_map, vix_map,
+            is_1d=True, roll_win=30, min_p=10
+        )
+        state.df_spx_vix_1d_gth = gth_1d_pack["df"]
+        state.gth_session_date = gth_1d_pack["session_date"]
+        state.gth_ref_spx = gth_1d_pack["ref_spx"]
+        state.gth_ref_vix = gth_1d_pack["ref_vix"]
+        state.current_rolling_corr_gth = gth_1d_pack["rolling_corr"]
+
+        gth_5d_pack = build_gth_stitched_df(
+            safe_to_series(b5_spx, 'spx'), s_vix_5d_gth, s_es_5d, basis_map, sorted_basis_dates, spx_map, vix_map,
+            is_1d=False, roll_win=78, min_p=20
+        )
+        state.df_spx_vix_5d_gth = gth_5d_pack["df"]
+        state.corr_5d_gth = gth_5d_pack["rolling_corr"]
+
+        if win_info["is_vix_gth_window"] and dtime(3, 15) <= now_et.time() < dtime(9, 30):
+            gth_target_date = today_et
+        else:
+            gth_target_date = state.gth_session_date or active_sess_date
+        compute_gth_spotvol_baseline(daily_ref_df, s_spx_d, s_vix_d, gth_target_date, now_et)
+        state.last_gth_bar_refresh_ts = time.time()
+
         # 3. Process Intraday 1D Bars (1-min)
-        df_v1 = safe_to_series(b1_vix, 'vix')
         df_v3 = safe_to_series(b1_vix3m, 'vix3m')
         df_1d = pd.concat([df_v1, df_v3], axis=1).dropna()
         if not df_1d.empty:
@@ -867,7 +1311,6 @@ async def refresh_historical_data():
         else:
             state.df_ts_1d = pd.DataFrame(columns=['vix', 'vix3m', 'ratio'])
 
-        df_s1 = safe_to_series(b1_spx, 'spx')
         df_sv_1d = pd.concat([df_s1, df_v1], axis=1).dropna()
         if not df_sv_1d.empty:
             ref_spx = state.latest_spx_close if state.latest_spx_close > 0 else float(df_sv_1d['spx'].iloc[0])
@@ -924,6 +1367,10 @@ async def refresh_historical_data():
         print(f"       1D={len(state.df_ts_1d)} bars, 5D={len(state.df_ts_5d)} bars, 1M={len(state.df_ts_1m)} bars (30m), "
               f"3M={len(state.df_ts_3m)} bars (30m), 6M={len(state.df_ts_6m)} bars (30m), YTD={len(state.df_ts_ytd)} bars, "
               f"1Y={len(state.df_ts_1y)} bars, MAX={len(state.df_ts_max)} bars.")
+        if state.es_contract:
+            basis_str = f"{state.es_spx_basis:+.2f} ({state.es_basis_source} {state.es_basis_date})" if state.es_spx_basis is not None else "N/A"
+            print(f"[GTH] ES={state.es_contract.localSymbol}, Basis={basis_str}, "
+                  f"1D_GTH={len(state.df_spx_vix_1d_gth)} bars (session={state.gth_session_date}), 5D_GTH={len(state.df_spx_vix_5d_gth)} bars.")
 
     except Exception as ex:
         print(f"[IBKR Error] Historical data refresh failed: {ex}")
@@ -932,27 +1379,30 @@ async def refresh_historical_data():
 def compute_live_payload() -> Dict[str, Any]:
     """
     Compute full real-time snapshot of market prices, Overvix residuals,
-    intraday term structure ratio stats, rolling correlation, and master confluence signal
-    for both SPX & VIX and NDX & VXN, plus Tech Vol Spread.
+    intraday term structure ratio stats, rolling correlation, master confluence signal,
+    and ES-based Global Trading Hours (GTH) monitoring for SPX & VIX.
     """
     spx_curr, spx_src = get_current_price(state.spx_ticker, state.latest_spx_close)
     vix_curr, vix_src = get_current_price(state.vix_ticker, state.latest_vix_close)
     vix3m_curr, vix3m_src = get_current_price(state.vix3m_ticker, state.latest_vix3m_close)
     ndx_curr, ndx_src = get_current_price(state.ndx_ticker, state.latest_ndx_close)
     vxn_curr, vxn_src = get_current_price(state.vxn_ticker, state.latest_vxn_close)
+    es_curr, es_src = get_current_price(state.es_ticker, state.eod_es_close or state.latest_es_close)
 
-    now_et = datetime.now(pytz.timezone('US/Eastern'))
+    now_et = datetime.now(ET_TZ)
     today_et = now_et.strftime('%Y-%m-%d')
     is_weekday = (now_et.weekday() < 5)
-    is_rth_time = is_weekday and (dtime(9, 30) <= now_et.time() < dtime(16, 0))
+    win = classify_market_window(now_et)
+    is_rth_time = win["is_rth_window"]
 
     # A live RTH trading session is active only during RTH hours AND when today's session has actually begun
     is_live_rth = is_rth_time and (
-        ("LIVE" in spx_src or "LIVE" in ndx_src) or 
+        ("LIVE" in spx_src or "LIVE" in ndx_src) or
         (state.active_session_date == today_et)
     )
 
     live_vix_val, live_vix_src = vix_curr, vix_src
+    is_premarket_hour = is_weekday and (now_et.time() < dtime(9, 30))
 
     if is_live_rth:
         spx_base = state.latest_spx_close if state.latest_spx_close > 0 else spx_curr
@@ -971,18 +1421,16 @@ def compute_live_payload() -> Dict[str, Any]:
         session_status = "REGULAR_RTH"
     else:
         # Pre-Market, After-Hours, or Weekend/Closed:
-        # Intraday charts display the displayed session (state.active_session_date).
-        # Pin current_point and session levels to the official closing values of the displayed session
-        # so the beacon sits precisely at the tip of the trail.
+        # Intraday RTH charts display the displayed session (state.active_session_date).
+        # Pin current_point and RTH session levels to the official closing values of the displayed session
+        # so the RTH beacon sits precisely at the tip of the trail.
 
-        # Prior completed session close reference baselines (from baseline regression)
         spx_base = state.latest_spx_close if state.latest_spx_close > 0 else (float(state.df_spx_vix_1d['spx'].iloc[0]) if not state.df_spx_vix_1d.empty else spx_curr)
         vix_base = state.latest_vix_close if state.latest_vix_close > 0 else (float(state.df_spx_vix_1d['vix'].iloc[0]) if not state.df_spx_vix_1d.empty else vix_curr)
         vix3m_base = state.latest_vix3m_close if state.latest_vix3m_close > 0 else (float(state.df_ts_1d['vix3m'].iloc[0]) if not state.df_ts_1d.empty else vix3m_curr)
         ndx_base = state.latest_ndx_close if state.latest_ndx_close > 0 else (float(state.df_ndx_vxn_1d['ndx'].iloc[0]) if not state.df_ndx_vxn_1d.empty else ndx_curr)
         vxn_base = state.latest_vxn_close if state.latest_vxn_close > 0 else (float(state.df_ndx_vxn_1d['vxn'].iloc[0]) if not state.df_ndx_vxn_1d.empty else vxn_curr)
 
-        # SPX & VIX closing coordinates and prices for displayed session
         if not state.df_spx_vix_1d.empty:
             curr_x = float(state.df_spx_vix_1d['spx_pct'].iloc[-1])
             curr_y = float(state.df_spx_vix_1d['vix_pt'].iloc[-1])
@@ -992,14 +1440,12 @@ def compute_live_payload() -> Dict[str, Any]:
             curr_x = ((spx_curr - spx_base) / spx_base * 100.0) if spx_base > 0 else state.last_sess_x
             curr_y = (vix_curr - vix_base) if vix_base > 0 else state.last_sess_y
 
-        # VIX3M closing price for displayed session
         if not state.df_ts_1d.empty:
             vix3m_curr = float(state.df_ts_1d['vix3m'].iloc[-1])
             vix3m_pt = vix3m_curr - vix3m_base if vix3m_base > 0 else 0.0
         else:
             vix3m_pt = vix3m_curr - vix3m_base if vix3m_base > 0 else 0.0
 
-        # NDX & VXN closing coordinates and prices for displayed session
         if not state.df_ndx_vxn_1d.empty:
             curr_ndx_x = float(state.df_ndx_vxn_1d['ndx_pct'].iloc[-1])
             curr_ndx_y = float(state.df_ndx_vxn_1d['vxn_pt'].iloc[-1])
@@ -1009,7 +1455,7 @@ def compute_live_payload() -> Dict[str, Any]:
             curr_ndx_x = ((ndx_curr - ndx_base) / ndx_base * 100.0) if ndx_base > 0 else state.last_sess_ndx_x
             curr_ndx_y = (vxn_curr - vxn_base) if vxn_base > 0 else state.last_sess_ndx_y
 
-        if is_weekday and now_et.time() < dtime(9, 30):
+        if is_premarket_hour:
             mode_tag = f"PRE-MARKET (SESSION {state.active_session_date} CLOSE)"
             session_status = "PRE_MARKET"
         else:
@@ -1115,7 +1561,204 @@ def compute_live_payload() -> Dict[str, Any]:
     curr_time_str = now_et.strftime('%H:%M:%S')
     curr_dt_str = now_et.strftime('%Y-%m-%d %H:%M')
 
-    src_suffix = "" if is_live_rth else (" (PRE-MARKET)" if session_status == "PRE_MARKET" else " (CLOSED)")
+    # GTH (ES Futures Basis-Adjusted + Spot VIX) State Classification & Computations
+    es_sym = getattr(state.es_contract, 'localSymbol', 'ES') if state.es_contract else ""
+    active_basis = state.eod_es_spx_basis if state.eod_es_spx_basis is not None else state.es_spx_basis
+    gth_has_es = bool(state.es_contract is not None and es_curr > 0 and active_basis is not None)
+    es_live_now = bool(gth_has_es and win["is_es_window"] and ("LIVE" in es_src))
+    has_gth_hist = (not state.df_spx_vix_1d_gth.empty)
+
+    if is_live_rth:
+        gth_status = "REGULAR_RTH"
+        gth_is_active = False
+        gth_is_es_live = es_live_now
+        gth_is_vix_live = ("LIVE" in live_vix_src)
+        gth_syn_spx = round(es_curr - active_basis, 2) if gth_has_es else round(spx_curr, 2)
+        gth_pct = round(curr_x, 2)
+        gth_vix_val = round(vix_curr, 2)
+        gth_vix_pt = round(curr_y, 2)
+        gth_ref_s = round(spx_base, 2)
+        gth_ref_v = round(vix_base, 2)
+        gth_sess_date = state.gth_session_date or state.active_session_date
+        gth_overvix = {
+            "expected_vix_pt": round(expected_vix_pt, 2),
+            "residual_pts": round(residual_pts, 2),
+            "is_overvixed": is_overvixed,
+            "status": "OVERVIXED" if is_overvixed else "NORMAL"
+        }
+        gth_curr_pt = {"x": round(curr_x, 2), "y": round(curr_y, 2)}
+        gth_confluence = {
+            "tag": confluence_tag,
+            "description": confluence_desc,
+            "is_dual_alert": is_dual_alert,
+            "is_overvix_alert": is_overvix_alert
+        }
+        gth_vix_opens_at = None
+    elif win["is_vix_gth_window"] and gth_has_es and (es_live_now or win["is_es_window"]):
+        gth_status = "GTH_ACTIVE"
+        gth_is_active = True
+        gth_is_es_live = es_live_now
+        gth_is_vix_live = ("LIVE" in live_vix_src) or (
+            state.gth_session_date == today_et and has_gth_hist
+        ) or (dtime(16, 0) <= now_et.time() < dtime(16, 15))
+
+        if dtime(3, 15) <= now_et.time() < dtime(9, 15):
+            # Morning pre-market GTH for today's upcoming cash session: reference yesterday's official RTH closes
+            g_ref_spx = state.eod_spx_close if state.eod_spx_close else spx_base
+            g_ref_vix = state.eod_vix_close if state.eod_vix_close else vix_base
+            g_basis = active_basis
+            g_slope = state.gth_slope if state.gth_slope is not None else state.slope
+            g_intercept = state.gth_intercept if state.gth_intercept is not None else state.intercept
+            g_vix_raw = live_vix_val if ("LIVE" in live_vix_src) else (
+                float(state.df_spx_vix_1d_gth['vix'].iloc[-1])
+                if (has_gth_hist and state.gth_session_date == today_et)
+                else g_ref_vix
+            )
+            gth_sess_date = today_et
+        else:
+            # Afternoon curb GTH (16:00-16:15 ET) continuing today's session: reference prior day's closes & today's EOD basis
+            g_ref_spx = spx_base
+            g_ref_vix = vix_base
+            g_basis = state.daily_basis_map.get(today_et, active_basis)
+            g_slope = state.slope
+            g_intercept = state.intercept
+            g_vix_raw = live_vix_val if ("LIVE" in live_vix_src) else (
+                float(state.df_spx_vix_1d_gth['vix'].iloc[-1])
+                if (has_gth_hist and state.gth_session_date == today_et)
+                else (state.eod_vix_close or vix_curr)
+            )
+            gth_sess_date = state.gth_session_date or state.active_session_date
+
+        active_basis = g_basis
+        syn_spx_raw = es_curr - float(g_basis)
+        g_x = ((syn_spx_raw - g_ref_spx) / g_ref_spx) * 100.0 if g_ref_spx > 0 else 0.0
+        g_y = g_vix_raw - g_ref_vix
+        g_exp = g_intercept + g_slope * g_x
+        g_res = g_y - g_exp
+        g_over = bool(g_res >= state.spx_threshold_pts)
+
+        gth_syn_spx = round(syn_spx_raw, 2)
+        gth_pct = round(g_x, 2)
+        gth_vix_val = round(g_vix_raw, 2)
+        gth_vix_pt = round(g_y, 2)
+        gth_ref_s = round(g_ref_spx, 2)
+        gth_ref_v = round(g_ref_vix, 2)
+        gth_vix_opens_at = None
+        gth_overvix = {
+            "expected_vix_pt": round(g_exp, 2),
+            "residual_pts": round(g_res, 2),
+            "is_overvixed": g_over,
+            "status": "OVERVIXED" if g_over else "NORMAL"
+        }
+        gth_curr_pt = {"x": round(g_x, 2), "y": round(g_y, 2)}
+        basis_op = f"- {g_basis:.2f}" if g_basis >= 0 else f"+ {abs(g_basis):.2f}"
+        gth_confluence = {
+            "tag": "GTH OVERVIX ALERT" if g_over else "GTH NORMAL REGIME",
+            "description": (
+                f"GTH Spot-Vol Shock: VIX {g_res:+.2f} pts above expected line ({es_sym} Synth SPX {gth_syn_spx:,.2f})."
+                if g_over else
+                f"GTH Monitoring Live ({es_sym} {basis_op} = {gth_syn_spx:,.2f} | VIX {gth_vix_val:.2f}, Res: {g_res:+.2f} pts). VIX3M at RTH close."
+            ),
+            "is_dual_alert": False,
+            "is_overvix_alert": g_over
+        }
+        session_status = "GTH_ACTIVE"
+        mode_tag = f"GTH LIVE ({es_sym} + VIX)"
+    elif win["is_es_window"] and gth_has_es and es_live_now:
+        # Overnight ES Globex (16:15-03:15 ET) or morning CBOE handover (09:15-09:30 ET):
+        # ES is live, VIX is dormant -> stream Synthetic SPX, pause Overvix residuals cleanly!
+        gth_status = "OVERNIGHT_ES_ONLY"
+        gth_is_active = False
+        gth_is_es_live = True
+        gth_is_vix_live = False
+        g_ref_spx = state.eod_spx_close if state.eod_spx_close else spx_curr
+        g_ref_vix = state.eod_vix_close if state.eod_vix_close else vix_curr
+        syn_spx_raw = es_curr - float(active_basis)
+        g_x = ((syn_spx_raw - g_ref_spx) / g_ref_spx) * 100.0 if g_ref_spx > 0 else 0.0
+
+        # During 09:15-09:30 handover, preserve last morning GTH VIX print; overnight uses prior close
+        if dtime(9, 15) <= now_et.time() < dtime(9, 30) and has_gth_hist and state.gth_session_date == today_et:
+            last_vix = float(state.df_spx_vix_1d_gth['vix'].iloc[-1])
+            gth_vix_pt = round(last_vix - g_ref_vix, 2)
+        else:
+            last_vix = g_ref_vix
+            gth_vix_pt = 0.0
+
+        gth_syn_spx = round(syn_spx_raw, 2)
+        gth_pct = round(g_x, 2)
+        gth_vix_val = round(last_vix, 2)
+        gth_ref_s = round(g_ref_spx, 2)
+        gth_ref_v = round(g_ref_vix, 2)
+        gth_sess_date = state.gth_session_date or state.active_session_date
+        gth_vix_opens_at = win["vix_opens_at"]
+        gth_overvix = {
+            "expected_vix_pt": None,
+            "residual_pts": None,
+            "is_overvixed": False,
+            "status": "PAUSED",
+            "reason": f"Spot VIX closed (Opens {gth_vix_opens_at})"
+        }
+        gth_curr_pt = {"x": round(g_x, 2), "y": None}
+        basis_op = f"- {active_basis:.2f}" if active_basis >= 0 else f"+ {abs(active_basis):.2f}"
+        gth_confluence = {
+            "tag": f"OVERNIGHT ES LIVE | VIX @ {gth_vix_opens_at}",
+            "description": f"Synthetic SPX ({es_sym} {basis_op} = {gth_syn_spx:,.2f}, {gth_pct:+.2f}%) live. Spot VIX opens {gth_vix_opens_at} — Overvix residuals paused.",
+            "is_dual_alert": False,
+            "is_overvix_alert": False
+        }
+        session_status = "OVERNIGHT_ES_ONLY"
+        mode_tag = f"OVERNIGHT ES LIVE ({es_sym} | VIX @ {gth_vix_opens_at})"
+    else:
+        gth_status = "CLOSED"
+        gth_is_active = False
+        gth_is_es_live = False
+        gth_is_vix_live = False
+        gth_vix_opens_at = win["vix_opens_at"]
+        gth_sess_date = state.gth_session_date or state.active_session_date
+        if has_gth_hist:
+            last_row = state.df_spx_vix_1d_gth.iloc[-1]
+            g_x = float(last_row['spx_pct'])
+            g_y = float(last_row['vix_pt'])
+            g_spx = float(last_row['spx'])
+            g_vix = float(last_row['vix'])
+            g_exp = state.intercept + state.slope * g_x
+            g_res = g_y - g_exp
+            g_over = bool(g_res >= state.spx_threshold_pts)
+            gth_syn_spx = round(g_spx, 2)
+            gth_pct = round(g_x, 2)
+            gth_vix_val = round(g_vix, 2)
+            gth_vix_pt = round(g_y, 2)
+            gth_ref_s = round(state.gth_ref_spx or spx_base, 2)
+            gth_ref_v = round(state.gth_ref_vix or vix_base, 2)
+            gth_overvix = {
+                "expected_vix_pt": round(g_exp, 2),
+                "residual_pts": round(g_res, 2),
+                "is_overvixed": g_over,
+                "status": "OVERVIXED" if g_over else "NORMAL"
+            }
+            gth_curr_pt = {"x": round(g_x, 2), "y": round(g_y, 2)}
+        else:
+            gth_syn_spx = round(spx_curr, 2)
+            gth_pct = round(curr_x, 2)
+            gth_vix_val = round(vix_curr, 2)
+            gth_vix_pt = round(curr_y, 2)
+            gth_ref_s = round(spx_base, 2)
+            gth_ref_v = round(vix_base, 2)
+            gth_overvix = {
+                "expected_vix_pt": round(expected_vix_pt, 2),
+                "residual_pts": round(residual_pts, 2),
+                "is_overvixed": is_overvixed,
+                "status": "OVERVIXED" if is_overvixed else "NORMAL"
+            }
+            gth_curr_pt = {"x": round(curr_x, 2), "y": round(curr_y, 2)}
+        gth_confluence = {
+            "tag": confluence_tag,
+            "description": confluence_desc,
+            "is_dual_alert": is_dual_alert,
+            "is_overvix_alert": is_overvix_alert
+        }
+
+    src_suffix = "" if is_live_rth else (" (PRE-MARKET)" if is_premarket_hour else " (CLOSED)")
 
     return {
         "timestamp": curr_time_str,
@@ -1126,12 +1769,45 @@ def compute_live_payload() -> Dict[str, Any]:
         "is_rth_active": is_live_rth,
         "session_status": session_status,
         "premarket": {
-            "is_premarket": (session_status == "PRE_MARKET"),
-            "gth_vix": round(live_vix_val, 2) if "LIVE" in live_vix_src else round(state.latest_vix_close, 2),
-            "gth_vix_change": round(live_vix_val - state.latest_vix_close, 2) if "LIVE" in live_vix_src else 0.0,
+            "is_premarket": is_premarket_hour,
+            "gth_vix": round(live_vix_val, 2) if "LIVE" in live_vix_src else round(state.eod_vix_close or state.latest_vix_close, 2),
+            "gth_vix_change": round(live_vix_val - (state.eod_vix_close or state.latest_vix_close), 2) if "LIVE" in live_vix_src else 0.0,
             "vix_source": live_vix_src,
             "session_date": state.active_session_date,
             "opens_at": "09:30 ET"
+        },
+        "gth": {
+            "available": bool(gth_has_es or has_gth_hist),
+            "session_status": gth_status,
+            "is_gth_active": gth_is_active,
+            "is_es_live": gth_is_es_live,
+            "is_vix_live": gth_is_vix_live,
+            "synthetic_spx": gth_syn_spx,
+            "spx_pct_change": gth_pct,
+            "es_price": round(es_curr, 2) if es_curr > 0 else None,
+            "es_symbol": es_sym,
+            "basis": round(active_basis, 2) if active_basis is not None else None,
+            "basis_source": state.es_basis_source,
+            "basis_date": state.es_basis_date,
+            "vix": gth_vix_val,
+            "vix_pt_change": gth_vix_pt,
+            "vix_opens_at": gth_vix_opens_at,
+            "ref_spx": gth_ref_s,
+            "ref_vix": gth_ref_v,
+            "session_date": gth_sess_date,
+            "rolling_corr": round(state.current_rolling_corr_gth, 3),
+            "corr_5d": round(state.corr_5d_gth, 3),
+            "model": {
+                "r_squared": round(state.gth_r_squared if (gth_status == "GTH_ACTIVE" and dtime(3, 15) <= now_et.time() < dtime(9, 30) and state.gth_r_squared is not None) else state.r_squared, 4),
+                "slope": round(state.gth_slope if (gth_status == "GTH_ACTIVE" and dtime(3, 15) <= now_et.time() < dtime(9, 30) and state.gth_slope is not None) else state.slope, 4),
+                "vol_slope": round(state.gth_vol_slope if (gth_status == "GTH_ACTIVE" and dtime(3, 15) <= now_et.time() < dtime(9, 30) and state.gth_vol_slope is not None) else state.vol_slope, 4),
+                "intercept": round(state.gth_intercept if (gth_status == "GTH_ACTIVE" and dtime(3, 15) <= now_et.time() < dtime(9, 30) and state.gth_intercept is not None) else state.intercept, 4),
+                "window_days": state.window_days,
+                "threshold_pts": round(state.spx_threshold_pts, 2),
+            },
+            "overvix": gth_overvix,
+            "current_point": gth_curr_pt,
+            "confluence": gth_confluence,
         },
         "connection": {
             "connected": state.is_connected,
@@ -1300,18 +1976,25 @@ async def broadcast_loop():
                     except Exception as e:
                         print(f"[IBKR Reconnect] Still waiting for TWS/Gateway: {e}")
 
-            # Check for RTH open transition (09:30 ET), periodic intraday refresh every 60s, or market close final sync
+            # Check for GTH open (03:15 ET), RTH open (09:30 ET), 60s periodic bar sync during active hours, or post-close settlement sync
             if state.is_connected and state.ib and state.ib.isConnected():
                 should_refresh = False
-                # If market just opened at 09:30 ET and active session is still the prior day
-                if is_weekday and (now_et.time() >= dtime(9, 30)) and (state.active_session_date != today_et):
+                win_loop = classify_market_window(now_et)
+                # 03:15 ET GTH open transition for today's CBOE VIX pre-market session
+                if is_weekday and (dtime(3, 15) <= now_et.time() < dtime(9, 15)) and (state.gth_session_date != today_et):
                     should_refresh = True
-                # Periodic refresh every 60s during RTH to pull latest 1-min bars
-                elif is_weekday and (dtime(9, 30) <= now_et.time() < dtime(16, 0)) and (now - last_hist_refresh >= 60.0):
+                # 09:30 ET RTH open transition when active session is still prior day
+                elif is_weekday and (now_et.time() >= dtime(9, 30)) and (state.active_session_date != today_et):
                     should_refresh = True
-                # Post-close final sync: if RTH ended (>= 16:00 ET) and we haven't synced since 16:00 ET today
-                elif is_weekday and (now_et.time() >= dtime(16, 0)) and (last_hist_refresh < datetime.combine(now_et.date(), dtime(16, 0)).replace(tzinfo=pytz.timezone('US/Eastern')).timestamp()):
+                # Periodic refresh every 60s during RTH (09:30-16:00) OR CBOE GTH active windows (03:15-09:15 & 16:00-16:15)
+                elif is_weekday and (win_loop["is_rth_window"] or win_loop["is_vix_gth_window"]) and (now - last_hist_refresh >= 60.0):
                     should_refresh = True
+                # Post-close final sync: immediately after 16:00 ET, and once after 16:15 curb to capture daily settlement basis
+                elif is_weekday and (now_et.time() >= dtime(16, 0)) and (last_hist_refresh < datetime.combine(now_et.date(), dtime(16, 0)).replace(tzinfo=ET_TZ).timestamp()):
+                    should_refresh = True
+                elif is_weekday and (now_et.time() >= dtime(16, 16)) and (state.last_eod_basis_sync_date != today_et):
+                    should_refresh = True
+                    state.last_eod_basis_sync_date = today_et
 
                 if should_refresh:
                     last_hist_refresh = now
@@ -1365,6 +2048,9 @@ async def lifespan(app: FastAPI):
             if state.spx_contract: state.ib.cancelMktData(state.spx_contract)
             if state.vix_contract: state.ib.cancelMktData(state.vix_contract)
             if state.vix3m_contract: state.ib.cancelMktData(state.vix3m_contract)
+            if state.ndx_contract: state.ib.cancelMktData(state.ndx_contract)
+            if state.vxn_contract: state.ib.cancelMktData(state.vxn_contract)
+            if state.es_contract: state.ib.cancelMktData(state.es_contract)
             state.ib.disconnect()
         except Exception:
             pass
@@ -1449,11 +2135,15 @@ async def get_bootstrap():
             res["ndx_raw"] = spot_raw
         if 'vxn' in df.columns:
             res["vxn_raw"] = vol_raw
+        if 'is_gth' in df.columns:
+            res["is_gth"] = [int(v) for v in df['is_gth'].tolist()]
         return res
 
-    # Format SPX & VIX Correlation across 8 horizons
+    # Format SPX & VIX Correlation across 8 horizons (+ GTH-enabled 1D/5D)
     corr_1d = format_corr_df(state.df_spx_vix_1d, 'spx_pct', 'vix_pt')
+    corr_1d_gth = format_corr_df(state.df_spx_vix_1d_gth, 'spx_pct', 'vix_pt')
     corr_5d = format_corr_df(state.df_spx_vix_5d, 'spx_pct', 'vix_pt')
+    corr_5d_gth = format_corr_df(state.df_spx_vix_5d_gth, 'spx_pct', 'vix_pt')
     corr_1m = format_corr_df(state.df_spx_vix_1m, 'spx_pct', 'vix_pt')
     corr_3m = format_corr_df(state.df_spx_vix_3m, 'spx_pct', 'vix_pt')
     corr_6m = format_corr_df(state.df_spx_vix_6m, 'spx_pct', 'vix_pt')
@@ -1601,6 +2291,10 @@ async def get_bootstrap():
         "history_1y": tech_vol_1y
     }
 
+    x_gth_hist = [round(float(v), 2) for v in state.df_spotvol_gth['spx_pct'].tolist()] if not state.df_spotvol_gth.empty else x_hist
+    y_gth_hist = [round(float(v), 2) for v in state.df_spotvol_gth['vix_pt'].tolist()] if not state.df_spotvol_gth.empty else y_hist
+    dates_gth_sv = [str(d)[:10] for d in state.df_spotvol_gth.index] if not state.df_spotvol_gth.empty else dates_sv
+
     return {
         **live,
         "overvix": {
@@ -1612,6 +2306,21 @@ async def get_bootstrap():
                 "x": corr_1d["spx_pct"],
                 "y": corr_1d["vix_pt"],
                 "times": corr_1d["times"]
+            },
+            "intraday_trail_gth": {
+                "x": corr_1d_gth["spx_pct"],
+                "y": corr_1d_gth["vix_pt"],
+                "times": corr_1d_gth["times"],
+                "is_gth": corr_1d_gth.get("is_gth", []),
+                "session_date": state.gth_session_date
+            },
+            "gth_model": {
+                **live["gth"]["model"],
+                "x_history": x_gth_hist,
+                "y_history": y_gth_hist,
+                "dates": dates_gth_sv,
+                "ref_spx": round(state.gth_ref_spx, 2) if state.gth_ref_spx else live["reference_closes"]["spx"],
+                "ref_vix": round(state.gth_ref_vix, 2) if state.gth_ref_vix else live["reference_closes"]["vix"],
             }
         },
         "term_structure": {
@@ -1636,7 +2345,9 @@ async def get_bootstrap():
             "rolling_corr": corr_1d["rolling_corr"],
             "current_corr": round(state.current_rolling_corr, 3),
             "1D": corr_1d,
+            "1D_GTH": corr_1d_gth,
             "5D": corr_5d,
+            "5D_GTH": corr_5d_gth,
             "1M": corr_1m,
             "3M": corr_3m,
             "6M": corr_6m,
@@ -1652,6 +2363,10 @@ async def get_bootstrap():
                 "YTD": round(state.corr_ytd, 3),
                 "1Y": round(state.corr_1y, 3),
                 "MAX": round(state.corr_max, 3)
+            },
+            "metrics_gth": {
+                "1D": round(state.current_rolling_corr_gth, 3),
+                "5D": round(state.corr_5d_gth, 3),
             }
         },
         "ndx": ndx_bootstrap,

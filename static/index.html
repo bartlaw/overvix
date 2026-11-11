@@ -65,6 +65,16 @@
         </button>
       </div>
 
+      <!-- GTH (ES Basis-Adjusted + Spot VIX) Toggle & Basis Badge -->
+      <div id="gth-control-group" class="flex items-center space-x-1.5 bg-slate-900/90 border border-slate-700/80 rounded-lg p-1 shadow-inner">
+        <button id="btn-gth-toggle" class="px-2.5 py-1 rounded text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1.5" title="Toggle Global Trading Hours (ES Futures Basis-Adjusted + Spot VIX, 03:15-16:15 ET) on SPX/VIX 1D & 5D">
+          <span id="gth-toggle-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+          <span>🌐 GTH</span>
+          <span id="gth-mode-pill" class="hidden text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-950 text-indigo-300 border border-indigo-700/60">ES+VIX</span>
+        </button>
+        <span id="gth-basis-badge" class="hidden text-[11px] font-mono px-2 py-0.5 rounded bg-slate-950/90 text-slate-300 border border-slate-700/70" title="Official RTH Settlement Basis (ES - SPX)">Basis: --</span>
+      </div>
+
       <!-- Global Date & Replay Controls -->
       <div class="flex items-center space-x-2 bg-slate-900/90 border border-slate-700/80 rounded-lg p-1 shadow-inner">
         <!-- Live Toggle Button -->
@@ -185,6 +195,7 @@
         <div class="mt-2">
           <div id="kpi-spx-price" class="text-xl font-bold font-mono tracking-tight text-white">---.--</div>
           <div id="kpi-spx-pct" class="text-xs font-mono font-medium text-slate-400 mt-0.5">--.--%</div>
+          <div id="kpi-spx-sub" class="text-[10px] font-mono text-indigo-300/90 mt-0.5 hidden"></div>
         </div>
       </div>
 
@@ -197,6 +208,7 @@
         <div class="mt-2">
           <div id="kpi-vix-price" class="text-xl font-bold font-mono tracking-tight text-cyan-300">--.--</div>
           <div id="kpi-vix-pt" class="text-xs font-mono font-medium text-slate-400 mt-0.5">--.-- pts</div>
+          <div id="kpi-vix-sub" class="text-[10px] font-mono text-slate-400 mt-0.5 hidden"></div>
         </div>
       </div>
 
@@ -789,7 +801,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v6.8 - remove Reset button, None is the unanchored baseline toggle) -->
-  <script src="/static/dashboard.js?v=6.8"></script>
+  <!-- DASHBOARD SCRIPT (v7.0 - GTH ES Futures + VIX Monitoring) -->
+  <script src="/static/dashboard.js?v=7.0"></script>
 </body>
 </html>
