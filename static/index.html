@@ -290,29 +290,28 @@
       
       <!-- LEFT PANEL: SPOT-VOL OVERVIX PLOT -->
       <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col shadow-md">
-        <div class="flex flex-wrap items-center justify-between pb-3 border-b border-slate-800/80 mb-2 gap-2">
-          <div>
-            <div class="flex items-center space-x-2">
+        <div id="spotvol-header" class="flex flex-wrap xl:flex-nowrap items-center justify-between pb-2.5 border-b border-slate-800/80 mb-2 gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center space-x-1.5 whitespace-nowrap">
               <h2 id="spotvol-title" class="text-sm font-bold text-white uppercase tracking-tight">Spot-Vol Regression &amp; Overvix Zone</h2>
-              <span id="trail-live-pill" class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800/60">+ Intraday Trail</span>
+              <span id="trail-live-pill" class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 flex-shrink-0">+ Intraday Trail</span>
             </div>
-            <p id="spotvol-sub" class="text-xs text-slate-400">SPX % vs VIX Point Move with +2.0 pt Threshold &amp; Today's Intraday Path</p>
+            <p id="spotvol-sub" class="text-[11px] text-slate-400 truncate">SPX % vs VIX Point Move with +2.0 pt Threshold &amp; Today's Intraday Path</p>
           </div>
 
-          <!-- Card 1 Header Controls: Selection Action Switch & Trail View Mode -->
-          <div class="flex flex-wrap items-center gap-2">
+          <!-- Card 1 Header Controls: Compact Selection Action Switch & Trail View Mode -->
+          <div class="flex items-center gap-1.5 flex-shrink-0">
             <!-- Scatter Selection Action Switch -->
-            <div class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium" title="Choose whether clicking a point on Spot-Vol Regression sets the Residual Monitor anchor (expanding range if needed) or loads that day's 1-min archive">
-              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider px-1">Select:</span>
-              <button id="btn-spotvol-click-anchor" class="px-2 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition">Set Anchor</button>
-              <button id="btn-spotvol-click-load" class="px-2 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">Load Day</button>
+            <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-[10px] font-medium whitespace-nowrap" title="Choose whether clicking a point on Spot-Vol Regression sets the Residual Monitor anchor (expanding range if needed) or loads that day's 1-min archive">
+              <button id="btn-spotvol-click-anchor" class="px-1.5 py-1 rounded-md text-[10px] font-semibold bg-cyan-500 text-black shadow-sm transition whitespace-nowrap">Set Anchor</button>
+              <button id="btn-spotvol-click-load" class="px-1.5 py-1 rounded-md text-[10px] font-semibold text-slate-400 hover:text-white transition whitespace-nowrap">Load Day</button>
             </div>
 
             <!-- Trail View Mode Selector -->
-            <div class="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs font-medium">
-              <button id="btn-trail-both" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition">Both</button>
-              <button id="btn-trail-today" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">Today Only</button>
-              <button id="btn-trail-60d" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">60D Only</button>
+            <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-[11px] font-medium whitespace-nowrap">
+              <button id="btn-trail-both" class="px-2 py-1 rounded-md text-[11px] font-semibold bg-cyan-500 text-black shadow-sm transition">Both</button>
+              <button id="btn-trail-today" class="px-2 py-1 rounded-md text-[11px] font-semibold text-slate-400 hover:text-white transition">Today Only</button>
+              <button id="btn-trail-60d" class="px-2 py-1 rounded-md text-[11px] font-semibold text-slate-400 hover:text-white transition">60D Only</button>
             </div>
           </div>
         </div>
@@ -816,7 +815,7 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v7.4 - Spot-Vol Selection Mode Switch & Anchor Auto-Range) -->
-  <script src="/static/dashboard.js?v=7.4"></script>
+  <!-- DASHBOARD SCRIPT (v7.5 - Compact Single-Row Card 1 Header Switch) -->
+  <script src="/static/dashboard.js?v=7.5"></script>
 </body>
 </html>

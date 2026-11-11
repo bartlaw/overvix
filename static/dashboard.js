@@ -836,8 +836,8 @@ function setupSpotVolClickSwitch() {
 
 function switchSpotVolClickAction(action) {
   spotVolClickAction = (action === 'load') ? 'load' : 'anchor';
-  const activeCls = "px-2 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
-  const idleCls = "px-2 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition";
+  const activeCls = "px-1.5 py-1 rounded-md text-[10px] font-semibold bg-cyan-500 text-black shadow-sm transition whitespace-nowrap";
+  const idleCls = "px-1.5 py-1 rounded-md text-[10px] font-semibold text-slate-400 hover:text-white transition whitespace-nowrap";
   if (btnSpotVolClickAnchor) {
     btnSpotVolClickAnchor.className = (spotVolClickAction === 'anchor') ? activeCls : idleCls;
   }
@@ -856,21 +856,22 @@ function switchSpotVolClickAction(action) {
 
 function switchTrailMode(mode) {
   currentTrailMode = mode;
-  const allTrailBtns = [btnTrailBoth, btnTrailToday, btnTrail60D];
-  allTrailBtns.forEach(btn => {
-    btn.className = "px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition";
+  const idleCls = "px-2 py-1 rounded-md text-[11px] font-semibold text-slate-400 hover:text-white transition";
+  const activeCls = "px-2 py-1 rounded-md text-[11px] font-semibold bg-cyan-500 text-black shadow-sm transition";
+  [btnTrailBoth, btnTrailToday, btnTrail60D].forEach(btn => {
+    btn.className = idleCls;
   });
 
   if (mode === 'both') {
-    btnTrailBoth.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
+    btnTrailBoth.className = activeCls;
     trailLivePill.textContent = "+ Intraday Trail";
     Plotly.restyle('overvix-chart', { visible: [true, true, true, true, true, true] });
   } else if (mode === 'today') {
-    btnTrailToday.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
+    btnTrailToday.className = activeCls;
     trailLivePill.textContent = "Today Trail Only";
     Plotly.restyle('overvix-chart', { visible: [false, true, true, true, true, true] });
   } else if (mode === '60d') {
-    btnTrail60D.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition";
+    btnTrail60D.className = activeCls;
     trailLivePill.textContent = "60D Scatter Only";
     Plotly.restyle('overvix-chart', { visible: [true, true, true, true, false, true] });
   }
