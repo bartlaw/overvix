@@ -609,15 +609,16 @@ function switchAssetPair(pair) {
     updateAnchorUI();
   }
 
-  // Re-render charts and UI immediately from cache
+  // Re-render charts and UI immediately from cache (preserving freshest live WS snapshot in live mode)
   const activeData = (currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap;
-  updateGthToggleUI(lastLiveUpdatePayload || activeData);
+  const liveOrActive = (currentViewMode === 'live' && lastLiveUpdatePayload) ? lastLiveUpdatePayload : activeData;
+  updateGthToggleUI(liveOrActive);
   if (activeData) {
     renderOvervixChart(activeData);
     renderTermStructureChart(currentTimeframe);
     renderCorrelationChart(currentCorrMode, currentCorrTf);
     updateCorrMetricDisplay();
-    updateUI(activeData);
+    updateUI(liveOrActive);
   }
 }
 
@@ -1021,6 +1022,40 @@ function updateCorrMetricDisplay() {
 // PLOTLY CHART INITIALIZATION & RENDERING
 // ==============================================================================
 
+/** Build the dotted vertical hairline and amber badge for overnight ES-only tracking on Chart 1. */
+function buildOvernightEsOverlay(gthObj) {
+  if (!gthObj || !gthObj.current_point || typeof gthObj.current_point.x !== 'number') {
+    return { shapes: [], annotations: [] };
+  }
+  const esX = gthObj.current_point.x;
+  const opensAt = gthObj.vix_opens_at || '03:15 ET';
+  return {
+    shapes: [{
+      type: 'line',
+      xref: 'x',
+      yref: 'paper',
+      x0: esX,
+      x1: esX,
+      y0: 0,
+      y1: 1,
+      line: { color: 'rgba(245, 158, 11, 0.55)', width: 1.5, dash: 'dot' }
+    }],
+    annotations: [{
+      xref: 'x',
+      yref: 'paper',
+      x: esX,
+      y: 0.98,
+      text: `Overnight ES: ${esX >= 0 ? '+' : ''}${esX.toFixed(2)}% (VIX @ ${opensAt})`,
+      showarrow: false,
+      font: { color: '#FBBF24', size: 10, family: 'monospace' },
+      bgcolor: 'rgba(15, 23, 42, 0.9)',
+      bordercolor: 'rgba(245, 158, 11, 0.5)',
+      borderwidth: 1,
+      borderpad: 3
+    }]
+  };
+}
+
 function renderOvervixChart(bootstrap) {
   const isNdx = (currentAssetPair === 'NDX');
   const gthMode = (!isNdx && !bootstrap.is_historical && isGthEnabled);
@@ -1185,34 +1220,9 @@ function renderOvervixChart(bootstrap) {
     }
   ];
 
-  const ovShapes = [];
-  const ovAnnotations = [];
-  if (isOvernightEs && gthObj && gthObj.current_point && typeof gthObj.current_point.x === 'number') {
-    const esX = gthObj.current_point.x;
-    ovShapes.push({
-      type: 'line',
-      xref: 'x',
-      yref: 'paper',
-      x0: esX,
-      x1: esX,
-      y0: 0,
-      y1: 1,
-      line: { color: 'rgba(245, 158, 11, 0.55)', width: 1.5, dash: 'dot' }
-    });
-    ovAnnotations.push({
-      xref: 'x',
-      yref: 'paper',
-      x: esX,
-      y: 0.98,
-      text: `Overnight ES: ${esX >= 0 ? '+' : ''}${esX.toFixed(2)}% (VIX @ ${gthObj.vix_opens_at || '03:15 ET'})`,
-      showarrow: false,
-      font: { color: '#FBBF24', size: 10, family: 'monospace' },
-      bgcolor: 'rgba(15, 23, 42, 0.9)',
-      bordercolor: 'rgba(245, 158, 11, 0.5)',
-      borderwidth: 1,
-      borderpad: 3
-    });
-  }
+  const overlay = (isOvernightEs && gthObj) ? buildOvernightEsOverlay(gthObj) : { shapes: [], annotations: [] };
+  const ovShapes = overlay.shapes;
+  const ovAnnotations = overlay.annotations;
 
   const sessionPeriodLabel = (bootstrap.is_historical && bootstrap.session_date)
     ? bootstrap.session_date
@@ -3626,6 +3636,7 @@ function updateUI(data) {
   // Real-Time Plotly Chart Updates
   // 5. Update Overvix / Over-VXN Plotly Chart Real-Time
   const isSpxGthLive = (!isNdx && isGthEnabled && data.session_status === 'GTH_ACTIVE' && data.gth && data.gth.current_point && data.gth.current_point.y !== null);
+  const isOvernightEsLive = (!isNdx && isGthEnabled && data.session_status === 'OVERNIGHT_ES_ONLY' && data.gth && data.gth.current_point && typeof data.gth.current_point.x === 'number');
   const activePt = (isNdx && ndx && ndx.current_point)
     ? ndx.current_point
     : (isSpxGthLive ? data.gth.current_point : data.current_point);
@@ -3633,7 +3644,23 @@ function updateUI(data) {
     ? ndx.overvix.is_overvixed
     : (isSpxGthLive && data.gth.overvix ? data.gth.overvix.is_overvixed : ov.is_overvixed);
 
-  if (activePt && activePt.y !== null) {
+  const ovChartEl = document.getElementById('overvix-chart');
+
+  if (isOvernightEsLive) {
+    // Check OVERNIGHT_ES_ONLY before falling back to RTH data.current_point, which still holds non-null y
+    const overlay = buildOvernightEsOverlay(data.gth);
+    const nextAnn = overlay.annotations[0];
+    const curAnn = ovChartEl && ovChartEl.layout && ovChartEl.layout.annotations ? ovChartEl.layout.annotations[0] : null;
+    if (!curAnn || curAnn.x !== nextAnn.x || curAnn.text !== nextAnn.text) {
+      Plotly.relayout('overvix-chart', {
+        shapes: overlay.shapes,
+        annotations: overlay.annotations
+      });
+    }
+  } else if (activePt && activePt.y !== null) {
+    if (ovChartEl && ovChartEl.layout && ((ovChartEl.layout.shapes && ovChartEl.layout.shapes.length > 0) || (ovChartEl.layout.annotations && ovChartEl.layout.annotations.length > 0))) {
+      Plotly.relayout('overvix-chart', { shapes: [], annotations: [] });
+    }
     const isLivePoint = (data.is_rth_active === true) || isSpxGthLive;
     const pointLabel = isSpxGthLive ? "Live GTH Point" : (isLivePoint ? "Live Point" : "Session Close Point");
     Plotly.restyle('overvix-chart', {
@@ -3665,15 +3692,6 @@ function updateUI(data) {
         text: [cachedTrail.times]
       }, [4]);
     }
-  } else if (!isNdx && isGthEnabled && data.session_status === 'OVERNIGHT_ES_ONLY' && data.gth && data.gth.current_point && typeof data.gth.current_point.x === 'number') {
-    // Update the overnight ES reference vertical hairline in Chart 1 without plotting a bogus Y residual
-    const esX = data.gth.current_point.x;
-    Plotly.relayout('overvix-chart', {
-      'shapes[0].x0': esX,
-      'shapes[0].x1': esX,
-      'annotations[0].x': esX,
-      'annotations[0].text': `Overnight ES: ${esX >= 0 ? '+' : ''}${esX.toFixed(2)}% (VIX @ ${data.gth.vix_opens_at || '03:15 ET'})`
-    });
   }
 
   // 6. Update Intraday Term Structure / Tech Vol Real-Time (when 1D is active)
