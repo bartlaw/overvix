@@ -4338,9 +4338,49 @@ async function initHistoricalControls() {
   const btnBannerBookmark = document.getElementById('btn-banner-bookmark');
   const inputDate = document.getElementById('input-session-date');
   const selectNotable = document.getElementById('select-notable-date');
+  const btnSessionDropdown = document.getElementById('btn-session-dropdown');
+  const sessionPopover = document.getElementById('session-popover');
+  const btnCloseSessionPopover = document.getElementById('btn-close-session-popover');
+  const btnPopoverReturnLive = document.getElementById('btn-popover-return-live');
 
   // Populate notable presets from API
   await refreshNotableDates();
+
+  // Popover toggle handling
+  if (btnSessionDropdown && sessionPopover) {
+    btnSessionDropdown.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sessionPopover.classList.toggle('hidden');
+    });
+  }
+
+  if (btnCloseSessionPopover && sessionPopover) {
+    btnCloseSessionPopover.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sessionPopover.classList.add('hidden');
+    });
+  }
+
+  if (btnPopoverReturnLive) {
+    btnPopoverReturnLive.addEventListener('click', () => {
+      returnToLiveMode();
+      if (sessionPopover) sessionPopover.classList.add('hidden');
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    if (sessionPopover && !sessionPopover.classList.contains('hidden')) {
+      if (!sessionPopover.contains(e.target) && (!btnSessionDropdown || !btnSessionDropdown.contains(e.target))) {
+        sessionPopover.classList.add('hidden');
+      }
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sessionPopover && !sessionPopover.classList.contains('hidden')) {
+      sessionPopover.classList.add('hidden');
+    }
+  });
 
   // Event handlers
   if (btnLive) btnLive.addEventListener('click', returnToLiveMode);
@@ -4353,15 +4393,22 @@ async function initHistoricalControls() {
   if (btnLoadDate) {
     btnLoadDate.addEventListener('click', () => {
       const d = inputDate ? inputDate.value : null;
-      if (d) loadHistoricalSession(d);
-      else alert("Please select or enter a date (YYYY-MM-DD).");
+      if (d) {
+        if (sessionPopover) sessionPopover.classList.add('hidden');
+        loadHistoricalSession(d);
+      } else {
+        alert("Please select or enter a date (YYYY-MM-DD).");
+      }
     });
   }
 
   if (inputDate) {
     const handleDate = (e) => {
       const d = e.target.value;
-      if (d && d.length === 10) loadHistoricalSession(d);
+      if (d && d.length === 10) {
+        if (sessionPopover) sessionPopover.classList.add('hidden');
+        loadHistoricalSession(d);
+      }
     };
     inputDate.addEventListener('change', handleDate);
     inputDate.addEventListener('input', handleDate);
@@ -4372,6 +4419,7 @@ async function initHistoricalControls() {
       const d = e.target.value;
       if (d) {
         if (inputDate) inputDate.value = d;
+        if (sessionPopover) sessionPopover.classList.add('hidden');
         loadHistoricalSession(d);
       }
     });
@@ -4432,6 +4480,18 @@ async function loadHistoricalSession(dateStr) {
       headerModeBadge.textContent = `ARCHIVE: ${dateStr}`;
       headerModeBadge.className = "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60 font-semibold";
     }
+
+    const sessionDropdownLabel = document.getElementById('session-dropdown-label');
+    const btnSessionDropdown = document.getElementById('btn-session-dropdown');
+    const sessionPopover = document.getElementById('session-popover');
+    const popoverLiveSection = document.getElementById('popover-live-section');
+
+    if (sessionDropdownLabel) sessionDropdownLabel.textContent = dateStr;
+    if (btnSessionDropdown) {
+      btnSessionDropdown.className = "px-2 py-0.5 rounded text-xs font-semibold text-amber-300 bg-amber-950/60 border border-amber-600/70 shadow-sm transition flex items-center space-x-1 cursor-pointer";
+    }
+    if (popoverLiveSection) popoverLiveSection.classList.remove('hidden');
+    if (sessionPopover) sessionPopover.classList.add('hidden');
 
     // Cache intraday series for the charts
     if (data.term_structure && data.term_structure.intraday_1d) {
@@ -4507,6 +4567,18 @@ function returnToLiveMode() {
   banner.classList.add('hidden');
   btnLive.className = "px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500 text-black shadow-sm transition flex items-center space-x-1.5";
   btnReturnLive.classList.add('hidden');
+
+  const sessionDropdownLabel = document.getElementById('session-dropdown-label');
+  const btnSessionDropdown = document.getElementById('btn-session-dropdown');
+  const sessionPopover = document.getElementById('session-popover');
+  const popoverLiveSection = document.getElementById('popover-live-section');
+
+  if (sessionDropdownLabel) sessionDropdownLabel.textContent = 'Replay';
+  if (btnSessionDropdown) {
+    btnSessionDropdown.className = "px-2 py-0.5 rounded text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition flex items-center space-x-1 cursor-pointer";
+  }
+  if (popoverLiveSection) popoverLiveSection.classList.add('hidden');
+  if (sessionPopover) sessionPopover.classList.add('hidden');
 
   if (headerModeBadge) {
     if (cachedBootstrap && cachedBootstrap.is_rth_active) {
