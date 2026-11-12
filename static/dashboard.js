@@ -481,8 +481,8 @@ function updateGthToggleUI(data = lastLiveUpdatePayload || cachedBootstrap) {
 
   if (gthControlGroup) {
     gthControlGroup.className = isSpxLive
-      ? "flex items-center space-x-1.5 bg-slate-900/90 border border-slate-700/80 rounded-lg p-1 shadow-inner"
-      : "flex items-center space-x-1.5 bg-slate-900/90 border border-slate-800/60 rounded-lg p-1 shadow-inner opacity-45 pointer-events-none";
+      ? "flex items-center space-x-1.5 bg-slate-900/90 border border-slate-700/80 rounded-lg p-0.5 shadow-inner"
+      : "flex items-center space-x-1.5 bg-slate-900/90 border border-slate-800/60 rounded-lg p-0.5 shadow-inner opacity-45 pointer-events-none";
   }
 
   btnGthToggle.disabled = !isSpxLive;
@@ -534,8 +534,8 @@ function updateGthToggleUI(data = lastLiveUpdatePayload || cachedBootstrap) {
     if (gth && gth.basis !== null && gth.basis !== undefined) {
       const sign = gth.basis >= 0 ? '+' : '';
       const sym = gth.es_symbol || 'ES';
-      gthBasisBadge.textContent = `${sym} Basis: ${sign}${gth.basis.toFixed(2)}`;
-      gthBasisBadge.title = `${gth.basis_source || 'RTH Close'} (${gth.basis_date || ''}) — Synthetic SPX = ES - Basis`;
+      gthBasisBadge.textContent = `Basis: ${sign}${gth.basis.toFixed(2)}`;
+      gthBasisBadge.title = `${sym} Settlement Basis (${gth.basis_source || 'RTH Close'} ${gth.basis_date || ''}): ${sign}${gth.basis.toFixed(2)} — Synthetic SPX = ES - Basis`;
       gthBasisBadge.classList.remove('hidden');
     } else {
       gthBasisBadge.classList.add('hidden');
@@ -3347,8 +3347,8 @@ function updateUI(data) {
       const connPill = document.getElementById('connection-pill');
       const connText = document.getElementById('connection-text');
       if (data.connection && data.connection.connected) {
-        connPill.className = "flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-medium bg-emerald-950/70 text-emerald-400 border border-emerald-800/60";
-        connText.textContent = `IBKR Connected [Port ${data.connection.port}]`;
+        connPill.className = "flex items-center space-x-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-950/70 text-emerald-400 border border-emerald-800/60";
+        connText.textContent = `IBKR [Port ${data.connection.port}]`;
       }
       return;
     }
@@ -3368,10 +3368,10 @@ function updateUI(data) {
   const connPill = document.getElementById('connection-pill');
   const connText = document.getElementById('connection-text');
   if (data.connection && data.connection.connected) {
-    connPill.className = "flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-medium bg-emerald-950/70 text-emerald-400 border border-emerald-800/60";
-    connText.textContent = `IBKR Connected [Port ${data.connection.port}]`;
+    connPill.className = "flex items-center space-x-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-950/70 text-emerald-400 border border-emerald-800/60";
+    connText.textContent = `IBKR [Port ${data.connection.port}]`;
   } else {
-    connPill.className = "flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-medium bg-red-950/70 text-red-400 border border-red-800/60";
+    connPill.className = "flex items-center space-x-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-red-950/70 text-red-400 border border-red-800/60";
     connText.textContent = "IBKR Disconnected";
   }
 
