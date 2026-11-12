@@ -48,24 +48,24 @@
 
   <!-- TOP HEADER -->
   <header class="border-b border-slate-800 bg-[#0c1220]/90 backdrop-blur sticky top-0 z-40 px-3 py-2">
-    <div class="w-full flex items-center gap-2 overflow-x-auto no-scrollbar">
+    <div class="w-full flex items-center justify-between gap-2 overflow-x-auto no-scrollbar">
       
-      <!-- Left: Brand & Title -->
+      <!-- Left: Brand, Asset Switcher & GTH Controls -->
       <div class="flex items-center space-x-2 shrink-0">
-        <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-amber-500 flex items-center justify-center shadow-md font-black text-black text-sm">
-          OV
-        </div>
-        <div>
-          <div class="flex items-center space-x-1.5">
-            <h1 class="text-sm font-bold tracking-tight text-white uppercase">Overvix</h1>
-            <span id="header-mode-badge" class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-semibold">IBKR Live</span>
+        <!-- Brand & Title -->
+        <div class="flex items-center space-x-2 shrink-0">
+          <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-amber-500 flex items-center justify-center shadow-md font-black text-black text-sm">
+            OV
           </div>
-          <p class="text-[11px] text-slate-400 leading-tight whitespace-nowrap">Spot-Vol &amp; Term Structure</p>
+          <div>
+            <div class="flex items-center space-x-1.5">
+              <h1 class="text-sm font-bold tracking-tight text-white uppercase">Overvix</h1>
+              <span id="header-mode-badge" class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-semibold">IBKR Live</span>
+            </div>
+            <p class="text-[11px] text-slate-400 leading-tight whitespace-nowrap">Spot-Vol &amp; Term Structure</p>
+          </div>
         </div>
-      </div>
 
-      <!-- Center: Controls (Asset Switcher + GTH + Date Replay) -->
-      <div class="flex items-center space-x-1.5 shrink-0">
         <!-- Asset Pair Switcher (SPX/VIX vs NDX/VXN) -->
         <div class="flex items-center space-x-1 bg-slate-900/90 border border-slate-700/80 rounded-lg p-0.5 shadow-inner">
           <button id="btn-asset-spx" class="px-2 py-0.5 rounded text-xs font-bold bg-cyan-500 text-black shadow-sm transition flex items-center space-x-1" title="Switch to S&P 500 (SPX & VIX)">
@@ -87,42 +87,42 @@
           </button>
           <span id="gth-basis-badge" class="hidden text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950/90 text-slate-300 border border-slate-700/70" title="Official RTH Settlement Basis (ES - SPX)">Basis: --</span>
         </div>
-
-        <!-- Global Date & Replay Controls -->
-        <div class="flex items-center space-x-1 bg-slate-900/90 border border-slate-700/80 rounded-lg p-0.5 shadow-inner">
-          <!-- Live Toggle Button -->
-          <button id="btn-mode-live" class="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500 text-black shadow-sm transition flex items-center space-x-1" title="View Real-Time Live Streaming Data">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-950 animate-pulse"></span>
-            <span>LIVE</span>
-          </button>
-
-          <!-- Date Picker Input + Load Button -->
-          <div class="flex items-center space-x-1 px-1 border-l border-slate-800">
-            <span class="text-xs text-slate-400">📅</span>
-            <input type="date" id="input-session-date" class="w-[98px] bg-slate-950 text-slate-200 border border-slate-700/80 rounded px-1 py-0.5 text-xs font-mono focus:border-cyan-400 focus:outline-none transition cursor-pointer" title="Pick an Intraday Session Date" />
-            <button id="btn-load-date" class="px-1.5 py-0.5 rounded text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white transition shadow-sm cursor-pointer" title="Load selected date">Load</button>
-          </div>
-
-          <!-- Notable Presets Dropdown -->
-          <select id="select-notable-date" class="max-w-[120px] bg-slate-950 text-slate-300 border border-slate-700/80 rounded px-1.5 py-0.5 text-xs font-medium focus:border-cyan-400 focus:outline-none transition cursor-pointer truncate" title="Quick Historical Regimes">
-            <option value="">Historical Sessions...</option>
-          </select>
-
-          <!-- Bookmark / Add Preset Button -->
-          <button id="btn-bookmark-date" class="px-1.5 py-0.5 rounded text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 hover:border-amber-500/50 transition shadow-sm cursor-pointer" title="Save current/selected date to quick presets">
-            <span>⭐</span>
-          </button>
-
-          <!-- Return to Live Action Button (active in historical mode) -->
-          <button id="btn-return-live" class="hidden px-2 py-0.5 rounded text-xs font-bold bg-amber-500 hover:bg-amber-400 text-black shadow transition flex items-center space-x-1 animate-pulse" title="Resume Live Real-Time Stream">
-            <span>↺</span>
-            <span>Return to Live</span>
-          </button>
-        </div>
       </div>
 
-      <!-- Right: Action Controls & Status (ml-auto pins to far right) -->
-      <div class="flex items-center space-x-1.5 shrink-0 ml-auto">
+      <!-- Middle: Global Date & Replay Controls (LIVE, Date, Load, Presets) -->
+      <div class="flex items-center space-x-1 bg-slate-900/90 border border-slate-700/80 rounded-lg p-0.5 shadow-inner shrink-0 mx-auto">
+        <!-- Live Toggle Button -->
+        <button id="btn-mode-live" class="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500 text-black shadow-sm transition flex items-center space-x-1" title="View Real-Time Live Streaming Data">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-950 animate-pulse"></span>
+          <span>LIVE</span>
+        </button>
+
+        <!-- Date Picker Input + Load Button -->
+        <div class="flex items-center space-x-1 px-1 border-l border-slate-800">
+          <span class="text-xs text-slate-400">📅</span>
+          <input type="date" id="input-session-date" class="w-[98px] bg-slate-950 text-slate-200 border border-slate-700/80 rounded px-1 py-0.5 text-xs font-mono focus:border-cyan-400 focus:outline-none transition cursor-pointer" title="Pick an Intraday Session Date" />
+          <button id="btn-load-date" class="px-1.5 py-0.5 rounded text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white transition shadow-sm cursor-pointer" title="Load selected date">Load</button>
+        </div>
+
+        <!-- Notable Presets Dropdown -->
+        <select id="select-notable-date" class="max-w-[120px] bg-slate-950 text-slate-300 border border-slate-700/80 rounded px-1.5 py-0.5 text-xs font-medium focus:border-cyan-400 focus:outline-none transition cursor-pointer truncate" title="Quick Historical Regimes">
+          <option value="">Historical Sessions...</option>
+        </select>
+
+        <!-- Bookmark / Add Preset Button -->
+        <button id="btn-bookmark-date" class="px-1.5 py-0.5 rounded text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 hover:border-amber-500/50 transition shadow-sm cursor-pointer" title="Save current/selected date to quick presets">
+          <span>⭐</span>
+        </button>
+
+        <!-- Return to Live Action Button (active in historical mode) -->
+        <button id="btn-return-live" class="hidden px-2 py-0.5 rounded text-xs font-bold bg-amber-500 hover:bg-amber-400 text-black shadow transition flex items-center space-x-1 animate-pulse" title="Resume Live Real-Time Stream">
+          <span>↺</span>
+          <span>Return to Live</span>
+        </button>
+      </div>
+
+      <!-- Right: Action Controls & Status -->
+      <div class="flex items-center space-x-1.5 shrink-0">
         
         <!-- IBKR Status Pill -->
         <div id="connection-pill" class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-950/70 text-emerald-400 border border-emerald-800/60">
@@ -831,8 +831,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v7.9 - Rock-Solid Single-Row Header Layout) -->
-  <script src="/static/dashboard.js?v=7.9"></script>
+  <!-- DASHBOARD SCRIPT (v8.0 - Centered Live & Load Replay Controls) -->
+  <script src="/static/dashboard.js?v=8.0"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>
