@@ -7,6 +7,14 @@
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="alternate icon" type="image/x-icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" sizes="192x192" href="/static/favicon-192.png">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Overvix">
+  <meta name="application-name" content="Overvix">
+  <meta name="description" content="High-performance real-time volatility terminal powered by Interactive Brokers (IBKR)">
   
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -130,6 +138,12 @@
         <button id="btn-settings" class="flex items-center space-x-1 px-3 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
           <span>⚙️</span>
           <span>Config</span>
+        </button>
+
+        <!-- PWA Native Install App Button -->
+        <button id="btn-pwa-install" class="hidden flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-cyan-500 hover:bg-cyan-400 text-black shadow-sm transition cursor-pointer" title="Install Overvix App (Pin to Windows Taskbar)">
+          <span>📥</span>
+          <span>Install App</span>
         </button>
 
       </div>
@@ -815,7 +829,50 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v7.7 - Live Bar Streaming Fallback for NDX/VXN/VIX3M) -->
-  <script src="/static/dashboard.js?v=7.7"></script>
+  <!-- DASHBOARD SCRIPT (v7.8 - PWA Enabled & Port 8082 Default) -->
+  <script src="/static/dashboard.js?v=7.8"></script>
+
+  <!-- PWA Service Worker & Install Handler -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+          .then(reg => {
+            console.log('[PWA] Service Worker registered with scope:', reg.scope);
+          })
+          .catch(err => {
+            console.warn('[PWA] Service Worker registration failed:', err);
+          });
+      });
+    }
+
+    let deferredInstallPrompt = null;
+    const btnPwaInstall = document.getElementById('btn-pwa-install');
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      // Prevent browser default mini-infobar on mobile, capture event for desktop button and omnibox
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      if (btnPwaInstall) {
+        btnPwaInstall.classList.remove('hidden');
+        btnPwaInstall.onclick = async () => {
+          if (!deferredInstallPrompt) return;
+          deferredInstallPrompt.prompt();
+          const { outcome } = await deferredInstallPrompt.userChoice;
+          console.log('[PWA] Install prompt outcome:', outcome);
+          deferredInstallPrompt = null;
+          btnPwaInstall.classList.add('hidden');
+        };
+      }
+    });
+
+    window.addEventListener('appinstalled', () => {
+      console.log('[PWA] Overvix successfully installed');
+      deferredInstallPrompt = null;
+      if (btnPwaInstall) {
+        btnPwaInstall.classList.add('hidden');
+      }
+    });
+  </script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 *.png
-!static/favicon-192.png
+!static/favicon-*.png
 .venv/
 __pycache__/
 data/

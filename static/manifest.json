@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json.schemastore.org/web-manifest-combined.json",
+  "name": "Overvix & Volatility Term Structure",
+  "short_name": "Overvix",
+  "description": "Real-time volatility terminal powered by Interactive Brokers (IBKR): Spot-Vol Regression, Overvix Residuals, and Term Structure Inversion.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#080c14",
+  "theme_color": "#0b1220",
+  "categories": ["finance", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/static/favicon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/favicon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/favicon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/static/favicon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "SPX & VIX Terminal",
+      "short_name": "SPX",
+      "description": "Open live S&P 500 and VIX Spot-Vol monitor",
+      "url": "/?pair=SPX",
+      "icons": [{ "src": "/static/favicon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "NDX & VXN Terminal",
+      "short_name": "NDX",
+      "description": "Open live Nasdaq-100 and VXN Tech-Vol monitor",
+      "url": "/?pair=NDX",
+      "icons": [{ "src": "/static/favicon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

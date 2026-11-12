@@ -13,7 +13,7 @@ Requirements:
 
 Usage:
     .\.venv\Scripts\python.exe dashboard.py
-    .\.venv\Scripts\python.exe dashboard.py --port 7496 --web-port 8000
+    .\.venv\Scripts\python.exe dashboard.py --port 7496 --web-port 8082
     .\.venv\Scripts\python.exe dashboard.py --no-browser
 """
 
@@ -76,7 +76,7 @@ from session_history import (
 DEFAULT_IBKR_HOST = '127.0.0.1'
 DEFAULT_IBKR_PORT = 7496        # 7496: TWS Live, 7497: TWS Paper, 4001: Gateway Live, 4002: Gateway Paper
 DEFAULT_CLIENT_ID = 20
-DEFAULT_WEB_PORT = 8000
+DEFAULT_WEB_PORT = 8082
 DEFAULT_WINDOW_DAYS = 60
 DEFAULT_SPX_THRESHOLD_PTS = 2.0
 DEFAULT_NDX_THRESHOLD_PTS = 2.5
@@ -2202,7 +2202,7 @@ async def lifespan(app: FastAPI):
     print("STARTING OVERVIX & VIX/VIX3M UNIFIED DASHBOARD")
     print("=" * 65)
 
-    await connect_and_init_ibkr(DEFAULT_IBKR_HOST, DEFAULT_IBKR_PORT, DEFAULT_CLIENT_ID)
+    await connect_and_init_ibkr(DEFAULT_IBKR_HOST, state.port, state.client_id)
     background_broadcast_task = asyncio.create_task(broadcast_loop())
 
     yield
@@ -2244,6 +2244,26 @@ async def get_index():
 async def get_favicon():
     favicon_file = os.path.join(static_dir, 'favicon.ico')
     return FileResponse(favicon_file)
+
+
+@app.get("/manifest.json", include_in_schema=False)
+@app.get("/manifest.webmanifest", include_in_schema=False)
+async def get_manifest():
+    manifest_file = os.path.join(static_dir, 'manifest.json')
+    return FileResponse(manifest_file, media_type="application/manifest+json")
+
+
+@app.get("/sw.js", include_in_schema=False)
+async def get_service_worker():
+    sw_file = os.path.join(static_dir, 'sw.js')
+    return FileResponse(
+        sw_file,
+        media_type="application/javascript",
+        headers={
+            "Service-Worker-Allowed": "/",
+            "Cache-Control": "no-cache, no-store, must-revalidate"
+        }
+    )
 
 
 @app.get("/api/bootstrap")
