@@ -14,7 +14,7 @@ Requirements:
 Usage:
     .\.venv\Scripts\python.exe dashboard.py
     .\.venv\Scripts\python.exe dashboard.py --port 7496 --web-port 8082
-    .\.venv\Scripts\python.exe dashboard.py --no-browser
+    .\.venv\Scripts\python.exe dashboard.py --open-browser
 """
 
 import sys
@@ -2719,13 +2719,16 @@ def main():
     parser.add_argument('--port', type=int, default=DEFAULT_IBKR_PORT, help=f"IBKR socket port (default: {DEFAULT_IBKR_PORT})")
     parser.add_argument('--web-port', type=int, default=DEFAULT_WEB_PORT, help=f"Web server port (default: {DEFAULT_WEB_PORT})")
     parser.add_argument('--client-id', type=int, default=DEFAULT_CLIENT_ID, help=f"API Client ID (default: {DEFAULT_CLIENT_ID})")
-    parser.add_argument('--no-browser', action='store_true', help="Do not automatically open browser on launch")
+    parser.add_argument('--open-browser', '--browser', dest='open_browser', action='store_true', default=False,
+                        help="Automatically open web browser on launch (default: False)")
+    parser.add_argument('--no-browser', dest='open_browser', action='store_false',
+                        help="Do not automatically open browser on launch (default behavior)")
     args = parser.parse_args()
 
     state.port = args.port
     state.client_id = args.client_id
 
-    if not args.no_browser:
+    if args.open_browser:
         def open_browser():
             url = f"http://localhost:{args.web_port}"
             # Poll /api/status until server is responsive before opening browser

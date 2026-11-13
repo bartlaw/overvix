@@ -182,12 +182,15 @@ To receive live streaming trades and daily historical bars, your IBKR account re
 ```bash
 python dashboard.py
 ```
-This automatically connects to IBKR on port `7496`, launches the server on `http://127.0.0.1:8082`, and opens your default browser.
+This connects to IBKR on port `7496` and launches the server on `http://127.0.0.1:8082`. It runs headlessly by default without auto-opening a browser tab (ideal when using the pinned PWA app or keeping an existing browser tab open).
 
-### Headless / Background Mode (No Browser Popup)
+### Open Web Browser on Launch
 ```bash
-python dashboard.py --no-browser
+python dashboard.py --open-browser
+# or:
+python dashboard.py --browser
 ```
+Automatically launches your default browser pointing to `http://127.0.0.1:8082`.
 
 ### CLI Arguments & Options
 | Flag | Type | Default | Description |
@@ -195,15 +198,16 @@ python dashboard.py --no-browser
 | `--port` | `int` | `7496` | IBKR TWS / Gateway socket port (`7496` Live, `7497` Paper, `4001`/`4002` Gateway). |
 | `--web-port` | `int` | `8082` | Port for the terminal web interface and API. |
 | `--client-id` | `int` | `20` | Unique API client ID for the IBKR connection. |
-| `--no-browser` | `flag` | `False` | Disables automatic browser opening upon server start. |
+| `--open-browser`, `--browser` | `flag` | `False` | Automatically opens your default web browser upon launch. |
+| `--no-browser` | `flag` | `True` (default) | Explicitly prevents opening the browser on launch. |
 
 #### Custom Examples
 ```bash
 # Connect to TWS Paper Trading on port 7497
 python dashboard.py --port 7497
 
-# Connect to IB Gateway on port 4001 with custom web port 8080
-python dashboard.py --port 4001 --web-port 8080 --client-id 42 --no-browser
+# Connect to IB Gateway on port 4001 with custom web port 8080 and auto-open browser
+python dashboard.py --port 4001 --web-port 8080 --client-id 42 --open-browser
 ```
 
 ---
