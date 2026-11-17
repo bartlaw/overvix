@@ -354,6 +354,7 @@ async def subscribe_live_bar_streams(today_et: Optional[str] = None):
         ('vix3m', state.vix3m_contract, state.vix3m_ticker, state.latest_vix3m_close),
         ('ndx', state.ndx_contract, state.ndx_ticker, state.latest_ndx_close),
         ('vxn', state.vxn_contract, state.vxn_ticker, state.latest_vxn_close),
+        ('cor1m', state.cor1m_contract, state.cor1m_ticker, state.cor1m_val or 0.0),
     ]
     targets = []
     for key, contract, ticker, fb in specs:
@@ -566,7 +567,8 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
         state.is_connected = False
         return False
 
-    state.ib.reqMarketDataType(3)
+    # Request real-time streaming market data (type 1). Type 3 suppresses live streaming on Cboe correlation indexes (e.g. COR1M).
+    state.ib.reqMarketDataType(1)
 
     # 1. Qualify Contracts
     state.spx_contract = Index('SPX', 'CBOE', 'USD')
@@ -1414,6 +1416,15 @@ async def refresh_historical_data():
             state.ib.reqHistoricalDataAsync(state.es_contract, '', '1 M', '1 day', 'TRADES', True, 1) if has_es else _empty_bars(),
         )
 
+        # Update COR1M latest close / intraday bar
+        if state.cor1m_contract and state.cor1m_contract.conId:
+            try:
+                b_cor1m = await state.ib.reqHistoricalDataAsync(state.cor1m_contract, '', '1 D', '1 min', 'TRADES', True, 1)
+                if b_cor1m:
+                    state.cor1m_val = float(b_cor1m[-1].close)
+            except Exception:
+                pass
+
         # Pre-market / GTH Session Synchronization:
         now_et = datetime.now(ET_TZ)
         today_et = now_et.strftime('%Y-%m-%d')
@@ -1800,16 +1811,16 @@ def compute_live_payload() -> Dict[str, Any]:
 
     # COR1M Evaluation
     cor1m_val = None
-    if state.cor1m_ticker:
-        t = state.cor1m_ticker
-        p = t.last if (t.last and not math.isnan(t.last) and t.last > 0) else (
-            t.close if (t.close and not math.isnan(t.close) and t.close > 0) else (
-                t.marketPrice() if (t.marketPrice() and not math.isnan(t.marketPrice())) else None
-            )
-        )
-        if p and p > 0:
-            cor1m_val = p
-            state.cor1m_val = p
+    if state.cor1m_contract:
+        c_val, c_src = resolve_live_price('cor1m', state.cor1m_ticker, state.cor1m_val or 0.0, None, 'cor1m', today_et, is_live_rth)
+        if c_val and c_val > 0:
+            cor1m_val = c_val
+            state.cor1m_val = c_val
+    if cor1m_val is None and state.cor1m_ticker:
+        c_val, c_src = get_current_price(state.cor1m_ticker, fallback_price=0.0)
+        if c_val and c_val > 0:
+            cor1m_val = c_val
+            state.cor1m_val = c_val
     if cor1m_val is None and state.cor1m_val is not None:
         cor1m_val = state.cor1m_val
 
