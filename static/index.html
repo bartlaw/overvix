@@ -265,7 +265,22 @@
         </div>
       </div>
 
-      <!-- Card 3: Structure / Secondary Vol (VIX3M or VXN - VIX Tech Spread) -->
+      <!-- Card 3: Overvix / Over-VXN Residual Card -->
+      <div id="card-overvix-residual" class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition">
+        <div class="flex items-center justify-between">
+          <span id="lbl-kpi-residual" class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">Overvix Residual</span>
+          <span id="kpi-overvix-status" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase">NORMAL</span>
+        </div>
+        <div class="mt-2">
+          <div id="kpi-residual-pts" class="text-xl font-bold font-mono tracking-tight text-cyan-400">--.-- pts</div>
+          <div class="text-[10px] font-mono text-slate-400 mt-0.5 flex items-center justify-between">
+            <span><span id="lbl-kpi-expected">Exp &Delta;</span>: <span id="kpi-expected-vix" class="text-slate-300 font-semibold">--.-- pts</span></span>
+            <span id="disp-thresh-pts" class="hidden">2.0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 4: Structure / Secondary Vol (VIX3M or VXN - VIX Tech Spread) -->
       <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
         <div class="flex items-center justify-between">
           <span id="lbl-kpi-sec-vol" class="text-[11px] font-semibold tracking-wider text-amber-400 uppercase">VIX3M (90-Day)</span>
@@ -277,7 +292,7 @@
         </div>
       </div>
 
-      <!-- Card 4: Ratio / Premium (VIX/VIX3M or VXN/VIX) -->
+      <!-- Card 5: Ratio / Premium (VIX/VIX3M or VXN/VIX) -->
       <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
         <div class="flex items-center justify-between">
           <span id="lbl-kpi-ratio" class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">VIX / VIX3M</span>
@@ -289,7 +304,7 @@
         </div>
       </div>
 
-      <!-- Card 5: COR1M (1-Month Implied Correlation) -->
+      <!-- Card 6: COR1M (1-Month Implied Correlation) -->
       <div id="card-cor1m" class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition">
         <div class="flex items-center justify-between">
           <span class="text-[11px] font-semibold tracking-wider text-purple-400 uppercase">COR1M (1M)</span>
@@ -301,7 +316,7 @@
         </div>
       </div>
 
-      <!-- Card 6: 25Δ Risk Reversal (Put Skew) -->
+      <!-- Card 7: 25Δ Risk Reversal (Put Skew) -->
       <div id="card-rr25" class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition">
         <div class="flex items-center justify-between">
           <span id="lbl-kpi-rr" class="text-[11px] font-semibold tracking-wider text-amber-400 uppercase">25Δ Skew (RR)</span>
@@ -310,21 +325,6 @@
         <div class="mt-2">
           <div id="kpi-rr-val" class="text-xl font-bold font-mono tracking-tight text-amber-300">--.-- pts</div>
           <div id="lbl-rr-sub" class="text-[10px] text-slate-400 mt-0.5">Put IV &minus; Call IV</div>
-        </div>
-      </div>
-
-      <!-- Card 7: Overvix / Over-VXN Residual Card -->
-      <div id="card-overvix-residual" class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition">
-        <div class="flex items-center justify-between">
-          <span id="lbl-kpi-residual" class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">Overvix Residual</span>
-          <span id="kpi-overvix-status" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase">NORMAL</span>
-        </div>
-        <div class="mt-2">
-          <div id="kpi-residual-pts" class="text-xl font-bold font-mono tracking-tight text-cyan-400">--.-- pts</div>
-          <div class="text-[10px] font-mono text-slate-400 mt-0.5 flex items-center justify-between">
-            <span><span id="lbl-kpi-expected">Exp &Delta;</span>: <span id="kpi-expected-vix" class="text-slate-300 font-semibold">--.-- pts</span></span>
-            <span>Target &ge; +<span id="disp-thresh-pts">2.0</span></span>
-          </div>
         </div>
       </div>
 
