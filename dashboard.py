@@ -52,10 +52,10 @@ except RuntimeError:
 
 # Import IBKR library (prefer ib_async, fallback to ib_insync)
 try:
-    from ib_async import IB, Index, Future, util
+    from ib_async import IB, Index, Future, Option, Stock, util
 except ImportError:
     try:
-        from ib_insync import IB, Index, Future, util
+        from ib_insync import IB, Index, Future, Option, Stock, util
     except ImportError:
         IB = None
         Index = None
@@ -109,6 +109,11 @@ class DashboardState:
         self.ndx_contract = None
         self.vxn_contract = None
         self.es_contract = None
+        self.cor1m_contract = None
+        self.spx_rr_put_contract = None
+        self.spx_rr_call_contract = None
+        self.ndx_rr_put_contract = None
+        self.ndx_rr_call_contract = None
 
         # Tickers
         self.spx_ticker = None
@@ -117,6 +122,16 @@ class DashboardState:
         self.ndx_ticker = None
         self.vxn_ticker = None
         self.es_ticker = None
+        self.cor1m_ticker = None
+        self.spx_rr_put_ticker = None
+        self.spx_rr_call_ticker = None
+        self.ndx_rr_put_ticker = None
+        self.ndx_rr_call_ticker = None
+
+        # Live Skew & Correlation Metrics
+        self.cor1m_val: Optional[float] = None
+        self.spx_rr_val: Optional[float] = None
+        self.ndx_rr_val: Optional[float] = None
 
         # Fallback real-time 1-min bar streams for indices without reqMktData ticks (e.g. NDX/VXN/VIX3M)
         self.live_bars: Dict[str, Any] = {}
@@ -441,6 +456,87 @@ async def resolve_front_es_contract(ib_client) -> Optional[Any]:
         return None
 
 
+async def resolve_and_subscribe_rr_contracts(ib_client):
+    """
+    Resolve and subscribe to ~30 DTE 25-delta Put and 25-delta Call contracts
+    for real-time Risk Reversal (Put IV - Call IV) streaming via modelGreeks.
+    Supports SPX options and QQQ options (for NDX tech skew).
+    """
+    today = datetime.now().date()
+
+    # 1. SPX 25Δ Risk Reversal
+    try:
+        if state.spx_contract and state.spx_contract.conId:
+            chains = await ib_client.reqSecDefOptParamsAsync('SPX', '', 'IND', state.spx_contract.conId)
+            spx_chain = next((c for c in chains if c.exchange in ('SMART', 'CBOE') and c.tradingClass in ('SPX', 'SPXW')), None)
+            if not spx_chain and chains:
+                spx_chain = chains[0]
+            if spx_chain:
+                valid_exps = []
+                for exp_str in spx_chain.expirations:
+                    try:
+                        d = datetime.strptime(exp_str, '%Y%m%d').date()
+                        dte = (d - today).days
+                        if 18 <= dte <= 50:
+                            valid_exps.append((abs(dte - 30), exp_str, dte))
+                    except Exception:
+                        pass
+                if valid_exps:
+                    valid_exps.sort(key=lambda x: x[0])
+                    target_exp = valid_exps[0][1]
+                    spx_spot = state.latest_spx_close or 7420.0
+                    put_strike = round((spx_spot * 0.96) / 25.0) * 25.0
+                    call_strike = round((spx_spot * 1.035) / 25.0) * 25.0
+
+                    put_opt = Option('SPX', target_exp, put_strike, 'P', 'SMART', tradingClass='SPX')
+                    call_opt = Option('SPX', target_exp, call_strike, 'C', 'SMART', tradingClass='SPX')
+                    q = await ib_client.qualifyContractsAsync(put_opt, call_opt)
+                    if len(q) == 2:
+                        state.spx_rr_put_contract = q[0]
+                        state.spx_rr_call_contract = q[1]
+                        state.spx_rr_put_ticker = ib_client.reqMktData(state.spx_rr_put_contract, '106', False, False)
+                        state.spx_rr_call_ticker = ib_client.reqMktData(state.spx_rr_call_contract, '106', False, False)
+                        print(f" [Risk Reversal] SPX 25Δ options subscribed ({target_exp}): P{put_strike} / C{call_strike}")
+    except Exception as e:
+        print(f" [Risk Reversal] Warning: Failed to resolve SPX RR contracts: {e}")
+
+    # 2. Tech (QQQ) 25Δ Risk Reversal for NDX
+    try:
+        qqq_stock = Stock('QQQ', 'SMART', 'USD')
+        await ib_client.qualifyContractsAsync(qqq_stock)
+        chains_qqq = await ib_client.reqSecDefOptParamsAsync('QQQ', '', 'STK', qqq_stock.conId)
+        qqq_chain = next((c for c in chains_qqq if c.exchange == 'SMART'), None)
+        if not qqq_chain and chains_qqq:
+            qqq_chain = chains_qqq[0]
+        if qqq_chain:
+            valid_exps_qqq = []
+            for exp_str in qqq_chain.expirations:
+                try:
+                    d = datetime.strptime(exp_str, '%Y%m%d').date()
+                    dte = (d - today).days
+                    if 18 <= dte <= 50:
+                        valid_exps_qqq.append((abs(dte - 30), exp_str, dte))
+                except Exception:
+                    pass
+            if valid_exps_qqq:
+                valid_exps_qqq.sort(key=lambda x: x[0])
+                target_exp_qqq = valid_exps_qqq[0][1]
+                qqq_spot = 660.0
+                put_qqq_strike = round((qqq_spot * 0.96) / 5.0) * 5.0
+                call_qqq_strike = round((qqq_spot * 1.035) / 5.0) * 5.0
+                put_qqq = Option('QQQ', target_exp_qqq, put_qqq_strike, 'P', 'SMART')
+                call_qqq = Option('QQQ', target_exp_qqq, call_qqq_strike, 'C', 'SMART')
+                q_qqq = await ib_client.qualifyContractsAsync(put_qqq, call_qqq)
+                if len(q_qqq) == 2:
+                    state.ndx_rr_put_contract = q_qqq[0]
+                    state.ndx_rr_call_contract = q_qqq[1]
+                    state.ndx_rr_put_ticker = ib_client.reqMktData(state.ndx_rr_put_contract, '106', False, False)
+                    state.ndx_rr_call_ticker = ib_client.reqMktData(state.ndx_rr_call_contract, '106', False, False)
+                    print(f" [Risk Reversal] QQQ 25Δ options subscribed ({target_exp_qqq}): P{put_qqq_strike} / C{call_qqq_strike}")
+    except Exception as e:
+        print(f" [Risk Reversal] Warning: Failed to resolve QQQ RR contracts: {e}")
+
+
 async def connect_and_init_ibkr(host: str, port: int, client_id: int):
     """
     Connect to IBKR, qualify contracts, fetch historical bars, and subscribe to market data.
@@ -478,8 +574,9 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
     state.vix3m_contract = Index('VIX3M', 'CBOE', 'USD')
     state.ndx_contract = Index('NDX', 'NASDAQ', 'USD')
     state.vxn_contract = Index('VXN', 'CBOE', 'USD')
+    state.cor1m_contract = Index('COR1M', 'CBOE', 'USD')
 
-    print("[IBKR] Qualifying index contracts (SPX, VIX, VIX3M, NDX, VXN) & resolving ES future...")
+    print("[IBKR] Qualifying index contracts (SPX, VIX, VIX3M, NDX, VXN, COR1M) & resolving ES future...")
     _, state.es_contract = await asyncio.gather(
         state.ib.qualifyContractsAsync(state.spx_contract, state.vix_contract, state.ndx_contract, state.vxn_contract),
         resolve_front_es_contract(state.ib)
@@ -490,6 +587,12 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
         print("  VIX3M qualification failed. Trying legacy symbol VXV...")
         state.vix3m_contract = Index('VXV', 'CBOE', 'USD')
         await state.ib.qualifyContractsAsync(state.vix3m_contract)
+
+    try:
+        await state.ib.qualifyContractsAsync(state.cor1m_contract)
+        print(f" COR1M: conId={state.cor1m_contract.conId}, symbol={state.cor1m_contract.symbol}")
+    except Exception as e:
+        print(f" [IBKR] Warning: COR1M qualification failed: {e}")
 
     print(f" SPX: conId={state.spx_contract.conId}, symbol={state.spx_contract.symbol}")
     print(f" VIX: conId={state.vix_contract.conId}, symbol={state.vix_contract.symbol}")
@@ -505,14 +608,28 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
     await refresh_historical_data()
 
     # 3. Subscribe to Real-Time Streaming Tickers
-    print("[IBKR] Subscribing to live market data streams (SPX, VIX, VIX3M, NDX, VXN, ES)...")
+    print("[IBKR] Subscribing to live market data streams (SPX, VIX, VIX3M, NDX, VXN, ES, COR1M)...")
     state.spx_ticker = state.ib.reqMktData(state.spx_contract, '', False, False)
     state.vix_ticker = state.ib.reqMktData(state.vix_contract, '', False, False)
     state.vix3m_ticker = state.ib.reqMktData(state.vix3m_contract, '', False, False)
     state.ndx_ticker = state.ib.reqMktData(state.ndx_contract, '', False, False)
     state.vxn_ticker = state.ib.reqMktData(state.vxn_contract, '', False, False)
+    if state.cor1m_contract and state.cor1m_contract.conId:
+        state.cor1m_ticker = state.ib.reqMktData(state.cor1m_contract, '', False, False)
+        try:
+            c_bars = await state.ib.reqHistoricalDataAsync(
+                state.cor1m_contract, endDateTime='', durationStr='2 D', barSizeSetting='1 day', whatToShow='TRADES', useRTH=True, formatDate=1
+            )
+            if c_bars:
+                state.cor1m_val = float(c_bars[-1].close)
+                print(f" [COR1M] Baseline Close: {state.cor1m_val:.2f}")
+        except Exception as e:
+            print(f" [COR1M] Warning fetching baseline bars: {e}")
     if state.es_contract:
         state.es_ticker = state.ib.reqMktData(state.es_contract, '', False, False)
+
+    # 4. Resolve & Subscribe to 25Δ Risk Reversal Options Contracts (SPX & QQQ)
+    await resolve_and_subscribe_rr_contracts(state.ib)
 
     for _ in range(8):
         await asyncio.sleep(0.2)
@@ -1681,15 +1798,114 @@ def compute_live_payload() -> Dict[str, Any]:
         ndx_corr_status = "POSITIVE DECOUPLING"
         ndx_corr_badge = "DECOUPLED"
 
+    # COR1M Evaluation
+    cor1m_val = None
+    if state.cor1m_ticker:
+        t = state.cor1m_ticker
+        p = t.last if (t.last and not math.isnan(t.last) and t.last > 0) else (
+            t.close if (t.close and not math.isnan(t.close) and t.close > 0) else (
+                t.marketPrice() if (t.marketPrice() and not math.isnan(t.marketPrice())) else None
+            )
+        )
+        if p and p > 0:
+            cor1m_val = p
+            state.cor1m_val = p
+    if cor1m_val is None and state.cor1m_val is not None:
+        cor1m_val = state.cor1m_val
+
+    cor1m_is_coiled = bool(cor1m_val is not None and 0 < cor1m_val < 8.0)
+    if cor1m_val is not None:
+        if cor1m_val < 8.0:
+            cor1m_regime = "COILED (< 8)"
+            cor1m_badge = "COILED"
+        elif cor1m_val < 15.0:
+            cor1m_regime = "LOW CORR"
+            cor1m_badge = "LOW"
+        elif cor1m_val > 45.0:
+            cor1m_regime = "MACRO SYNC"
+            cor1m_badge = "SYNC"
+        else:
+            cor1m_regime = "NORMAL"
+            cor1m_badge = "NORMAL"
+    else:
+        cor1m_regime = "NORMAL"
+        cor1m_badge = "NORMAL"
+
+    # SPX 25Δ Risk Reversal Evaluation
+    spx_rr_val = None
+    spx_put_iv = None
+    spx_call_iv = None
+    if state.spx_rr_put_ticker and state.spx_rr_call_ticker:
+        mg_p = state.spx_rr_put_ticker.modelGreeks
+        mg_c = state.spx_rr_call_ticker.modelGreeks
+        if mg_p and mg_c and mg_p.impliedVol > 0 and mg_c.impliedVol > 0:
+            spx_put_iv = mg_p.impliedVol * 100.0
+            spx_call_iv = mg_c.impliedVol * 100.0
+            spx_rr_val = spx_put_iv - spx_call_iv
+            state.spx_rr_val = spx_rr_val
+    if spx_rr_val is None and state.spx_rr_val is not None:
+        spx_rr_val = state.spx_rr_val
+
+    if spx_rr_val is not None:
+        if spx_rr_val >= 7.5:
+            spx_rr_regime = "ELEVATED"
+            spx_rr_badge = "ELEVATED"
+        elif spx_rr_val < 3.5:
+            spx_rr_regime = "COMPLACENT"
+            spx_rr_badge = "COMPLACENT"
+        else:
+            spx_rr_regime = "NORMAL"
+            spx_rr_badge = "NORMAL"
+    else:
+        spx_rr_regime = "NORMAL"
+        spx_rr_badge = "NORMAL"
+
+    # NDX 25Δ Risk Reversal Evaluation (from QQQ options)
+    ndx_rr_val = None
+    ndx_put_iv = None
+    ndx_call_iv = None
+    if state.ndx_rr_put_ticker and state.ndx_rr_call_ticker:
+        mg_p = state.ndx_rr_put_ticker.modelGreeks
+        mg_c = state.ndx_rr_call_ticker.modelGreeks
+        if mg_p and mg_c and mg_p.impliedVol > 0 and mg_c.impliedVol > 0:
+            ndx_put_iv = mg_p.impliedVol * 100.0
+            ndx_call_iv = mg_c.impliedVol * 100.0
+            ndx_rr_val = ndx_put_iv - ndx_call_iv
+            state.ndx_rr_val = ndx_rr_val
+    if ndx_rr_val is None and state.ndx_rr_val is not None:
+        ndx_rr_val = state.ndx_rr_val
+
+    if ndx_rr_val is not None:
+        if ndx_rr_val >= 7.5:
+            ndx_rr_regime = "ELEVATED"
+            ndx_rr_badge = "ELEVATED"
+        elif ndx_rr_val < 3.5:
+            ndx_rr_regime = "COMPLACENT"
+            ndx_rr_badge = "COMPLACENT"
+        else:
+            ndx_rr_regime = "NORMAL"
+            ndx_rr_badge = "NORMAL"
+    else:
+        ndx_rr_regime = "NORMAL"
+        ndx_rr_badge = "NORMAL"
+
     # Master Confluence Signals (SPX)
     is_dual_alert = bool(is_overvixed and is_inverted)
+    is_volcano_alert = bool(cor1m_is_coiled and spx_rr_val is not None and spx_rr_val >= 7.0)
+    is_coiled_alert = bool(cor1m_is_coiled and not is_volcano_alert)
     is_overvix_alert = bool(is_overvixed and not is_inverted)
     is_inversion_alert = bool(is_inverted and not is_overvixed)
-    is_normal = bool(not is_overvixed and not is_inverted)
+    is_normal = bool(not is_overvixed and not is_inverted and not is_volcano_alert and not is_coiled_alert)
 
     if is_dual_alert:
         confluence_tag = "CAPITULATION DUAL ALERT"
         confluence_desc = "High-Conviction Mean-Reversion Long: Overvix Triggered + Vol Curve Inverted (Backwardation)"
+    elif is_volcano_alert:
+        confluence_tag = "VOLCANO SHOCK WARNING"
+        confluence_desc = f"Volcano Confluence: Implied Correlation is coiled ({cor1m_val:.1f} < 8.0) while 25Δ Skew is elevated (+{spx_rr_val:.2f} pts). High risk of correlation shock."
+    elif is_coiled_alert:
+        confluence_tag = "DISPERSION COILED (< 8.0)"
+        confluence_desc = f"Extreme Single-Stock Dispersion (COR1M: {cor1m_val:.2f} < 8.0). Index volatility compressed; vulnerable to correlation shock."
     elif is_overvix_alert:
         confluence_tag = "OVERVIX ALERT"
         confluence_desc = f"Spot-Vol Shock: VIX is {residual_pts:+.2f} pts above expected line."
@@ -2038,6 +2254,19 @@ def compute_live_payload() -> Dict[str, Any]:
             "badge": corr_badge,
             "desc": corr_desc
         },
+        "cor1m": {
+            "current": round(cor1m_val, 2) if cor1m_val is not None else None,
+            "regime": cor1m_regime,
+            "badge": cor1m_badge,
+            "is_coiled": cor1m_is_coiled
+        },
+        "risk_reversal": {
+            "current": round(spx_rr_val, 2) if spx_rr_val is not None else None,
+            "put_iv": round(spx_put_iv, 2) if spx_put_iv is not None else None,
+            "call_iv": round(spx_call_iv, 2) if spx_call_iv is not None else None,
+            "regime": spx_rr_regime,
+            "badge": spx_rr_badge
+        },
         "confluence": {
             "tag": confluence_tag,
             "description": confluence_desc,
@@ -2083,7 +2312,14 @@ def compute_live_payload() -> Dict[str, Any]:
                 "status": ndx_corr_status,
                 "badge": ndx_corr_badge
             },
-            "confluence": {
+            "risk_reversal": {
+                "current": round(ndx_rr_val, 2) if ndx_rr_val is not None else None,
+                "put_iv": round(ndx_put_iv, 2) if ndx_put_iv is not None else None,
+                "call_iv": round(ndx_call_iv, 2) if ndx_call_iv is not None else None,
+                "regime": ndx_rr_regime,
+                "badge": ndx_rr_badge
+            },
+        "confluence": {
                 "tag": ndx_confluence_tag,
                 "description": ndx_confluence_desc,
                 "is_overvixed": is_overvxned
@@ -2221,6 +2457,11 @@ async def lifespan(app: FastAPI):
             if state.ndx_contract: state.ib.cancelMktData(state.ndx_contract)
             if state.vxn_contract: state.ib.cancelMktData(state.vxn_contract)
             if state.es_contract: state.ib.cancelMktData(state.es_contract)
+            if state.cor1m_contract: state.ib.cancelMktData(state.cor1m_contract)
+            if state.spx_rr_put_contract: state.ib.cancelMktData(state.spx_rr_put_contract)
+            if state.spx_rr_call_contract: state.ib.cancelMktData(state.spx_rr_call_contract)
+            if state.ndx_rr_put_contract: state.ib.cancelMktData(state.ndx_rr_put_contract)
+            if state.ndx_rr_call_contract: state.ib.cancelMktData(state.ndx_rr_call_contract)
             state.ib.disconnect()
         except Exception:
             pass

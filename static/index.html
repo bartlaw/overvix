@@ -237,7 +237,7 @@
   <main class="flex-1 max-w-[1720px] w-full mx-auto p-4 space-y-4">
     
     <!-- KPI METRIC CARDS -->
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
       
       <!-- Card 1: Primary Asset (SPX or NDX) -->
       <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
@@ -289,19 +289,31 @@
         </div>
       </div>
 
-      <!-- Card 5: Expected Vol Move -->
-      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
+      <!-- Card 5: COR1M (1-Month Implied Correlation) -->
+      <div id="card-cor1m" class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition">
         <div class="flex items-center justify-between">
-          <span id="lbl-kpi-expected" class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">Expected &Delta;VIX</span>
-          <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">OLS</span>
+          <span class="text-[11px] font-semibold tracking-wider text-purple-400 uppercase">COR1M (1M)</span>
+          <span id="tag-cor1m-regime" class="text-[10px] px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/50 uppercase font-semibold">---</span>
         </div>
         <div class="mt-2">
-          <div id="kpi-expected-vix" class="text-xl font-bold font-mono tracking-tight text-slate-200">--.--</div>
-          <div id="lbl-kpi-exp-sub" class="text-[10px] text-slate-400 mt-0.5">Spot-Vol Model</div>
+          <div id="kpi-cor1m-val" class="text-xl font-bold font-mono tracking-tight text-purple-300">--.--</div>
+          <div id="lbl-cor1m-sub" class="text-[10px] text-slate-400 mt-0.5">Dispersion @ &lt; 8.0</div>
         </div>
       </div>
 
-      <!-- Card 6: Overvix / Over-VXN Residual Card -->
+      <!-- Card 6: 25Δ Risk Reversal (Put Skew) -->
+      <div id="card-rr25" class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition">
+        <div class="flex items-center justify-between">
+          <span id="lbl-kpi-rr" class="text-[11px] font-semibold tracking-wider text-amber-400 uppercase">25Δ Skew (RR)</span>
+          <span id="tag-rr-regime" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50 uppercase font-semibold">---</span>
+        </div>
+        <div class="mt-2">
+          <div id="kpi-rr-val" class="text-xl font-bold font-mono tracking-tight text-amber-300">--.-- pts</div>
+          <div id="lbl-rr-sub" class="text-[10px] text-slate-400 mt-0.5">Put IV &minus; Call IV</div>
+        </div>
+      </div>
+
+      <!-- Card 7: Overvix / Over-VXN Residual Card -->
       <div id="card-overvix-residual" class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition">
         <div class="flex items-center justify-between">
           <span id="lbl-kpi-residual" class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">Overvix Residual</span>
@@ -309,7 +321,10 @@
         </div>
         <div class="mt-2">
           <div id="kpi-residual-pts" class="text-xl font-bold font-mono tracking-tight text-cyan-400">--.-- pts</div>
-          <div class="text-[10px] text-slate-400 mt-0.5">Alert Target: &ge; +<span id="disp-thresh-pts">2.0</span> pts</div>
+          <div class="text-[10px] font-mono text-slate-400 mt-0.5 flex items-center justify-between">
+            <span><span id="lbl-kpi-expected">Exp &Delta;</span>: <span id="kpi-expected-vix" class="text-slate-300 font-semibold">--.-- pts</span></span>
+            <span>Target &ge; +<span id="disp-thresh-pts">2.0</span></span>
+          </div>
         </div>
       </div>
 

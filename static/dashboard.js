@@ -3561,9 +3561,12 @@ function updateUI(data) {
       ratioBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 uppercase font-semibold border border-emerald-800';
     }
 
-    document.getElementById('lbl-kpi-expected').textContent = "Expected ΔVXN";
-    document.getElementById('kpi-expected-vix').textContent = `${fmtPts(ndxOv.expected_vol_pt)} pts`;
-    document.getElementById('lbl-kpi-exp-sub').textContent = "Tech Beta Model";
+    const expLblNdx = document.getElementById('lbl-kpi-expected');
+    if (expLblNdx) expLblNdx.textContent = "Exp Δ";
+    const expVixNdx = document.getElementById('kpi-expected-vix');
+    if (expVixNdx) expVixNdx.textContent = `${fmtPts(ndxOv.expected_vol_pt)} pts`;
+    const expSubNdx = document.getElementById('lbl-kpi-exp-sub');
+    if (expSubNdx) expSubNdx.textContent = "Tech Beta Model";
 
     document.getElementById('lbl-kpi-residual').textContent = "Over-VXN Residual";
     residualEl.textContent = `${fmtPts(ndxOv.residual_pts)} pts`;
@@ -3676,9 +3679,12 @@ function updateUI(data) {
 
     const activeMod = (useGthKpi && gth.model) ? gth.model : mod;
     if (useGthKpi && data.session_status === 'OVERNIGHT_ES_ONLY') {
-      document.getElementById('lbl-kpi-expected').textContent = "Expected ΔVIX";
-      document.getElementById('kpi-expected-vix').textContent = "--.-- pts";
-      document.getElementById('lbl-kpi-exp-sub').textContent = `VIX @ ${gth.vix_opens_at || '03:15 ET'}`;
+      const expLblGth = document.getElementById('lbl-kpi-expected');
+      if (expLblGth) expLblGth.textContent = "Exp Δ";
+      const expVixGth = document.getElementById('kpi-expected-vix');
+      if (expVixGth) expVixGth.textContent = "--.-- pts";
+      const expSubGth = document.getElementById('lbl-kpi-exp-sub');
+      if (expSubGth) expSubGth.textContent = `VIX @ ${gth.vix_opens_at || '03:15 ET'}`;
 
       document.getElementById('lbl-kpi-residual').textContent = "Overvix Residual";
       residualEl.textContent = "PAUSED";
@@ -3688,9 +3694,12 @@ function updateUI(data) {
       cardOvervix.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm';
     } else {
       const activeOv = (useGthKpi && gth.overvix && gth.overvix.residual_pts !== null) ? gth.overvix : ov;
-      document.getElementById('lbl-kpi-expected').textContent = "Expected ΔVIX";
-      document.getElementById('kpi-expected-vix').textContent = `${fmtPts(activeOv.expected_vix_pt)} pts`;
-      document.getElementById('lbl-kpi-exp-sub').textContent = useGthKpi ? "GTH Spot-Vol Model" : "Spot-Vol Model";
+      const expLblSpx = document.getElementById('lbl-kpi-expected');
+      if (expLblSpx) expLblSpx.textContent = "Exp Δ";
+      const expVixSpx = document.getElementById('kpi-expected-vix');
+      if (expVixSpx) expVixSpx.textContent = `${fmtPts(activeOv.expected_vix_pt)} pts`;
+      const expSubSpx = document.getElementById('lbl-kpi-exp-sub');
+      if (expSubSpx) expSubSpx.textContent = useGthKpi ? "GTH Spot-Vol Model" : "Spot-Vol Model";
 
       document.getElementById('lbl-kpi-residual').textContent = "Overvix Residual";
       residualEl.textContent = `${fmtPts(activeOv.residual_pts)} pts`;
@@ -3717,6 +3726,91 @@ function updateUI(data) {
     document.getElementById('param-slope').textContent = fmtNum(activeMod.slope, 4);
     document.getElementById('param-volslope').textContent = fmtNum(activeMod.vol_slope, 4);
     document.getElementById('param-intercept').textContent = fmtNum(activeMod.intercept, 4);
+  }
+
+  // Card 5: COR1M (1-Month Implied Correlation)
+  const cor1mData = data.cor1m;
+  const cardCor1m = document.getElementById('card-cor1m');
+  const cor1mValEl = document.getElementById('kpi-cor1m-val');
+  const tagCor1m = document.getElementById('tag-cor1m-regime');
+  const subCor1m = document.getElementById('lbl-cor1m-sub');
+
+  if (cor1mValEl && tagCor1m) {
+    if (cor1mData && cor1mData.current !== null && cor1mData.current !== undefined) {
+      cor1mValEl.textContent = fmtNum(cor1mData.current, 2);
+      tagCor1m.textContent = cor1mData.badge || cor1mData.regime || 'NORMAL';
+
+      if (cor1mData.is_coiled || cor1mData.current < 8.0) {
+        if (cardCor1m) cardCor1m.className = 'bg-purple-950/30 border border-purple-500 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition animate-pulse';
+        tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-purple-900 text-purple-200 border border-purple-400 font-bold uppercase animate-pulse';
+        cor1mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
+        if (subCor1m) subCor1m.textContent = 'Coiled Dispersion (< 8.0)';
+      } else if (cor1mData.current < 15.0) {
+        if (cardCor1m) cardCor1m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-purple-950/70 text-purple-300 border border-purple-800/60 font-semibold uppercase';
+        cor1mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
+        if (subCor1m) subCor1m.textContent = 'Low Correlation (< 15.0)';
+      } else if (cor1mData.current > 45.0) {
+        if (cardCor1m) cardCor1m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-blue-950/70 text-blue-300 border border-blue-800/60 font-semibold uppercase';
+        cor1mValEl.className = 'text-xl font-bold font-mono tracking-tight text-blue-300';
+        if (subCor1m) subCor1m.textContent = 'Macro Sync (> 45.0)';
+      } else {
+        if (cardCor1m) cardCor1m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-semibold';
+        cor1mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
+        if (subCor1m) subCor1m.textContent = 'Dispersion @ < 8.0';
+      }
+    } else {
+      cor1mValEl.textContent = '--.--';
+      tagCor1m.textContent = '---';
+      tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-semibold';
+      if (cardCor1m) cardCor1m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+      if (subCor1m) subCor1m.textContent = 'Dispersion @ < 8.0';
+    }
+  }
+
+  // Card 6: 25Δ Risk Reversal (Put Skew)
+  const rrData = (isNdx && ndx && ndx.risk_reversal) ? ndx.risk_reversal : data.risk_reversal;
+  const cardRr = document.getElementById('card-rr25');
+  const lblRr = document.getElementById('lbl-kpi-rr');
+  const rrValEl = document.getElementById('kpi-rr-val');
+  const tagRr = document.getElementById('tag-rr-regime');
+  const subRr = document.getElementById('lbl-rr-sub');
+
+  if (lblRr) lblRr.textContent = isNdx ? "QQQ 25Δ Skew (RR)" : "SPX 25Δ Skew (RR)";
+
+  if (rrValEl && tagRr) {
+    if (rrData && rrData.current !== null && rrData.current !== undefined) {
+      rrValEl.textContent = `${fmtPts(rrData.current)} pts`;
+      tagRr.textContent = rrData.badge || rrData.regime || '---';
+
+      if (rrData.put_iv !== null && rrData.call_iv !== null && rrData.put_iv !== undefined && rrData.call_iv !== undefined) {
+        if (subRr) subRr.textContent = `P: ${fmtNum(rrData.put_iv, 1)}% | C: ${fmtNum(rrData.call_iv, 1)}%`;
+      } else if (subRr) {
+        subRr.textContent = 'Put IV − Call IV';
+      }
+
+      if (rrData.current >= 8.0 || rrData.badge === 'EXTREME') {
+        if (cardRr) cardRr.className = 'bg-red-950/30 border border-red-700 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-900 text-red-200 border border-red-500 font-bold uppercase animate-pulse';
+        rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-red-400';
+      } else if (rrData.current >= 6.0 || rrData.badge === 'STEEP') {
+        if (cardRr) cardRr.className = 'bg-amber-950/20 border border-amber-800/80 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-semibold uppercase';
+        rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-amber-300';
+      } else {
+        if (cardRr) cardRr.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase';
+        rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-emerald-400';
+      }
+    } else {
+      rrValEl.textContent = '--.-- pts';
+      tagRr.textContent = '---';
+      tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-semibold';
+      if (cardRr) cardRr.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+      if (subRr) subRr.textContent = 'Put IV − Call IV';
+    }
   }
 
   // Intraday Session Stats for middle chart (Term Structure or Tech Vol)
