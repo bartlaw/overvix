@@ -178,6 +178,12 @@ To receive live streaming trades and daily historical bars, your IBKR account re
 
 ## Running the Dashboard
 
+### 1-Click Windows Launcher (Edge PWA + Server)
+```bash
+run_app.bat
+```
+Double-clicking or running `run_app.bat` launches the installed Overvix Edge Web App / PWA window and starts the backend server if not already active.
+
 ### Standard Launch (Default Port 8082, IBKR Port 7496)
 ```bash
 python dashboard.py
