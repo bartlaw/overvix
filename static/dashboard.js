@@ -323,6 +323,16 @@ function playAlertSound(type = 'overvix') {
 const fmtNum = (n, dec = 2) => (n !== null && n !== undefined && !isNaN(n)) ? Number(n).toFixed(dec) : '--.--';
 const fmtPct = (n) => (n !== null && n !== undefined && !isNaN(n)) ? (n >= 0 ? `+${n.toFixed(2)}%` : `${n.toFixed(2)}%`) : '--.--%';
 const fmtPts = (n) => (n !== null && n !== undefined && !isNaN(n)) ? (n >= 0 ? `+${n.toFixed(2)}` : `${n.toFixed(2)}`) : '--.--';
+const fmtMaturity = (expStr, dte) => {
+  if (!expStr || expStr.length < 8) return (dte !== null && dte !== undefined) ? `~${dte}d` : '';
+  const y = expStr.slice(0, 4);
+  const m = parseInt(expStr.slice(4, 6), 10) - 1;
+  const d = parseInt(expStr.slice(6, 8), 10);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const mName = months[m] || '';
+  const dteStr = (dte !== null && dte !== undefined) ? ` (${dte}d)` : '';
+  return `${d} ${mName} '${y.slice(2)}${dteStr}`;
+};
 
 // Sound Toggle Handler
 const btnSound = document.getElementById('btn-sound');
@@ -3776,9 +3786,20 @@ function updateUI(data) {
   const lblRr = document.getElementById('lbl-kpi-rr');
   const rrValEl = document.getElementById('kpi-rr-val');
   const tagRr = document.getElementById('tag-rr-regime');
+  const matRr = document.getElementById('lbl-rr-mat');
   const subRr = document.getElementById('lbl-rr-sub');
 
   if (lblRr) lblRr.textContent = isNdx ? "QQQ 25Δ Skew (RR)" : "SPX 25Δ Skew (RR)";
+
+  if (matRr) {
+    if (rrData && rrData.expiration) {
+      matRr.textContent = `Exp: ${fmtMaturity(rrData.expiration, rrData.dte)}`;
+    } else if (rrData && rrData.dte) {
+      matRr.textContent = `Exp: ~${rrData.dte}d`;
+    } else {
+      matRr.textContent = `Exp: ~30d`;
+    }
+  }
 
   if (rrValEl && tagRr) {
     if (rrData && rrData.current !== null && rrData.current !== undefined) {
@@ -3789,6 +3810,12 @@ function updateUI(data) {
         if (subRr) subRr.textContent = `P: ${fmtNum(rrData.put_iv, 1)}% | C: ${fmtNum(rrData.call_iv, 1)}%`;
       } else if (subRr) {
         subRr.textContent = 'Put IV − Call IV';
+      }
+
+      if (cardRr && rrData.expiration) {
+        const cStr = rrData.call_strike ? `C${rrData.call_strike}` : 'Call';
+        const pStr = rrData.put_strike ? `P${rrData.put_strike}` : 'Put';
+        cardRr.title = `Maturity: ${fmtMaturity(rrData.expiration, rrData.dte)} | ${cStr} vs ${pStr}`;
       }
 
       if (rrData.current >= 8.0 || rrData.badge === 'EXTREME') {
@@ -3819,9 +3846,20 @@ function updateUI(data) {
   const lblRr4m = document.getElementById('lbl-kpi-rr4m');
   const rr4mValEl = document.getElementById('kpi-rr4m-val');
   const tagRr4m = document.getElementById('tag-rr4m-regime');
+  const matRr4m = document.getElementById('lbl-rr4m-mat');
   const subRr4m = document.getElementById('lbl-rr4m-sub');
 
   if (lblRr4m) lblRr4m.textContent = isNdx ? "QQQ 4M Skew (RR)" : "SPX 4M Skew (RR)";
+
+  if (matRr4m) {
+    if (rr4mData && rr4mData.expiration) {
+      matRr4m.textContent = `Exp: ${fmtMaturity(rr4mData.expiration, rr4mData.dte)}`;
+    } else if (rr4mData && rr4mData.dte) {
+      matRr4m.textContent = `Exp: ~${rr4mData.dte}d`;
+    } else {
+      matRr4m.textContent = `Exp: ~120d`;
+    }
+  }
 
   if (rr4mValEl && tagRr4m) {
     if (rr4mData && rr4mData.net_credit !== null && rr4mData.net_credit !== undefined) {
@@ -3834,17 +3872,17 @@ function updateUI(data) {
       tagRr4m.textContent = rr4mData.badge || rr4mData.regime || '---';
 
       if (rr4mData.call_strike && rr4mData.put_strike) {
-        const dteStr = rr4mData.dte ? ` • ${rr4mData.dte}d` : '';
-        if (subRr4m) subRr4m.textContent = `C${rr4mData.call_strike} / P${rr4mData.put_strike}${dteStr}`;
+        subRr4m.textContent = `C${rr4mData.call_strike} / P${rr4mData.put_strike} • 10%C/15%P`;
       } else if (subRr4m) {
         subRr4m.textContent = '10%C vs 15%P (4M)';
       }
 
       if (cardRr4m && rr4mData.call_mid !== undefined && rr4mData.put_mid !== undefined) {
+        const mat = rr4mData.expiration ? `Exp: ${fmtMaturity(rr4mData.expiration, rr4mData.dte)} | ` : '';
         const cIv = (rr4mData.call_iv !== null && rr4mData.call_iv !== undefined) ? ` (IV: ${fmtNum(rr4mData.call_iv, 1)}%)` : '';
         const pIv = (rr4mData.put_iv !== null && rr4mData.put_iv !== undefined) ? ` (IV: ${fmtNum(rr4mData.put_iv, 1)}%)` : '';
         const skw = (rr4mData.iv_skew !== null && rr4mData.iv_skew !== undefined) ? ` | Skew: ${fmtPts(rr4mData.iv_skew)} pts` : '';
-        cardRr4m.title = `Call: $${fmtNum(rr4mData.call_mid, 2)}${cIv} | Put: $${fmtNum(rr4mData.put_mid, 2)}${pIv}${skw}`;
+        cardRr4m.title = `${mat}Call: $${fmtNum(rr4mData.call_mid, 2)}${cIv} | Put: $${fmtNum(rr4mData.put_mid, 2)}${pIv}${skw}`;
       }
 
       if (crVal >= 35.0 || rr4mData.regime === 'EXTREME CREDIT') {

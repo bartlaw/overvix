@@ -1992,6 +1992,23 @@ def compute_live_payload() -> Dict[str, Any]:
         ndx_rr_regime = "NORMAL"
         ndx_rr_badge = "NORMAL"
 
+    # Contract Expiration & DTE metadata for 25Δ Risk Reversal
+    spx_rr_exp = getattr(state.spx_rr_call_contract, 'lastTradeDateOrContractMonth', '') if state.spx_rr_call_contract else ''
+    spx_rr_dte = None
+    if spx_rr_exp:
+        try:
+            spx_rr_dte = (datetime.strptime(spx_rr_exp, '%Y%m%d').date() - datetime.now().date()).days
+        except Exception:
+            pass
+
+    ndx_rr_exp = getattr(state.ndx_rr_call_contract, 'lastTradeDateOrContractMonth', '') if state.ndx_rr_call_contract else ''
+    ndx_rr_dte = None
+    if ndx_rr_exp:
+        try:
+            ndx_rr_dte = (datetime.strptime(ndx_rr_exp, '%Y%m%d').date() - datetime.now().date()).days
+        except Exception:
+            pass
+
     # 4M OTM Risk Reversal Evaluation (Merridew Skew: 10% OTM Call vs 15% OTM Put ~120 DTE)
     def _calc_4m_rr(c_contract, p_contract, c_ticker, p_ticker, cached_data):
         if not c_contract or not p_contract:
@@ -2481,7 +2498,11 @@ def compute_live_payload() -> Dict[str, Any]:
             "put_iv": round(spx_put_iv, 2) if spx_put_iv is not None else None,
             "call_iv": round(spx_call_iv, 2) if spx_call_iv is not None else None,
             "regime": spx_rr_regime,
-            "badge": spx_rr_badge
+            "badge": spx_rr_badge,
+            "expiration": spx_rr_exp,
+            "dte": spx_rr_dte,
+            "call_strike": getattr(state.spx_rr_call_contract, 'strike', None),
+            "put_strike": getattr(state.spx_rr_put_contract, 'strike', None)
         },
         "rr_4m": spx_4m_rr_payload,
         "confluence": {
@@ -2534,7 +2555,11 @@ def compute_live_payload() -> Dict[str, Any]:
                 "put_iv": round(ndx_put_iv, 2) if ndx_put_iv is not None else None,
                 "call_iv": round(ndx_call_iv, 2) if ndx_call_iv is not None else None,
                 "regime": ndx_rr_regime,
-                "badge": ndx_rr_badge
+                "badge": ndx_rr_badge,
+                "expiration": ndx_rr_exp,
+                "dte": ndx_rr_dte,
+                "call_strike": getattr(state.ndx_rr_call_contract, 'strike', None),
+                "put_strike": getattr(state.ndx_rr_put_contract, 'strike', None)
             },
             "rr_4m": ndx_4m_rr_payload,
         "confluence": {
