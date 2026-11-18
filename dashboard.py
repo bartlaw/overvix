@@ -547,7 +547,7 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
     except Exception as e:
         print(f" [Risk Reversal] Warning: Failed to resolve QQQ RR contracts: {e}")
 
-    # 3. SPX 4M OTM Risk Reversal (9.5% OTM Call vs 17.5% OTM Put ~120 DTE)
+    # 3. SPX 4M OTM Risk Reversal (10% OTM Call vs 15% OTM Put ~120 DTE)
     try:
         if state.spx_contract and state.spx_contract.conId:
             chains = await ib_client.reqSecDefOptParamsAsync('SPX', '', 'IND', state.spx_contract.conId)
@@ -568,9 +568,17 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
                     valid_exps_4m.sort(key=lambda x: x[0])
                     target_exp_4m = valid_exps_4m[0][1]
                     target_dte_4m = valid_exps_4m[0][2]
-                    spx_spot = state.latest_spx_close or (state.spx_ticker.marketPrice() if state.spx_ticker else None) or 7340.0
-                    call_strike_4m = round((spx_spot * 1.095) / 25.0) * 25.0
-                    put_strike_4m = round((spx_spot * 0.825) / 25.0) * 25.0
+                    
+                    spx_spot = None
+                    if state.spx_ticker and state.spx_ticker.marketPrice() and not math.isnan(state.spx_ticker.marketPrice()) and state.spx_ticker.marketPrice() > 0:
+                        spx_spot = state.spx_ticker.marketPrice()
+                    elif state.es_ticker and state.es_ticker.marketPrice() and not math.isnan(state.es_ticker.marketPrice()) and state.es_spx_basis:
+                        spx_spot = state.es_ticker.marketPrice() - state.es_spx_basis
+                    if not spx_spot or spx_spot <= 0:
+                        spx_spot = state.latest_spx_close or 7340.0
+
+                    call_strike_4m = round((spx_spot * 1.10) / 25.0) * 25.0
+                    put_strike_4m = round((spx_spot * 0.85) / 25.0) * 25.0
 
                     call_opt_4m = Option('SPX', target_exp_4m, call_strike_4m, 'C', 'SMART', tradingClass='SPX')
                     put_opt_4m = Option('SPX', target_exp_4m, put_strike_4m, 'P', 'SMART', tradingClass='SPX')
@@ -580,7 +588,7 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
                         state.spx_4m_rr_put_contract = q_4m[1]
                         state.spx_4m_rr_call_ticker = ib_client.reqMktData(state.spx_4m_rr_call_contract, '106', False, False)
                         state.spx_4m_rr_put_ticker = ib_client.reqMktData(state.spx_4m_rr_put_contract, '106', False, False)
-                        print(f" [4M Skew] SPX 4M OTM RR subscribed ({target_exp_4m}, {target_dte_4m}d): C{call_strike_4m} (+9.5%) / P{put_strike_4m} (-17.5%)")
+                        print(f" [4M Skew] SPX 4M OTM RR subscribed ({target_exp_4m}, {target_dte_4m}d): C{call_strike_4m} (+10%) / P{put_strike_4m} (-15%)")
     except Exception as e:
         print(f" [4M Skew] Warning: Failed to resolve SPX 4M RR contracts: {e}")
 
@@ -607,8 +615,8 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
                 target_exp_qqq_4m = valid_exps_qqq_4m[0][1]
                 target_dte_qqq_4m = valid_exps_qqq_4m[0][2]
                 qqq_spot = (state.latest_ndx_close / 41.0) if (state.latest_ndx_close and state.latest_ndx_close > 0) else 665.0
-                call_qqq_strike_4m = round((qqq_spot * 1.095) / 5.0) * 5.0
-                put_qqq_strike_4m = round((qqq_spot * 0.825) / 5.0) * 5.0
+                call_qqq_strike_4m = round((qqq_spot * 1.10) / 5.0) * 5.0
+                put_qqq_strike_4m = round((qqq_spot * 0.85) / 5.0) * 5.0
                 call_qqq_4m = Option('QQQ', target_exp_qqq_4m, call_qqq_strike_4m, 'C', 'SMART')
                 put_qqq_4m = Option('QQQ', target_exp_qqq_4m, put_qqq_strike_4m, 'P', 'SMART')
                 q_qqq_4m = await ib_client.qualifyContractsAsync(call_qqq_4m, put_qqq_4m)
@@ -617,7 +625,7 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
                     state.ndx_4m_rr_put_contract = q_qqq_4m[1]
                     state.ndx_4m_rr_call_ticker = ib_client.reqMktData(state.ndx_4m_rr_call_contract, '106', False, False)
                     state.ndx_4m_rr_put_ticker = ib_client.reqMktData(state.ndx_4m_rr_put_contract, '106', False, False)
-                    print(f" [4M Skew] QQQ 4M OTM RR subscribed ({target_exp_qqq_4m}, {target_dte_qqq_4m}d): C{call_qqq_strike_4m} / P{put_qqq_strike_4m}")
+                    print(f" [4M Skew] QQQ 4M OTM RR subscribed ({target_exp_qqq_4m}, {target_dte_qqq_4m}d): C{call_qqq_strike_4m} (+10%) / P{put_qqq_strike_4m} (-15%)")
     except Exception as e:
         print(f" [4M Skew] Warning: Failed to resolve QQQ 4M RR contracts: {e}")
 
@@ -1984,7 +1992,7 @@ def compute_live_payload() -> Dict[str, Any]:
         ndx_rr_regime = "NORMAL"
         ndx_rr_badge = "NORMAL"
 
-    # 4M OTM Risk Reversal Evaluation (Merridew Skew: 9.5% OTM Call vs 17.5% OTM Put ~120 DTE)
+    # 4M OTM Risk Reversal Evaluation (Merridew Skew: 10% OTM Call vs 15% OTM Put ~120 DTE)
     def _calc_4m_rr(c_contract, p_contract, c_ticker, p_ticker, cached_data):
         if not c_contract or not p_contract:
             return cached_data

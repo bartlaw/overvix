@@ -3813,7 +3813,7 @@ function updateUI(data) {
     }
   }
 
-  // Card 8: 4M Wing Skew / OTM Risk Reversal (9.5% C vs 17.5% P)
+  // Card 8: 4M Wing Skew / OTM Risk Reversal (10% C vs 15% P)
   const rr4mData = (isNdx && ndx && ndx.rr_4m) ? ndx.rr_4m : data.rr_4m;
   const cardRr4m = document.getElementById('card-rr4m');
   const lblRr4m = document.getElementById('lbl-kpi-rr4m');
@@ -3837,7 +3837,7 @@ function updateUI(data) {
         const dteStr = rr4mData.dte ? ` • ${rr4mData.dte}d` : '';
         if (subRr4m) subRr4m.textContent = `C${rr4mData.call_strike} / P${rr4mData.put_strike}${dteStr}`;
       } else if (subRr4m) {
-        subRr4m.textContent = '9.5%C vs 17.5%P (4M)';
+        subRr4m.textContent = '10%C vs 15%P (4M)';
       }
 
       if (cardRr4m && rr4mData.call_mid !== undefined && rr4mData.put_mid !== undefined) {
@@ -3870,9 +3870,9 @@ function updateUI(data) {
       tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-semibold';
       if (cardRr4m) {
         cardRr4m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
-        cardRr4m.title = '4-Month OTM Risk Reversal (9.5% OTM Call vs 17.5% OTM Put)';
+        cardRr4m.title = '4-Month OTM Risk Reversal (10% OTM Call vs 15% OTM Put)';
       }
-      if (subRr4m) subRr4m.textContent = '9.5%C vs 17.5%P (4M)';
+      if (subRr4m) subRr4m.textContent = '10%C vs 15%P (4M)';
     }
   }
 
