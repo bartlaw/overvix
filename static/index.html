@@ -317,12 +317,12 @@
       </div>
 
       <!-- Card 7: 25Δ Risk Reversal (Put Skew) -->
-      <div id="card-rr25" class="relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none" title="Click or hover for full breakdown">
+      <div id="card-rr25" class="relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none">
         <div class="flex items-center justify-between">
           <span id="lbl-kpi-rr" class="text-[11px] font-semibold tracking-wider text-amber-400 uppercase">25Δ Skew (RR)</span>
           <div class="flex items-center space-x-1">
             <span id="tag-rr-regime" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50 uppercase font-semibold">---</span>
-            <span id="btn-rr25-info" class="text-[11px] text-slate-400 hover:text-amber-400 transition" title="Toggle detailed 25Δ breakdown">ⓘ</span>
+            <span id="btn-rr25-info" class="text-[11px] text-slate-400 hover:text-amber-400 transition cursor-pointer">ⓘ</span>
           </div>
         </div>
         <div class="mt-2">
@@ -412,12 +412,12 @@
       </div>
 
       <!-- Card 8: 4M Wing Skew / OTM Risk Reversal (10% C vs 15% P) -->
-      <div id="card-rr4m" class="relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none" title="Click or hover for full breakdown">
+      <div id="card-rr4m" class="relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none">
         <div class="flex items-center justify-between">
           <span id="lbl-kpi-rr4m" class="text-[11px] font-semibold tracking-wider text-amber-400 uppercase">4M Skew (RR)</span>
           <div class="flex items-center space-x-1">
             <span id="tag-rr4m-regime" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-semibold">---</span>
-            <span id="btn-rr4m-info" class="text-[11px] text-slate-400 hover:text-cyan-400 transition" title="Toggle detailed leg breakdown">ⓘ</span>
+            <span id="btn-rr4m-info" class="text-[11px] text-slate-400 hover:text-cyan-400 transition cursor-pointer">ⓘ</span>
           </div>
         </div>
         <div class="mt-2">
@@ -1058,8 +1058,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v8.6 - Rich Readable Popovers on 25Δ & 4M Skew Badges) -->
-  <script src="/static/dashboard.js?v=8.6"></script>
+  <!-- DASHBOARD SCRIPT (v8.7 - Clean Popovers with Native Tooltip Removed on Skew Cards) -->
+  <script src="/static/dashboard.js?v=8.7"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>

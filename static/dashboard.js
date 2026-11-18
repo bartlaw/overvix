@@ -3831,17 +3831,7 @@ function updateUI(data) {
       const skewValStr = `${fmtPts(rrVal)} pts`;
 
       if (cardRr) {
-        cardRr.title = `${assetName} 25Δ Risk Reversal (30-Day Put Skew)\n` +
-          `────────────────────────────────────────────────────\n` +
-          `Regime: ${rrData.badge || rrData.regime || 'NORMAL'} (25Δ Skew: ${skewValStr})\n` +
-          `Maturity: ${matStr} (${dteStr})\n\n` +
-          `Option Legs Breakdown:\n` +
-          `• Long Call (25Δ OTM):  ${cStr} | Mid: ${cMidStr} | IV: ${cIvStr} | Δ: ${cDeltaStr}\n` +
-          `• Short Put (25Δ OTM):  ${pStr} | Mid: ${pMidStr} | IV: ${pIvStr} | Δ: ${pDeltaStr}\n\n` +
-          `25Δ Skew Dynamics:\n` +
-          `• Put IV − Call IV Skew: ${skewValStr}\n` +
-          `• Downside Premium: Put IV exceeds Call IV by ${fmtNum(rrVal, 1)} pts\n` +
-          `• Click card or ⓘ for interactive floating breakdown`;
+        cardRr.removeAttribute('title');
       }
 
       // Populate interactive Floating Popover Card
@@ -3928,7 +3918,7 @@ function updateUI(data) {
       tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-semibold';
       if (cardRr) {
         cardRr.className = 'relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
-        cardRr.title = '25Δ Risk Reversal (30-Day Put Skew)';
+        cardRr.removeAttribute('title');
       }
       if (subRr) subRr.textContent = 'Put IV − Call IV';
     }
@@ -3993,17 +3983,7 @@ function updateUI(data) {
       const skewStr = (rr4mData.iv_skew !== null && rr4mData.iv_skew !== undefined) ? `${fmtPts(rr4mData.iv_skew)} pts` : '-- pts';
 
       if (cardRr4m) {
-        cardRr4m.title = `${assetName} 4M Wing Risk Reversal (+10% Call vs -15% Put)\n` +
-          `────────────────────────────────────────────────────\n` +
-          `Regime: ${rr4mData.badge || rr4mData.regime || 'NORMAL'}\n` +
-          `Net Credit: ${isCredit ? '+' : ''}${fmtNum(crVal, 2)} pts (${cashStr} / 1-lot)\n` +
-          `Maturity: ${matStr} (${dteStr})\n\n` +
-          `Option Legs Breakdown:\n` +
-          `• Long Call (+10% OTM):  ${cStr} | Mid: ${cMidStr} | IV: ${cIvStr} | Δ: ${cDeltaStr}\n` +
-          `• Short Put (-15% OTM):  ${pStr} | Mid: ${pMidStr} | IV: ${pIvStr} | Δ: ${pDeltaStr}\n\n` +
-          `Wing Volatility Dynamics:\n` +
-          `• IV Skew (Put IV - Call IV): ${skewStr}\n` +
-          `• Click card or ⓘ for interactive floating breakdown`;
+        cardRr4m.removeAttribute('title');
       }
 
       // Populate interactive Floating Popover Card
@@ -4088,7 +4068,7 @@ function updateUI(data) {
       tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-semibold';
       if (cardRr4m) {
         cardRr4m.className = 'relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
-        cardRr4m.title = '4-Month OTM Risk Reversal (10% OTM Call vs 15% OTM Put)';
+        cardRr4m.removeAttribute('title');
       }
       if (subRr4m) subRr4m.textContent = '10%C vs 15%P (4M)';
     }
@@ -4996,9 +4976,13 @@ function returnToLiveMode() {
 }
 
 function setupRiskReversalPopovers() {
-  const attachPopoverHandler = (cardId, popoverId, closeBtnId) => {
+  const popover25 = document.getElementById('popover-rr25');
+  const popover4m = document.getElementById('popover-rr4m');
+
+  const attachPopoverHandler = (cardId, popoverId, closeBtnId, otherPopoverId) => {
     const card = document.getElementById(cardId);
     const popover = document.getElementById(popoverId);
+    const otherPopover = document.getElementById(otherPopoverId);
     const btnClose = document.getElementById(closeBtnId);
 
     if (!card || !popover) return;
@@ -5012,7 +4996,13 @@ function setupRiskReversalPopovers() {
         return;
       }
       e.stopPropagation();
-      popover.classList.toggle('hidden');
+      const willOpen = popover.classList.contains('hidden');
+      if (otherPopover) otherPopover.classList.add('hidden');
+      if (willOpen) {
+        popover.classList.remove('hidden');
+      } else {
+        popover.classList.add('hidden');
+      }
     });
 
     if (btnClose) {
@@ -5021,16 +5011,21 @@ function setupRiskReversalPopovers() {
         popover.classList.add('hidden');
       });
     }
-
-    document.addEventListener('click', (e) => {
-      if (!popover.classList.contains('hidden') && !card.contains(e.target)) {
-        popover.classList.add('hidden');
-      }
-    });
   };
 
-  attachPopoverHandler('card-rr25', 'popover-rr25', 'btn-close-rr25-popover');
-  attachPopoverHandler('card-rr4m', 'popover-rr4m', 'btn-close-rr4m-popover');
+  attachPopoverHandler('card-rr25', 'popover-rr25', 'btn-close-rr25-popover', 'popover-rr4m');
+  attachPopoverHandler('card-rr4m', 'popover-rr4m', 'btn-close-rr4m-popover', 'popover-rr25');
+
+  document.addEventListener('click', (e) => {
+    const card25 = document.getElementById('card-rr25');
+    const card4m = document.getElementById('card-rr4m');
+    if (popover25 && !popover25.classList.contains('hidden') && (!card25 || !card25.contains(e.target))) {
+      popover25.classList.add('hidden');
+    }
+    if (popover4m && !popover4m.classList.contains('hidden') && (!card4m || !card4m.contains(e.target))) {
+      popover4m.classList.add('hidden');
+    }
+  });
 }
 
 // Start Dashboard on load
