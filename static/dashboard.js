@@ -3780,7 +3780,7 @@ function updateUI(data) {
     }
   }
 
-  // Card 6: 25Δ Risk Reversal (Put Skew)
+  // Card 7: 25Δ Risk Reversal (Put Skew)
   const rrData = (isNdx && ndx && ndx.risk_reversal) ? ndx.risk_reversal : data.risk_reversal;
   const cardRr = document.getElementById('card-rr25');
   const lblRr = document.getElementById('lbl-kpi-rr');
@@ -3803,31 +3803,122 @@ function updateUI(data) {
 
   if (rrValEl && tagRr) {
     if (rrData && rrData.current !== null && rrData.current !== undefined) {
-      rrValEl.textContent = `${fmtPts(rrData.current)} pts`;
+      const rrVal = rrData.current;
+      rrValEl.textContent = `${fmtPts(rrVal)} pts`;
       tagRr.textContent = rrData.badge || rrData.regime || '---';
 
-      if (rrData.put_iv !== null && rrData.call_iv !== null && rrData.put_iv !== undefined && rrData.call_iv !== undefined) {
-        if (subRr) subRr.textContent = `P: ${fmtNum(rrData.put_iv, 1)}% | C: ${fmtNum(rrData.call_iv, 1)}%`;
+      // Subtitle: Strike Selection & Volatility Info (or P / C IVs)
+      if (rrData.call_strike && rrData.put_strike && rrData.call_iv && rrData.put_iv) {
+        subRr.textContent = `C${rrData.call_strike}: ${fmtNum(rrData.call_iv, 1)}% · P${rrData.put_strike}: ${fmtNum(rrData.put_iv, 1)}%`;
+      } else if (rrData.put_iv !== null && rrData.call_iv !== null && rrData.put_iv !== undefined && rrData.call_iv !== undefined) {
+        subRr.textContent = `P: ${fmtNum(rrData.put_iv, 1)}% · C: ${fmtNum(rrData.call_iv, 1)}%`;
       } else if (subRr) {
         subRr.textContent = 'Put IV − Call IV';
       }
 
-      if (cardRr && rrData.expiration) {
-        const cStr = rrData.call_strike ? `C${rrData.call_strike}` : 'Call';
-        const pStr = rrData.put_strike ? `P${rrData.put_strike}` : 'Put';
-        cardRr.title = `Maturity: ${fmtMaturity(rrData.expiration, rrData.dte)} | ${cStr} vs ${pStr}`;
+      // Detailed readable popup formatting (both for title tooltip and floating popover card)
+      const assetName = isNdx ? "QQQ" : "SPX";
+      const matStr = rrData.expiration ? fmtMaturity(rrData.expiration, null) : '-- --- \'--';
+      const dteStr = `${rrData.dte || 30} DTE`;
+      const cStr = rrData.call_strike ? `${rrData.call_strike}C` : 'Call';
+      const pStr = rrData.put_strike ? `${rrData.put_strike}P` : 'Put';
+      const cMidStr = (rrData.call_mid !== undefined && rrData.call_mid !== null) ? `$${fmtNum(rrData.call_mid, 2)}` : '$--.--';
+      const pMidStr = (rrData.put_mid !== undefined && rrData.put_mid !== null) ? `$${fmtNum(rrData.put_mid, 2)}` : '$--.--';
+      const cIvStr = (rrData.call_iv !== null && rrData.call_iv !== undefined) ? `${fmtNum(rrData.call_iv, 1)}%` : '--.-%';
+      const pIvStr = (rrData.put_iv !== null && rrData.put_iv !== undefined) ? `${fmtNum(rrData.put_iv, 1)}%` : '--.-%';
+      const cDeltaStr = (rrData.call_delta !== null && rrData.call_delta !== undefined) ? (rrData.call_delta >= 0 ? `+${fmtNum(rrData.call_delta, 3)}` : fmtNum(rrData.call_delta, 3)) : '+0.250';
+      const pDeltaStr = (rrData.put_delta !== null && rrData.put_delta !== undefined) ? (rrData.put_delta >= 0 ? `+${fmtNum(rrData.put_delta, 3)}` : fmtNum(rrData.put_delta, 3)) : '-0.250';
+      const skewValStr = `${fmtPts(rrVal)} pts`;
+
+      if (cardRr) {
+        cardRr.title = `${assetName} 25Δ Risk Reversal (30-Day Put Skew)\n` +
+          `────────────────────────────────────────────────────\n` +
+          `Regime: ${rrData.badge || rrData.regime || 'NORMAL'} (25Δ Skew: ${skewValStr})\n` +
+          `Maturity: ${matStr} (${dteStr})\n\n` +
+          `Option Legs Breakdown:\n` +
+          `• Long Call (25Δ OTM):  ${cStr} | Mid: ${cMidStr} | IV: ${cIvStr} | Δ: ${cDeltaStr}\n` +
+          `• Short Put (25Δ OTM):  ${pStr} | Mid: ${pMidStr} | IV: ${pIvStr} | Δ: ${pDeltaStr}\n\n` +
+          `25Δ Skew Dynamics:\n` +
+          `• Put IV − Call IV Skew: ${skewValStr}\n` +
+          `• Downside Premium: Put IV exceeds Call IV by ${fmtNum(rrVal, 1)} pts\n` +
+          `• Click card or ⓘ for interactive floating breakdown`;
       }
 
-      if (rrData.current >= 8.0 || rrData.badge === 'EXTREME') {
-        if (cardRr) cardRr.className = 'bg-red-950/30 border border-red-700 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+      // Populate interactive Floating Popover Card
+      const popTitle = document.getElementById('pop-rr25-title');
+      const popBadge = document.getElementById('pop-rr25-badge');
+      const popSkew = document.getElementById('pop-rr25-skew');
+      const popStatus = document.getElementById('pop-rr25-status');
+      const popMat = document.getElementById('pop-rr25-mat');
+      const popDte = document.getElementById('pop-rr25-dte');
+      const popSpread = document.getElementById('pop-rr25-spread');
+      const popCallStrike = document.getElementById('pop-rr25-call-strike');
+      const popCallMid = document.getElementById('pop-rr25-call-mid');
+      const popCallIv = document.getElementById('pop-rr25-call-iv');
+      const popCallDelta = document.getElementById('pop-rr25-call-delta');
+      const popPutStrike = document.getElementById('pop-rr25-put-strike');
+      const popPutMid = document.getElementById('pop-rr25-put-mid');
+      const popPutIv = document.getElementById('pop-rr25-put-iv');
+      const popPutDelta = document.getElementById('pop-rr25-put-delta');
+      const popDesc = document.getElementById('pop-rr25-desc');
+
+      if (popTitle) popTitle.innerHTML = `<span>⚖️</span><span>${assetName} 25Δ Risk Reversal</span>`;
+      if (popBadge) {
+        popBadge.textContent = rrData.badge || rrData.regime || '---';
+        if (rrVal >= 8.0 || rrData.badge === 'EXTREME') {
+          popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-red-900 text-red-200 border border-red-500 animate-pulse';
+        } else if (rrVal >= 6.0 || rrData.badge === 'STEEP') {
+          popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-amber-950/70 text-amber-300 border border-amber-800/60';
+        } else {
+          popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700';
+        }
+      }
+      if (popSkew) popSkew.textContent = `${fmtPts(rrVal)} pts`;
+      if (popStatus) {
+        popStatus.textContent = rrVal >= 7.5 ? 'ELEVATED SKEW (Fear)' : (rrVal < 3.5 ? 'COMPLACENT (Low Skew)' : 'NORMAL SKEW');
+      }
+      if (popMat) popMat.textContent = matStr;
+      if (popDte) popDte.textContent = `${dteStr} (~30d)`;
+      if (popSpread) {
+        if (rrData.net_credit !== undefined && rrData.net_credit !== null) {
+          const sign = rrData.net_credit >= 0 ? '+' : '';
+          popSpread.textContent = `Combo Mid: ${sign}$${fmtNum(rrData.net_credit, 2)}`;
+        } else {
+          popSpread.textContent = `Skew: ${fmtPts(rrVal)} pts`;
+        }
+      }
+
+      if (popCallStrike) popCallStrike.textContent = cStr;
+      if (popCallMid) popCallMid.textContent = cMidStr;
+      if (popCallIv) popCallIv.textContent = cIvStr;
+      if (popCallDelta) popCallDelta.textContent = cDeltaStr;
+
+      if (popPutStrike) popPutStrike.textContent = pStr;
+      if (popPutMid) popPutMid.textContent = pMidStr;
+      if (popPutIv) popPutIv.textContent = pIvStr;
+      if (popPutDelta) popPutDelta.textContent = pDeltaStr;
+
+      if (popDesc) {
+        if (rrVal >= 7.5) {
+          popDesc.textContent = `25Δ Put IV exceeds Call IV by ${fmtNum(rrVal, 1)} pts. Elevated institutional downside tail hedging demand detected.`;
+        } else if (rrVal < 3.5) {
+          popDesc.textContent = `25Δ Put IV is compressed relative to Call IV (+${fmtNum(rrVal, 1)} pts). Market exhibits low hedging demand / complacency.`;
+        } else {
+          popDesc.textContent = `Standard 25Δ downside skew (+${fmtNum(rrVal, 1)} pts). Healthy baseline pricing for 30-day index options.`;
+        }
+      }
+
+      // Card styling preserving relative group cursor-pointer select-none
+      if (rrVal >= 8.0 || rrData.badge === 'EXTREME') {
+        if (cardRr) cardRr.className = 'relative group bg-red-950/30 border border-red-700 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-900 text-red-200 border border-red-500 font-bold uppercase animate-pulse';
         rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-red-400';
-      } else if (rrData.current >= 6.0 || rrData.badge === 'STEEP') {
-        if (cardRr) cardRr.className = 'bg-amber-950/20 border border-amber-800/80 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+      } else if (rrVal >= 6.0 || rrData.badge === 'STEEP') {
+        if (cardRr) cardRr.className = 'relative group bg-amber-950/20 border border-amber-800/80 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-semibold uppercase';
         rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-amber-300';
       } else {
-        if (cardRr) cardRr.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        if (cardRr) cardRr.className = 'relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase';
         rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-emerald-400';
       }
@@ -3835,7 +3926,10 @@ function updateUI(data) {
       rrValEl.textContent = '--.-- pts';
       tagRr.textContent = '---';
       tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-semibold';
-      if (cardRr) cardRr.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+      if (cardRr) {
+        cardRr.className = 'relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
+        cardRr.title = '25Δ Risk Reversal (30-Day Put Skew)';
+      }
       if (subRr) subRr.textContent = 'Put IV − Call IV';
     }
   }
@@ -4901,41 +4995,42 @@ function returnToLiveMode() {
   }
 }
 
-function setupRr4mPopover() {
-  const cardRr4m = document.getElementById('card-rr4m');
-  const popoverRr4m = document.getElementById('popover-rr4m');
-  const btnClose = document.getElementById('btn-close-rr4m-popover');
+function setupRiskReversalPopovers() {
+  const attachPopoverHandler = (cardId, popoverId, closeBtnId) => {
+    const card = document.getElementById(cardId);
+    const popover = document.getElementById(popoverId);
+    const btnClose = document.getElementById(closeBtnId);
 
-  if (!cardRr4m || !popoverRr4m) return;
+    if (!card || !popover) return;
 
-  const togglePopover = (e) => {
-    e.stopPropagation();
-    popoverRr4m.classList.toggle('hidden');
+    card.addEventListener('click', (e) => {
+      // If click originated inside the popover (except close button), don't toggle
+      if (popover.contains(e.target)) {
+        if (e.target === btnClose || (btnClose && btnClose.contains(e.target))) {
+          popover.classList.add('hidden');
+        }
+        return;
+      }
+      e.stopPropagation();
+      popover.classList.toggle('hidden');
+    });
+
+    if (btnClose) {
+      btnClose.addEventListener('click', (e) => {
+        e.stopPropagation();
+        popover.classList.add('hidden');
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!popover.classList.contains('hidden') && !card.contains(e.target)) {
+        popover.classList.add('hidden');
+      }
+    });
   };
 
-  cardRr4m.addEventListener('click', (e) => {
-    // If click originated inside the popover (except close button), don't close
-    if (popoverRr4m.contains(e.target)) {
-      if (e.target === btnClose || (btnClose && btnClose.contains(e.target))) {
-        popoverRr4m.classList.add('hidden');
-      }
-      return;
-    }
-    togglePopover(e);
-  });
-
-  if (btnClose) {
-    btnClose.addEventListener('click', (e) => {
-      e.stopPropagation();
-      popoverRr4m.classList.add('hidden');
-    });
-  }
-
-  document.addEventListener('click', (e) => {
-    if (!popoverRr4m.classList.contains('hidden') && !cardRr4m.contains(e.target)) {
-      popoverRr4m.classList.add('hidden');
-    }
-  });
+  attachPopoverHandler('card-rr25', 'popover-rr25', 'btn-close-rr25-popover');
+  attachPopoverHandler('card-rr4m', 'popover-rr4m', 'btn-close-rr4m-popover');
 }
 
 // Start Dashboard on load
@@ -4945,7 +5040,7 @@ window.addEventListener('DOMContentLoaded', () => {
   setupCorrButtons();
   setupAssetSwitcher();
   setupGthToggle();
-  setupRr4mPopover();
+  setupRiskReversalPopovers();
   initHistoricalControls();
   bootstrapData();
 });

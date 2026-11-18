@@ -1934,18 +1934,44 @@ def compute_live_payload() -> Dict[str, Any]:
         cor1m_regime = "NORMAL"
         cor1m_badge = "NORMAL"
 
+    # Helper to extract leg price, IV, and Delta from Option ticker
+    def _extract_leg_info(ticker):
+        mid = None
+        iv = None
+        delta = None
+        if ticker:
+            mid = ticker.marketPrice()
+            if mid is None or math.isnan(mid) or mid <= 0:
+                if ticker.bid and ticker.ask and not math.isnan(ticker.bid) and not math.isnan(ticker.ask) and ticker.bid > 0:
+                    mid = (ticker.bid + ticker.ask) / 2.0
+                elif ticker.close and not math.isnan(ticker.close) and ticker.close > 0:
+                    mid = ticker.close
+            if ticker.modelGreeks:
+                mg = ticker.modelGreeks
+                if mg.impliedVol and not math.isnan(mg.impliedVol) and mg.impliedVol > 0:
+                    iv = mg.impliedVol * 100.0
+                if mg.delta and not math.isnan(mg.delta):
+                    delta = mg.delta
+        return mid, iv, delta
+
     # SPX 25Δ Risk Reversal Evaluation
     spx_rr_val = None
     spx_put_iv = None
     spx_call_iv = None
+    spx_call_mid = None
+    spx_put_mid = None
+    spx_call_delta = None
+    spx_put_delta = None
+    spx_rr_net_credit = None
+
     if state.spx_rr_put_ticker and state.spx_rr_call_ticker:
-        mg_p = state.spx_rr_put_ticker.modelGreeks
-        mg_c = state.spx_rr_call_ticker.modelGreeks
-        if mg_p and mg_c and mg_p.impliedVol > 0 and mg_c.impliedVol > 0:
-            spx_put_iv = mg_p.impliedVol * 100.0
-            spx_call_iv = mg_c.impliedVol * 100.0
+        spx_call_mid, spx_call_iv, spx_call_delta = _extract_leg_info(state.spx_rr_call_ticker)
+        spx_put_mid, spx_put_iv, spx_put_delta = _extract_leg_info(state.spx_rr_put_ticker)
+        if spx_put_iv and spx_call_iv:
             spx_rr_val = spx_put_iv - spx_call_iv
             state.spx_rr_val = spx_rr_val
+        if spx_call_mid is not None and spx_put_mid is not None:
+            spx_rr_net_credit = spx_put_mid - spx_call_mid
     if spx_rr_val is None and state.spx_rr_val is not None:
         spx_rr_val = state.spx_rr_val
 
@@ -1967,14 +1993,20 @@ def compute_live_payload() -> Dict[str, Any]:
     ndx_rr_val = None
     ndx_put_iv = None
     ndx_call_iv = None
+    ndx_call_mid = None
+    ndx_put_mid = None
+    ndx_call_delta = None
+    ndx_put_delta = None
+    ndx_rr_net_credit = None
+
     if state.ndx_rr_put_ticker and state.ndx_rr_call_ticker:
-        mg_p = state.ndx_rr_put_ticker.modelGreeks
-        mg_c = state.ndx_rr_call_ticker.modelGreeks
-        if mg_p and mg_c and mg_p.impliedVol > 0 and mg_c.impliedVol > 0:
-            ndx_put_iv = mg_p.impliedVol * 100.0
-            ndx_call_iv = mg_c.impliedVol * 100.0
+        ndx_call_mid, ndx_call_iv, ndx_call_delta = _extract_leg_info(state.ndx_rr_call_ticker)
+        ndx_put_mid, ndx_put_iv, ndx_put_delta = _extract_leg_info(state.ndx_rr_put_ticker)
+        if ndx_put_iv and ndx_call_iv:
             ndx_rr_val = ndx_put_iv - ndx_call_iv
             state.ndx_rr_val = ndx_rr_val
+        if ndx_call_mid is not None and ndx_put_mid is not None:
+            ndx_rr_net_credit = ndx_put_mid - ndx_call_mid
     if ndx_rr_val is None and state.ndx_rr_val is not None:
         ndx_rr_val = state.ndx_rr_val
 
@@ -2497,6 +2529,11 @@ def compute_live_payload() -> Dict[str, Any]:
             "current": round(spx_rr_val, 2) if spx_rr_val is not None else None,
             "put_iv": round(spx_put_iv, 2) if spx_put_iv is not None else None,
             "call_iv": round(spx_call_iv, 2) if spx_call_iv is not None else None,
+            "call_mid": round(spx_call_mid, 2) if spx_call_mid is not None else None,
+            "put_mid": round(spx_put_mid, 2) if spx_put_mid is not None else None,
+            "call_delta": round(spx_call_delta, 3) if spx_call_delta is not None else None,
+            "put_delta": round(spx_put_delta, 3) if spx_put_delta is not None else None,
+            "net_credit": round(spx_rr_net_credit, 2) if spx_rr_net_credit is not None else None,
             "regime": spx_rr_regime,
             "badge": spx_rr_badge,
             "expiration": spx_rr_exp,
@@ -2554,6 +2591,11 @@ def compute_live_payload() -> Dict[str, Any]:
                 "current": round(ndx_rr_val, 2) if ndx_rr_val is not None else None,
                 "put_iv": round(ndx_put_iv, 2) if ndx_put_iv is not None else None,
                 "call_iv": round(ndx_call_iv, 2) if ndx_call_iv is not None else None,
+                "call_mid": round(ndx_call_mid, 2) if ndx_call_mid is not None else None,
+                "put_mid": round(ndx_put_mid, 2) if ndx_put_mid is not None else None,
+                "call_delta": round(ndx_call_delta, 3) if ndx_call_delta is not None else None,
+                "put_delta": round(ndx_put_delta, 3) if ndx_put_delta is not None else None,
+                "net_credit": round(ndx_rr_net_credit, 2) if ndx_rr_net_credit is not None else None,
                 "regime": ndx_rr_regime,
                 "badge": ndx_rr_badge,
                 "expiration": ndx_rr_exp,

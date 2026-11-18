@@ -317,15 +317,97 @@
       </div>
 
       <!-- Card 7: 25Δ Risk Reversal (Put Skew) -->
-      <div id="card-rr25" class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition">
+      <div id="card-rr25" class="relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none" title="Click or hover for full breakdown">
         <div class="flex items-center justify-between">
           <span id="lbl-kpi-rr" class="text-[11px] font-semibold tracking-wider text-amber-400 uppercase">25Δ Skew (RR)</span>
-          <span id="tag-rr-regime" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50 uppercase font-semibold">---</span>
+          <div class="flex items-center space-x-1">
+            <span id="tag-rr-regime" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50 uppercase font-semibold">---</span>
+            <span id="btn-rr25-info" class="text-[11px] text-slate-400 hover:text-amber-400 transition" title="Toggle detailed 25Δ breakdown">ⓘ</span>
+          </div>
         </div>
         <div class="mt-2">
           <div id="kpi-rr-val" class="text-xl font-bold font-mono tracking-tight text-amber-300">--.-- pts</div>
           <div id="lbl-rr-mat" class="text-[10px] font-mono text-slate-300 mt-0.5">Exp: -- --- '-- (--)</div>
-          <div id="lbl-rr-sub" class="text-[10px] text-slate-400 mt-0.5">Put IV &minus; Call IV</div>
+          <div id="lbl-rr-sub" class="text-[10px] font-mono text-slate-300 mt-0.5 truncate">Put IV &minus; Call IV</div>
+        </div>
+
+        <!-- Floating Popover Card for 25Δ Risk Reversal -->
+        <div id="popover-rr25" class="hidden absolute top-full right-0 mt-2 z-50 w-80 bg-slate-900/95 border border-slate-700/90 rounded-xl shadow-2xl p-3 space-y-2.5 backdrop-blur-md text-left transition">
+          <!-- Header -->
+          <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+            <div>
+              <div id="pop-rr25-title" class="text-xs font-bold text-white flex items-center space-x-1">
+                <span>⚖️</span>
+                <span>SPX 25Δ Risk Reversal</span>
+              </div>
+              <div class="text-[10px] text-slate-400 font-medium">~30-Day 25-Delta Put Skew (Front-Month)</div>
+            </div>
+            <div class="flex items-center space-x-1.5">
+              <span id="pop-rr25-badge" class="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-amber-950/70 text-amber-300 border border-amber-800/60">
+                NORMAL
+              </span>
+              <button id="btn-close-rr25-popover" class="text-slate-400 hover:text-white text-xs px-1 py-0.5 rounded hover:bg-slate-800 transition" title="Close">✕</button>
+            </div>
+          </div>
+
+          <!-- Key Metrics Grid -->
+          <div class="grid grid-cols-2 gap-2 bg-slate-950/70 rounded-lg p-2 border border-slate-800/80">
+            <div>
+              <div class="text-[10px] text-slate-400 uppercase font-semibold">25Δ IV Skew</div>
+              <div id="pop-rr25-skew" class="text-sm font-bold font-mono text-amber-300">+--.-- pts</div>
+              <div id="pop-rr25-status" class="text-[10px] font-mono text-slate-400">Put IV &minus; Call IV</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-slate-400 uppercase font-semibold">Maturity / DTE</div>
+              <div id="pop-rr25-mat" class="text-sm font-bold font-mono text-white">-- --- '--</div>
+              <div id="pop-rr25-dte" class="text-[10px] font-mono text-cyan-400">-- DTE (~30d)</div>
+            </div>
+          </div>
+
+          <!-- Option Legs Breakdown Table -->
+          <div>
+            <div class="text-[10px] font-semibold text-slate-400 uppercase mb-1 flex items-center justify-between">
+              <span>Option Legs Breakdown</span>
+              <span id="pop-rr25-spread" class="text-slate-300 font-mono">Net: --.-- pts</span>
+            </div>
+            <div class="overflow-hidden rounded border border-slate-800 text-[11px] font-mono">
+              <table class="w-full text-left">
+                <thead class="bg-slate-950 text-[10px] text-slate-400 uppercase border-b border-slate-800">
+                  <tr>
+                    <th class="py-1 px-1.5">Leg</th>
+                    <th class="py-1 px-1.5">Strike</th>
+                    <th class="py-1 px-1.5 text-right">Mid</th>
+                    <th class="py-1 px-1.5 text-right">IV</th>
+                    <th class="py-1 px-1.5 text-right">Delta</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60 bg-slate-900/80">
+                  <!-- Long Call -->
+                  <tr>
+                    <td class="py-1 px-1.5 text-emerald-400 font-medium">+Call (25Δ)</td>
+                    <td id="pop-rr25-call-strike" class="py-1 px-1.5 text-white font-bold">----</td>
+                    <td id="pop-rr25-call-mid" class="py-1 px-1.5 text-right text-slate-300">$0.00</td>
+                    <td id="pop-rr25-call-iv" class="py-1 px-1.5 text-right text-cyan-300">--.-%</td>
+                    <td id="pop-rr25-call-delta" class="py-1 px-1.5 text-right text-slate-300">+0.25</td>
+                  </tr>
+                  <!-- Short Put -->
+                  <tr>
+                    <td class="py-1 px-1.5 text-rose-400 font-medium">-Put (25Δ)</td>
+                    <td id="pop-rr25-put-strike" class="py-1 px-1.5 text-white font-bold">----</td>
+                    <td id="pop-rr25-put-mid" class="py-1 px-1.5 text-right text-slate-300">$0.00</td>
+                    <td id="pop-rr25-put-iv" class="py-1 px-1.5 text-right text-amber-300">--.-%</td>
+                    <td id="pop-rr25-put-delta" class="py-1 px-1.5 text-right text-slate-300">-0.25</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Strategy Rationale / Footer -->
+          <div class="text-[10px] text-slate-400 bg-slate-950/50 rounded p-1.5 border border-slate-800/60 leading-tight">
+            <span class="text-slate-300 font-semibold">Skew Dynamics:</span>
+            <span id="pop-rr25-desc">Standard 25Δ put-to-call volatility premium measuring downside institutional hedging demand.</span>
+          </div>
         </div>
       </div>
 
@@ -976,8 +1058,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v8.5 - Rich Readable Popover & Strike/Vol Info on 4M Wing Skew) -->
-  <script src="/static/dashboard.js?v=8.5"></script>
+  <!-- DASHBOARD SCRIPT (v8.6 - Rich Readable Popovers on 25Δ & 4M Skew Badges) -->
+  <script src="/static/dashboard.js?v=8.6"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>
