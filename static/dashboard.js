@@ -3813,6 +3813,69 @@ function updateUI(data) {
     }
   }
 
+  // Card 8: 4M Wing Skew / OTM Risk Reversal (9.5% C vs 17.5% P)
+  const rr4mData = (isNdx && ndx && ndx.rr_4m) ? ndx.rr_4m : data.rr_4m;
+  const cardRr4m = document.getElementById('card-rr4m');
+  const lblRr4m = document.getElementById('lbl-kpi-rr4m');
+  const rr4mValEl = document.getElementById('kpi-rr4m-val');
+  const tagRr4m = document.getElementById('tag-rr4m-regime');
+  const subRr4m = document.getElementById('lbl-rr4m-sub');
+
+  if (lblRr4m) lblRr4m.textContent = isNdx ? "QQQ 4M Skew (RR)" : "SPX 4M Skew (RR)";
+
+  if (rr4mValEl && tagRr4m) {
+    if (rr4mData && rr4mData.net_credit !== null && rr4mData.net_credit !== undefined) {
+      const crVal = rr4mData.net_credit;
+      if (crVal >= 0) {
+        rr4mValEl.textContent = `${fmtPts(crVal)} pts CR`;
+      } else {
+        rr4mValEl.textContent = `${fmtPts(crVal)} pts DB`;
+      }
+      tagRr4m.textContent = rr4mData.badge || rr4mData.regime || '---';
+
+      if (rr4mData.call_strike && rr4mData.put_strike) {
+        const dteStr = rr4mData.dte ? ` • ${rr4mData.dte}d` : '';
+        if (subRr4m) subRr4m.textContent = `C${rr4mData.call_strike} / P${rr4mData.put_strike}${dteStr}`;
+      } else if (subRr4m) {
+        subRr4m.textContent = '9.5%C vs 17.5%P (4M)';
+      }
+
+      if (cardRr4m && rr4mData.call_mid !== undefined && rr4mData.put_mid !== undefined) {
+        const cIv = (rr4mData.call_iv !== null && rr4mData.call_iv !== undefined) ? ` (IV: ${fmtNum(rr4mData.call_iv, 1)}%)` : '';
+        const pIv = (rr4mData.put_iv !== null && rr4mData.put_iv !== undefined) ? ` (IV: ${fmtNum(rr4mData.put_iv, 1)}%)` : '';
+        const skw = (rr4mData.iv_skew !== null && rr4mData.iv_skew !== undefined) ? ` | Skew: ${fmtPts(rr4mData.iv_skew)} pts` : '';
+        cardRr4m.title = `Call: $${fmtNum(rr4mData.call_mid, 2)}${cIv} | Put: $${fmtNum(rr4mData.put_mid, 2)}${pIv}${skw}`;
+      }
+
+      if (crVal >= 35.0 || rr4mData.regime === 'EXTREME CREDIT') {
+        if (cardRr4m) cardRr4m.className = 'bg-purple-950/40 border border-purple-500 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-purple-900 text-purple-200 border border-purple-500 font-bold uppercase animate-pulse';
+        rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
+      } else if (crVal >= 15.0 || rr4mData.regime === 'ENTRY ZONE') {
+        if (cardRr4m) cardRr4m.className = 'bg-emerald-950/30 border border-emerald-600 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/90 text-emerald-200 border border-emerald-500 font-bold uppercase';
+        rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-emerald-300';
+      } else if (crVal >= 0.0) {
+        if (cardRr4m) cardRr4m.className = 'bg-amber-950/20 border border-amber-800/80 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-semibold uppercase';
+        rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-amber-300';
+      } else {
+        if (cardRr4m) cardRr4m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-semibold uppercase';
+        rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-slate-300';
+      }
+    } else {
+      rr4mValEl.textContent = '--.-- pts';
+      tagRr4m.textContent = '---';
+      tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-semibold';
+      if (cardRr4m) {
+        cardRr4m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        cardRr4m.title = '4-Month OTM Risk Reversal (9.5% OTM Call vs 17.5% OTM Put)';
+      }
+      if (subRr4m) subRr4m.textContent = '9.5%C vs 17.5%P (4M)';
+    }
+  }
+
   // Intraday Session Stats for middle chart (Term Structure or Tech Vol)
   if (isNdx) {
     const dTech = cachedTechVol['1D'];

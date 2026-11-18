@@ -114,6 +114,10 @@ class DashboardState:
         self.spx_rr_call_contract = None
         self.ndx_rr_put_contract = None
         self.ndx_rr_call_contract = None
+        self.spx_4m_rr_call_contract = None
+        self.spx_4m_rr_put_contract = None
+        self.ndx_4m_rr_call_contract = None
+        self.ndx_4m_rr_put_contract = None
 
         # Tickers
         self.spx_ticker = None
@@ -127,11 +131,17 @@ class DashboardState:
         self.spx_rr_call_ticker = None
         self.ndx_rr_put_ticker = None
         self.ndx_rr_call_ticker = None
+        self.spx_4m_rr_call_ticker = None
+        self.spx_4m_rr_put_ticker = None
+        self.ndx_4m_rr_call_ticker = None
+        self.ndx_4m_rr_put_ticker = None
 
         # Live Skew & Correlation Metrics
         self.cor1m_val: Optional[float] = None
         self.spx_rr_val: Optional[float] = None
         self.ndx_rr_val: Optional[float] = None
+        self.spx_4m_rr_data: Optional[Dict[str, Any]] = None
+        self.ndx_4m_rr_data: Optional[Dict[str, Any]] = None
 
         # Fallback real-time 1-min bar streams for indices without reqMktData ticks (e.g. NDX/VXN/VIX3M)
         self.live_bars: Dict[str, Any] = {}
@@ -536,6 +546,80 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
                     print(f" [Risk Reversal] QQQ 25Δ options subscribed ({target_exp_qqq}): P{put_qqq_strike} / C{call_qqq_strike}")
     except Exception as e:
         print(f" [Risk Reversal] Warning: Failed to resolve QQQ RR contracts: {e}")
+
+    # 3. SPX 4M OTM Risk Reversal (9.5% OTM Call vs 17.5% OTM Put ~120 DTE)
+    try:
+        if state.spx_contract and state.spx_contract.conId:
+            chains = await ib_client.reqSecDefOptParamsAsync('SPX', '', 'IND', state.spx_contract.conId)
+            spx_chain = next((c for c in chains if c.exchange in ('SMART', 'CBOE') and c.tradingClass in ('SPX', 'SPXW')), None)
+            if not spx_chain and chains:
+                spx_chain = chains[0]
+            if spx_chain:
+                valid_exps_4m = []
+                for exp_str in spx_chain.expirations:
+                    try:
+                        d = datetime.strptime(exp_str, '%Y%m%d').date()
+                        dte = (d - today).days
+                        if 100 <= dte <= 165:
+                            valid_exps_4m.append((abs(dte - 120), exp_str, dte))
+                    except Exception:
+                        pass
+                if valid_exps_4m:
+                    valid_exps_4m.sort(key=lambda x: x[0])
+                    target_exp_4m = valid_exps_4m[0][1]
+                    target_dte_4m = valid_exps_4m[0][2]
+                    spx_spot = state.latest_spx_close or (state.spx_ticker.marketPrice() if state.spx_ticker else None) or 7340.0
+                    call_strike_4m = round((spx_spot * 1.095) / 25.0) * 25.0
+                    put_strike_4m = round((spx_spot * 0.825) / 25.0) * 25.0
+
+                    call_opt_4m = Option('SPX', target_exp_4m, call_strike_4m, 'C', 'SMART', tradingClass='SPX')
+                    put_opt_4m = Option('SPX', target_exp_4m, put_strike_4m, 'P', 'SMART', tradingClass='SPX')
+                    q_4m = await ib_client.qualifyContractsAsync(call_opt_4m, put_opt_4m)
+                    if len(q_4m) == 2:
+                        state.spx_4m_rr_call_contract = q_4m[0]
+                        state.spx_4m_rr_put_contract = q_4m[1]
+                        state.spx_4m_rr_call_ticker = ib_client.reqMktData(state.spx_4m_rr_call_contract, '106', False, False)
+                        state.spx_4m_rr_put_ticker = ib_client.reqMktData(state.spx_4m_rr_put_contract, '106', False, False)
+                        print(f" [4M Skew] SPX 4M OTM RR subscribed ({target_exp_4m}, {target_dte_4m}d): C{call_strike_4m} (+9.5%) / P{put_strike_4m} (-17.5%)")
+    except Exception as e:
+        print(f" [4M Skew] Warning: Failed to resolve SPX 4M RR contracts: {e}")
+
+    # 4. Tech (QQQ) 4M OTM Risk Reversal for NDX
+    try:
+        qqq_stock = Stock('QQQ', 'SMART', 'USD')
+        await ib_client.qualifyContractsAsync(qqq_stock)
+        chains_qqq = await ib_client.reqSecDefOptParamsAsync('QQQ', '', 'STK', qqq_stock.conId)
+        qqq_chain = next((c for c in chains_qqq if c.exchange == 'SMART' and c.tradingClass == 'QQQ'), None)
+        if not qqq_chain:
+            qqq_chain = next((c for c in chains_qqq if c.tradingClass == 'QQQ'), None) or (chains_qqq[0] if chains_qqq else None)
+        if qqq_chain:
+            valid_exps_qqq_4m = []
+            for exp_str in qqq_chain.expirations:
+                try:
+                    d = datetime.strptime(exp_str, '%Y%m%d').date()
+                    dte = (d - today).days
+                    if 100 <= dte <= 165:
+                        valid_exps_qqq_4m.append((abs(dte - 120), exp_str, dte))
+                except Exception:
+                    pass
+            if valid_exps_qqq_4m:
+                valid_exps_qqq_4m.sort(key=lambda x: x[0])
+                target_exp_qqq_4m = valid_exps_qqq_4m[0][1]
+                target_dte_qqq_4m = valid_exps_qqq_4m[0][2]
+                qqq_spot = (state.latest_ndx_close / 41.0) if (state.latest_ndx_close and state.latest_ndx_close > 0) else 665.0
+                call_qqq_strike_4m = round((qqq_spot * 1.095) / 5.0) * 5.0
+                put_qqq_strike_4m = round((qqq_spot * 0.825) / 5.0) * 5.0
+                call_qqq_4m = Option('QQQ', target_exp_qqq_4m, call_qqq_strike_4m, 'C', 'SMART')
+                put_qqq_4m = Option('QQQ', target_exp_qqq_4m, put_qqq_strike_4m, 'P', 'SMART')
+                q_qqq_4m = await ib_client.qualifyContractsAsync(call_qqq_4m, put_qqq_4m)
+                if len(q_qqq_4m) == 2:
+                    state.ndx_4m_rr_call_contract = q_qqq_4m[0]
+                    state.ndx_4m_rr_put_contract = q_qqq_4m[1]
+                    state.ndx_4m_rr_call_ticker = ib_client.reqMktData(state.ndx_4m_rr_call_contract, '106', False, False)
+                    state.ndx_4m_rr_put_ticker = ib_client.reqMktData(state.ndx_4m_rr_put_contract, '106', False, False)
+                    print(f" [4M Skew] QQQ 4M OTM RR subscribed ({target_exp_qqq_4m}, {target_dte_qqq_4m}d): C{call_qqq_strike_4m} / P{put_qqq_strike_4m}")
+    except Exception as e:
+        print(f" [4M Skew] Warning: Failed to resolve QQQ 4M RR contracts: {e}")
 
 
 async def connect_and_init_ibkr(host: str, port: int, client_id: int):
@@ -1900,6 +1984,119 @@ def compute_live_payload() -> Dict[str, Any]:
         ndx_rr_regime = "NORMAL"
         ndx_rr_badge = "NORMAL"
 
+    # 4M OTM Risk Reversal Evaluation (Merridew Skew: 9.5% OTM Call vs 17.5% OTM Put ~120 DTE)
+    def _calc_4m_rr(c_contract, p_contract, c_ticker, p_ticker, cached_data):
+        if not c_contract or not p_contract:
+            return cached_data
+
+        c_mid = None
+        p_mid = None
+        c_iv = None
+        p_iv = None
+        c_delta = None
+        p_delta = None
+
+        if c_ticker:
+            c_mid = c_ticker.marketPrice()
+            if c_mid is None or math.isnan(c_mid) or c_mid <= 0:
+                if c_ticker.bid and c_ticker.ask and not math.isnan(c_ticker.bid) and not math.isnan(c_ticker.ask) and c_ticker.bid > 0:
+                    c_mid = (c_ticker.bid + c_ticker.ask) / 2.0
+                elif c_ticker.close and not math.isnan(c_ticker.close) and c_ticker.close > 0:
+                    c_mid = c_ticker.close
+            if c_ticker.modelGreeks:
+                mg = c_ticker.modelGreeks
+                if mg.impliedVol and not math.isnan(mg.impliedVol) and mg.impliedVol > 0:
+                    c_iv = mg.impliedVol * 100.0
+                if mg.delta and not math.isnan(mg.delta):
+                    c_delta = mg.delta
+
+        if p_ticker:
+            p_mid = p_ticker.marketPrice()
+            if p_mid is None or math.isnan(p_mid) or p_mid <= 0:
+                if p_ticker.bid and p_ticker.ask and not math.isnan(p_ticker.bid) and not math.isnan(p_ticker.ask) and p_ticker.bid > 0:
+                    p_mid = (p_ticker.bid + p_ticker.ask) / 2.0
+                elif p_ticker.close and not math.isnan(p_ticker.close) and p_ticker.close > 0:
+                    p_mid = p_ticker.close
+            if p_ticker.modelGreeks:
+                mg = p_ticker.modelGreeks
+                if mg.impliedVol and not math.isnan(mg.impliedVol) and mg.impliedVol > 0:
+                    p_iv = mg.impliedVol * 100.0
+                if mg.delta and not math.isnan(mg.delta):
+                    p_delta = mg.delta
+
+        # Fallback to cache if missing
+        if (c_mid is None or p_mid is None) and cached_data:
+            c_mid = c_mid or cached_data.get('call_mid')
+            p_mid = p_mid or cached_data.get('put_mid')
+            c_iv = c_iv or cached_data.get('call_iv')
+            p_iv = p_iv or cached_data.get('put_iv')
+            c_delta = c_delta or cached_data.get('call_delta')
+            p_delta = p_delta or cached_data.get('put_delta')
+
+        if c_mid is not None and p_mid is not None:
+            combo_mid = c_mid - p_mid
+            net_credit = p_mid - c_mid  # positive when Put > Call (Credit collected)
+            iv_skew = (p_iv - c_iv) if (p_iv is not None and c_iv is not None) else None
+
+            # Regime
+            if net_credit >= 35.0:
+                regime = "EXTREME CREDIT"
+                badge = "EXTREME CREDIT"
+            elif net_credit >= 15.0:
+                regime = "ENTRY ZONE"
+                badge = "ENTRY CREDIT"
+            elif net_credit >= 0.0:
+                regime = "MILD CREDIT"
+                badge = "MILD CREDIT"
+            else:
+                regime = "NORMAL (DEBIT)"
+                badge = "NORMAL (DEBIT)"
+
+            # DTE
+            dte = None
+            exp_str = getattr(c_contract, 'lastTradeDateOrContractMonth', '')
+            if exp_str:
+                try:
+                    exp_date = datetime.strptime(exp_str, '%Y%m%d').date()
+                    dte = (exp_date - datetime.now().date()).days
+                except Exception:
+                    pass
+
+            return {
+                "net_credit": round(net_credit, 2),
+                "combo_mid": round(combo_mid, 2),
+                "call_strike": getattr(c_contract, 'strike', None),
+                "put_strike": getattr(p_contract, 'strike', None),
+                "dte": dte,
+                "expiration": exp_str,
+                "call_mid": round(c_mid, 2),
+                "put_mid": round(p_mid, 2),
+                "call_iv": round(c_iv, 2) if c_iv is not None else None,
+                "put_iv": round(p_iv, 2) if p_iv is not None else None,
+                "call_delta": round(c_delta, 3) if c_delta is not None else None,
+                "put_delta": round(p_delta, 3) if p_delta is not None else None,
+                "iv_skew": round(iv_skew, 2) if iv_skew is not None else None,
+                "regime": regime,
+                "badge": badge
+            }
+        return cached_data
+
+    spx_4m_rr_payload = _calc_4m_rr(
+        state.spx_4m_rr_call_contract, state.spx_4m_rr_put_contract,
+        state.spx_4m_rr_call_ticker, state.spx_4m_rr_put_ticker,
+        state.spx_4m_rr_data
+    )
+    if spx_4m_rr_payload:
+        state.spx_4m_rr_data = spx_4m_rr_payload
+
+    ndx_4m_rr_payload = _calc_4m_rr(
+        state.ndx_4m_rr_call_contract, state.ndx_4m_rr_put_contract,
+        state.ndx_4m_rr_call_ticker, state.ndx_4m_rr_put_ticker,
+        state.ndx_4m_rr_data
+    )
+    if ndx_4m_rr_payload:
+        state.ndx_4m_rr_data = ndx_4m_rr_payload
+
     # Master Confluence Signals (SPX)
     is_dual_alert = bool(is_overvixed and is_inverted)
     is_volcano_alert = bool(cor1m_is_coiled and spx_rr_val is not None and spx_rr_val >= 7.0)
@@ -2278,6 +2475,7 @@ def compute_live_payload() -> Dict[str, Any]:
             "regime": spx_rr_regime,
             "badge": spx_rr_badge
         },
+        "rr_4m": spx_4m_rr_payload,
         "confluence": {
             "tag": confluence_tag,
             "description": confluence_desc,
@@ -2330,6 +2528,7 @@ def compute_live_payload() -> Dict[str, Any]:
                 "regime": ndx_rr_regime,
                 "badge": ndx_rr_badge
             },
+            "rr_4m": ndx_4m_rr_payload,
         "confluence": {
                 "tag": ndx_confluence_tag,
                 "description": ndx_confluence_desc,
@@ -2473,6 +2672,10 @@ async def lifespan(app: FastAPI):
             if state.spx_rr_call_contract: state.ib.cancelMktData(state.spx_rr_call_contract)
             if state.ndx_rr_put_contract: state.ib.cancelMktData(state.ndx_rr_put_contract)
             if state.ndx_rr_call_contract: state.ib.cancelMktData(state.ndx_rr_call_contract)
+            if state.spx_4m_rr_call_contract: state.ib.cancelMktData(state.spx_4m_rr_call_contract)
+            if state.spx_4m_rr_put_contract: state.ib.cancelMktData(state.spx_4m_rr_put_contract)
+            if state.ndx_4m_rr_call_contract: state.ib.cancelMktData(state.ndx_4m_rr_call_contract)
+            if state.ndx_4m_rr_put_contract: state.ib.cancelMktData(state.ndx_4m_rr_put_contract)
             state.ib.disconnect()
         except Exception:
             pass

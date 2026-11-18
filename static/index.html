@@ -237,7 +237,7 @@
   <main class="flex-1 max-w-[1720px] w-full mx-auto p-4 space-y-4">
     
     <!-- KPI METRIC CARDS -->
-    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
       
       <!-- Card 1: Primary Asset (SPX or NDX) -->
       <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
@@ -325,6 +325,18 @@
         <div class="mt-2">
           <div id="kpi-rr-val" class="text-xl font-bold font-mono tracking-tight text-amber-300">--.-- pts</div>
           <div id="lbl-rr-sub" class="text-[10px] text-slate-400 mt-0.5">Put IV &minus; Call IV</div>
+        </div>
+      </div>
+
+      <!-- Card 8: 4M Wing Skew / OTM Risk Reversal (9.5% C vs 17.5% P) -->
+      <div id="card-rr4m" class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition" title="4-Month OTM Risk Reversal (9.5% OTM Call vs 17.5% OTM Put)">
+        <div class="flex items-center justify-between">
+          <span id="lbl-kpi-rr4m" class="text-[11px] font-semibold tracking-wider text-amber-400 uppercase">4M Skew (RR)</span>
+          <span id="tag-rr4m-regime" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-semibold">---</span>
+        </div>
+        <div class="mt-2">
+          <div id="kpi-rr4m-val" class="text-xl font-bold font-mono tracking-tight text-slate-300">--.-- pts</div>
+          <div id="lbl-rr4m-sub" class="text-[10px] text-slate-400 mt-0.5">9.5%C vs 17.5%P</div>
         </div>
       </div>
 
@@ -880,8 +892,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v8.1 - Option B Ultra-Compact Session Replay & Centered SPX/NDX) -->
-  <script src="/static/dashboard.js?v=8.1"></script>
+  <!-- DASHBOARD SCRIPT (v8.2 - Option B Ultra-Compact Session Replay & 8-Card Skew Monitoring) -->
+  <script src="/static/dashboard.js?v=8.2"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>
