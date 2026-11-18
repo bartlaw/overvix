@@ -330,15 +330,97 @@
       </div>
 
       <!-- Card 8: 4M Wing Skew / OTM Risk Reversal (10% C vs 15% P) -->
-      <div id="card-rr4m" class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition" title="4-Month OTM Risk Reversal (10% OTM Call vs 15% OTM Put)">
+      <div id="card-rr4m" class="relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none" title="Click or hover for full breakdown">
         <div class="flex items-center justify-between">
           <span id="lbl-kpi-rr4m" class="text-[11px] font-semibold tracking-wider text-amber-400 uppercase">4M Skew (RR)</span>
-          <span id="tag-rr4m-regime" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-semibold">---</span>
+          <div class="flex items-center space-x-1">
+            <span id="tag-rr4m-regime" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-semibold">---</span>
+            <span id="btn-rr4m-info" class="text-[11px] text-slate-400 hover:text-cyan-400 transition" title="Toggle detailed leg breakdown">ⓘ</span>
+          </div>
         </div>
         <div class="mt-2">
           <div id="kpi-rr4m-val" class="text-xl font-bold font-mono tracking-tight text-slate-300">--.-- pts</div>
           <div id="lbl-rr4m-mat" class="text-[10px] font-mono text-slate-300 mt-0.5">Exp: -- --- '-- (--)</div>
-          <div id="lbl-rr4m-sub" class="text-[10px] text-slate-400 mt-0.5">10%C vs 15%P</div>
+          <div id="lbl-rr4m-sub" class="text-[10px] font-mono text-slate-300 mt-0.5 truncate">C----: --.-% · P----: --.-%</div>
+        </div>
+
+        <!-- Floating Popover Card for 4M Wing Risk Reversal -->
+        <div id="popover-rr4m" class="hidden absolute top-full right-0 mt-2 z-50 w-80 bg-slate-900/95 border border-slate-700/90 rounded-xl shadow-2xl p-3 space-y-2.5 backdrop-blur-md text-left transition">
+          <!-- Header -->
+          <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+            <div>
+              <div id="pop-rr4m-title" class="text-xs font-bold text-white flex items-center space-x-1">
+                <span>🦅</span>
+                <span>SPX 4M Wing Risk Reversal</span>
+              </div>
+              <div class="text-[10px] text-slate-400 font-medium">+10% OTM Call vs -15% OTM Put</div>
+            </div>
+            <div class="flex items-center space-x-1.5">
+              <span id="pop-rr4m-badge" class="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700">
+                ---
+              </span>
+              <button id="btn-close-rr4m-popover" class="text-slate-400 hover:text-white text-xs px-1 py-0.5 rounded hover:bg-slate-800 transition" title="Close">✕</button>
+            </div>
+          </div>
+
+          <!-- Key Metrics Grid -->
+          <div class="grid grid-cols-2 gap-2 bg-slate-950/70 rounded-lg p-2 border border-slate-800/80">
+            <div>
+              <div class="text-[10px] text-slate-400 uppercase font-semibold">Net Credit</div>
+              <div id="pop-rr4m-credit" class="text-sm font-bold font-mono text-emerald-400">--.-- pts</div>
+              <div id="pop-rr4m-cash" class="text-[10px] font-mono text-slate-400">($-,--- / 1-lot)</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-slate-400 uppercase font-semibold">Maturity / DTE</div>
+              <div id="pop-rr4m-mat" class="text-sm font-bold font-mono text-white">-- --- '--</div>
+              <div id="pop-rr4m-dte" class="text-[10px] font-mono text-cyan-400">-- DTE (~4M)</div>
+            </div>
+          </div>
+
+          <!-- Option Legs Breakdown Table -->
+          <div>
+            <div class="text-[10px] font-semibold text-slate-400 uppercase mb-1 flex items-center justify-between">
+              <span>Option Legs Breakdown</span>
+              <span id="pop-rr4m-skew" class="text-amber-400 font-mono">Skew: --.-- pts</span>
+            </div>
+            <div class="overflow-hidden rounded border border-slate-800 text-[11px] font-mono">
+              <table class="w-full text-left">
+                <thead class="bg-slate-950 text-[10px] text-slate-400 uppercase border-b border-slate-800">
+                  <tr>
+                    <th class="py-1 px-1.5">Leg</th>
+                    <th class="py-1 px-1.5">Strike</th>
+                    <th class="py-1 px-1.5 text-right">Mid</th>
+                    <th class="py-1 px-1.5 text-right">IV</th>
+                    <th class="py-1 px-1.5 text-right">Delta</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/60 bg-slate-900/80">
+                  <!-- Long Call -->
+                  <tr>
+                    <td class="py-1 px-1.5 text-emerald-400 font-medium">+Call (10%)</td>
+                    <td id="pop-rr4m-call-strike" class="py-1 px-1.5 text-white font-bold">----</td>
+                    <td id="pop-rr4m-call-mid" class="py-1 px-1.5 text-right text-slate-300">$0.00</td>
+                    <td id="pop-rr4m-call-iv" class="py-1 px-1.5 text-right text-cyan-300">--.-%</td>
+                    <td id="pop-rr4m-call-delta" class="py-1 px-1.5 text-right text-slate-300">+0.00</td>
+                  </tr>
+                  <!-- Short Put -->
+                  <tr>
+                    <td class="py-1 px-1.5 text-rose-400 font-medium">-Put (15%)</td>
+                    <td id="pop-rr4m-put-strike" class="py-1 px-1.5 text-white font-bold">----</td>
+                    <td id="pop-rr4m-put-mid" class="py-1 px-1.5 text-right text-slate-300">$0.00</td>
+                    <td id="pop-rr4m-put-iv" class="py-1 px-1.5 text-right text-amber-300">--.-%</td>
+                    <td id="pop-rr4m-put-delta" class="py-1 px-1.5 text-right text-slate-300">-0.00</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Strategy Rationale / Footer -->
+          <div class="text-[10px] text-slate-400 bg-slate-950/50 rounded p-1.5 border border-slate-800/60 leading-tight">
+            <span class="text-slate-300 font-semibold">Wing Dynamics:</span>
+            <span id="pop-rr4m-desc">Put wing IV exceeds Call wing IV, financing upside participation with positive carry.</span>
+          </div>
         </div>
       </div>
 
@@ -894,8 +976,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v8.4 - Actual Maturity Display on Skew Badges) -->
-  <script src="/static/dashboard.js?v=8.4"></script>
+  <!-- DASHBOARD SCRIPT (v8.5 - Rich Readable Popover & Strike/Vol Info on 4M Wing Skew) -->
+  <script src="/static/dashboard.js?v=8.5"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>

@@ -3864,41 +3864,127 @@ function updateUI(data) {
   if (rr4mValEl && tagRr4m) {
     if (rr4mData && rr4mData.net_credit !== null && rr4mData.net_credit !== undefined) {
       const crVal = rr4mData.net_credit;
-      if (crVal >= 0) {
+      const isCredit = crVal >= 0;
+      if (isCredit) {
         rr4mValEl.textContent = `${fmtPts(crVal)} pts CR`;
       } else {
         rr4mValEl.textContent = `${fmtPts(crVal)} pts DB`;
       }
       tagRr4m.textContent = rr4mData.badge || rr4mData.regime || '---';
 
+      // Subtitle: Strike Selection & Volatility Info (e.g. C8125: 14.0% · P6275: 27.8%)
       if (rr4mData.call_strike && rr4mData.put_strike) {
-        subRr4m.textContent = `C${rr4mData.call_strike} / P${rr4mData.put_strike} • 10%C/15%P`;
+        const cIvStr = (rr4mData.call_iv !== null && rr4mData.call_iv !== undefined) ? `${fmtNum(rr4mData.call_iv, 1)}%` : '--.-%';
+        const pIvStr = (rr4mData.put_iv !== null && rr4mData.put_iv !== undefined) ? `${fmtNum(rr4mData.put_iv, 1)}%` : '--.-%';
+        subRr4m.textContent = `C${rr4mData.call_strike}: ${cIvStr} · P${rr4mData.put_strike}: ${pIvStr}`;
       } else if (subRr4m) {
         subRr4m.textContent = '10%C vs 15%P (4M)';
       }
 
-      if (cardRr4m && rr4mData.call_mid !== undefined && rr4mData.put_mid !== undefined) {
-        const mat = rr4mData.expiration ? `Exp: ${fmtMaturity(rr4mData.expiration, rr4mData.dte)} | ` : '';
-        const cIv = (rr4mData.call_iv !== null && rr4mData.call_iv !== undefined) ? ` (IV: ${fmtNum(rr4mData.call_iv, 1)}%)` : '';
-        const pIv = (rr4mData.put_iv !== null && rr4mData.put_iv !== undefined) ? ` (IV: ${fmtNum(rr4mData.put_iv, 1)}%)` : '';
-        const skw = (rr4mData.iv_skew !== null && rr4mData.iv_skew !== undefined) ? ` | Skew: ${fmtPts(rr4mData.iv_skew)} pts` : '';
-        cardRr4m.title = `${mat}Call: $${fmtNum(rr4mData.call_mid, 2)}${cIv} | Put: $${fmtNum(rr4mData.put_mid, 2)}${pIv}${skw}`;
+      // Detailed readable popup formatting (both for title tooltip and floating popover card)
+      const assetName = isNdx ? "QQQ" : "SPX";
+      const multiplier = 100;
+      const cashVal = Math.abs(crVal * multiplier);
+      const cashStr = `${isCredit ? '+' : '-'}$${cashVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const matStr = rr4mData.expiration ? fmtMaturity(rr4mData.expiration, null) : '-- --- \'--';
+      const dteStr = `${rr4mData.dte || 120} DTE`;
+      const cStr = rr4mData.call_strike ? `${rr4mData.call_strike}C` : 'Call';
+      const pStr = rr4mData.put_strike ? `${rr4mData.put_strike}P` : 'Put';
+      const cMidStr = (rr4mData.call_mid !== undefined && rr4mData.call_mid !== null) ? `$${fmtNum(rr4mData.call_mid, 2)}` : '$--.--';
+      const pMidStr = (rr4mData.put_mid !== undefined && rr4mData.put_mid !== null) ? `$${fmtNum(rr4mData.put_mid, 2)}` : '$--.--';
+      const cIvStr = (rr4mData.call_iv !== null && rr4mData.call_iv !== undefined) ? `${fmtNum(rr4mData.call_iv, 1)}%` : '--.-%';
+      const pIvStr = (rr4mData.put_iv !== null && rr4mData.put_iv !== undefined) ? `${fmtNum(rr4mData.put_iv, 1)}%` : '--.-%';
+      const cDeltaStr = (rr4mData.call_delta !== null && rr4mData.call_delta !== undefined) ? (rr4mData.call_delta >= 0 ? `+${fmtNum(rr4mData.call_delta, 3)}` : fmtNum(rr4mData.call_delta, 3)) : '--';
+      const pDeltaStr = (rr4mData.put_delta !== null && rr4mData.put_delta !== undefined) ? (rr4mData.put_delta >= 0 ? `+${fmtNum(rr4mData.put_delta, 3)}` : fmtNum(rr4mData.put_delta, 3)) : '--';
+      const skewStr = (rr4mData.iv_skew !== null && rr4mData.iv_skew !== undefined) ? `${fmtPts(rr4mData.iv_skew)} pts` : '-- pts';
+
+      if (cardRr4m) {
+        cardRr4m.title = `${assetName} 4M Wing Risk Reversal (+10% Call vs -15% Put)\n` +
+          `────────────────────────────────────────────────────\n` +
+          `Regime: ${rr4mData.badge || rr4mData.regime || 'NORMAL'}\n` +
+          `Net Credit: ${isCredit ? '+' : ''}${fmtNum(crVal, 2)} pts (${cashStr} / 1-lot)\n` +
+          `Maturity: ${matStr} (${dteStr})\n\n` +
+          `Option Legs Breakdown:\n` +
+          `• Long Call (+10% OTM):  ${cStr} | Mid: ${cMidStr} | IV: ${cIvStr} | Δ: ${cDeltaStr}\n` +
+          `• Short Put (-15% OTM):  ${pStr} | Mid: ${pMidStr} | IV: ${pIvStr} | Δ: ${pDeltaStr}\n\n` +
+          `Wing Volatility Dynamics:\n` +
+          `• IV Skew (Put IV - Call IV): ${skewStr}\n` +
+          `• Click card or ⓘ for interactive floating breakdown`;
       }
 
+      // Populate interactive Floating Popover Card
+      const popTitle = document.getElementById('pop-rr4m-title');
+      const popBadge = document.getElementById('pop-rr4m-badge');
+      const popCredit = document.getElementById('pop-rr4m-credit');
+      const popCash = document.getElementById('pop-rr4m-cash');
+      const popMat = document.getElementById('pop-rr4m-mat');
+      const popDte = document.getElementById('pop-rr4m-dte');
+      const popSkew = document.getElementById('pop-rr4m-skew');
+      const popCallStrike = document.getElementById('pop-rr4m-call-strike');
+      const popCallMid = document.getElementById('pop-rr4m-call-mid');
+      const popCallIv = document.getElementById('pop-rr4m-call-iv');
+      const popCallDelta = document.getElementById('pop-rr4m-call-delta');
+      const popPutStrike = document.getElementById('pop-rr4m-put-strike');
+      const popPutMid = document.getElementById('pop-rr4m-put-mid');
+      const popPutIv = document.getElementById('pop-rr4m-put-iv');
+      const popPutDelta = document.getElementById('pop-rr4m-put-delta');
+      const popDesc = document.getElementById('pop-rr4m-desc');
+
+      if (popTitle) popTitle.innerHTML = `<span>🦅</span><span>${assetName} 4M Wing Risk Reversal</span>`;
+      if (popBadge) {
+        popBadge.textContent = rr4mData.badge || rr4mData.regime || '---';
+        if (crVal >= 35.0 || rr4mData.regime === 'EXTREME CREDIT') {
+          popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-purple-900 text-purple-200 border border-purple-500 animate-pulse';
+        } else if (crVal >= 15.0 || rr4mData.regime === 'ENTRY ZONE') {
+          popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-emerald-900/90 text-emerald-200 border border-emerald-500';
+        } else if (crVal >= 0.0) {
+          popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-amber-950/70 text-amber-300 border border-amber-800/60';
+        } else {
+          popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700';
+        }
+      }
+      if (popCredit) {
+        popCredit.textContent = `${isCredit ? '+' : ''}${fmtNum(crVal, 2)} pts ${isCredit ? 'CR' : 'DB'}`;
+        popCredit.className = isCredit ? 'text-sm font-bold font-mono text-emerald-400' : 'text-sm font-bold font-mono text-slate-300';
+      }
+      if (popCash) popCash.textContent = `(${cashStr} / 1-lot)`;
+      if (popMat) popMat.textContent = matStr;
+      if (popDte) popDte.textContent = `${dteStr} (~4M)`;
+      if (popSkew) popSkew.textContent = `Skew: ${skewStr}`;
+
+      if (popCallStrike) popCallStrike.textContent = cStr;
+      if (popCallMid) popCallMid.textContent = cMidStr;
+      if (popCallIv) popCallIv.textContent = cIvStr;
+      if (popCallDelta) popCallDelta.textContent = cDeltaStr;
+
+      if (popPutStrike) popPutStrike.textContent = pStr;
+      if (popPutMid) popPutMid.textContent = pMidStr;
+      if (popPutIv) popPutIv.textContent = pIvStr;
+      if (popPutDelta) popPutDelta.textContent = pDeltaStr;
+
+      if (popDesc) {
+        if (rr4mData.iv_skew && rr4mData.iv_skew > 0) {
+          popDesc.textContent = `Short Put IV exceeds Long Call IV by +${fmtNum(rr4mData.iv_skew, 2)} pts, allowing the upside call to be financed with net credit.`;
+        } else {
+          popDesc.textContent = `Call & Put wings are monitored for asymmetric skew entry opportunities across ~120 DTE.`;
+        }
+      }
+
+      // Card styling: preserving relative group cursor-pointer select-none
       if (crVal >= 35.0 || rr4mData.regime === 'EXTREME CREDIT') {
-        if (cardRr4m) cardRr4m.className = 'bg-purple-950/40 border border-purple-500 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        if (cardRr4m) cardRr4m.className = 'relative group bg-purple-950/40 border border-purple-500 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-purple-900 text-purple-200 border border-purple-500 font-bold uppercase animate-pulse';
         rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
       } else if (crVal >= 15.0 || rr4mData.regime === 'ENTRY ZONE') {
-        if (cardRr4m) cardRr4m.className = 'bg-emerald-950/30 border border-emerald-600 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        if (cardRr4m) cardRr4m.className = 'relative group bg-emerald-950/30 border border-emerald-600 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/90 text-emerald-200 border border-emerald-500 font-bold uppercase';
         rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-emerald-300';
       } else if (crVal >= 0.0) {
-        if (cardRr4m) cardRr4m.className = 'bg-amber-950/20 border border-amber-800/80 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        if (cardRr4m) cardRr4m.className = 'relative group bg-amber-950/20 border border-amber-800/80 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-semibold uppercase';
         rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-amber-300';
       } else {
-        if (cardRr4m) cardRr4m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        if (cardRr4m) cardRr4m.className = 'relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-semibold uppercase';
         rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-slate-300';
       }
@@ -3907,7 +3993,7 @@ function updateUI(data) {
       tagRr4m.textContent = '---';
       tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-semibold';
       if (cardRr4m) {
-        cardRr4m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+        cardRr4m.className = 'relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         cardRr4m.title = '4-Month OTM Risk Reversal (10% OTM Call vs 15% OTM Put)';
       }
       if (subRr4m) subRr4m.textContent = '10%C vs 15%P (4M)';
@@ -4815,6 +4901,43 @@ function returnToLiveMode() {
   }
 }
 
+function setupRr4mPopover() {
+  const cardRr4m = document.getElementById('card-rr4m');
+  const popoverRr4m = document.getElementById('popover-rr4m');
+  const btnClose = document.getElementById('btn-close-rr4m-popover');
+
+  if (!cardRr4m || !popoverRr4m) return;
+
+  const togglePopover = (e) => {
+    e.stopPropagation();
+    popoverRr4m.classList.toggle('hidden');
+  };
+
+  cardRr4m.addEventListener('click', (e) => {
+    // If click originated inside the popover (except close button), don't close
+    if (popoverRr4m.contains(e.target)) {
+      if (e.target === btnClose || (btnClose && btnClose.contains(e.target))) {
+        popoverRr4m.classList.add('hidden');
+      }
+      return;
+    }
+    togglePopover(e);
+  });
+
+  if (btnClose) {
+    btnClose.addEventListener('click', (e) => {
+      e.stopPropagation();
+      popoverRr4m.classList.add('hidden');
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    if (!popoverRr4m.classList.contains('hidden') && !cardRr4m.contains(e.target)) {
+      popoverRr4m.classList.add('hidden');
+    }
+  });
+}
+
 // Start Dashboard on load
 window.addEventListener('DOMContentLoaded', () => {
   setupTimeframeButtons();
@@ -4822,6 +4945,7 @@ window.addEventListener('DOMContentLoaded', () => {
   setupCorrButtons();
   setupAssetSwitcher();
   setupGthToggle();
+  setupRr4mPopover();
   initHistoricalControls();
   bootstrapData();
 });
