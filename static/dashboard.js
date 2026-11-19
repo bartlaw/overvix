@@ -1222,6 +1222,12 @@ function renderOvervixChart(bootstrap) {
       ? `<b>Session Close (${trailSessionDate || 'Prior'})</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Official Close</span><extra></extra>`
       : `<b>Live Current Point</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`);
 
+  // Size gradient for historical points: oldest session = 3.5px, most recent session = 9.0px (current max)
+  const nHist = xHist.length;
+  const histSizes = nHist <= 1
+    ? (nHist === 1 ? [9] : 9)
+    : xHist.map((_, i) => Number((3.5 + (9.0 - 3.5) * (i / (nHist - 1))).toFixed(2)));
+
   const traces = [
     // 0: Historical 60D Spot-Vol Points
     {
@@ -1232,7 +1238,7 @@ function renderOvervixChart(bootstrap) {
       name: `${assetLabel} Historical (60D)`,
       marker: {
         color: isNdx ? '#C084FC' : '#E6D385',
-        size: 9,
+        size: histSizes,
         opacity: 0.85,
         line: { color: isNdx ? '#9333EA' : '#B39F50', width: 0.75 }
       },
