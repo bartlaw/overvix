@@ -4203,18 +4203,27 @@ function updateUI(data) {
       const popPutDelta = document.getElementById('pop-rr4m-put-delta');
       const popDesc = document.getElementById('pop-rr4m-desc');
 
-      const isExtreme = (rr4mData.regime === 'EXTREME CREDIT' || crVal >= 35.0 || (isCredit && rr4mData.iv_skew && rr4mData.iv_skew >= 12.0) || (isCredit && rr4mData.skew_ratio && rr4mData.skew_ratio >= 1.68));
-      const isEntry = !isExtreme && (rr4mData.regime === 'ENTRY ZONE' || crVal >= 15.0 || (isCredit && rr4mData.iv_skew && rr4mData.iv_skew >= 7.0) || (isCredit && rr4mData.skew_ratio && rr4mData.skew_ratio >= 1.35));
+      const skewVal = rr4mData.iv_skew;
+      const ratioVal = rr4mData.skew_ratio;
+
+      // Statistical Skew Regimes for 4M Wing Skew (~120 DTE, similar to 25Δ Skew stats):
+      // Extreme >= 12.0 pts (or ratio >= 1.65x)
+      // Elevated >= 8.5 pts (or ratio >= 1.45x)
+      // Complacent < 4.5 pts (or ratio < 1.30x)
+      // Normal: 4.5 to 8.5 pts
+      const isExtreme = (rr4mData.regime === 'EXTREME' || rr4mData.badge === 'EXTREME SKEW' || (skewVal !== null && skewVal >= 12.0) || (ratioVal && ratioVal >= 1.65));
+      const isElevated = !isExtreme && (rr4mData.regime === 'ELEVATED' || rr4mData.badge === 'ELEVATED SKEW' || (skewVal !== null && skewVal >= 8.5) || (ratioVal && ratioVal >= 1.45));
+      const isComplacent = !isExtreme && !isElevated && (rr4mData.regime === 'COMPLACENT' || (skewVal !== null && skewVal < 4.5) || (ratioVal && ratioVal < 1.30));
 
       if (popTitle) popTitle.innerHTML = `<span>🦅</span><span>${assetName} 4M Wing Risk Reversal</span>`;
       if (popBadge) {
-        popBadge.textContent = rr4mData.badge || rr4mData.regime || (isCredit ? 'CREDIT' : 'DEBIT');
+        popBadge.textContent = rr4mData.badge || rr4mData.regime || 'NORMAL';
         if (isExtreme) {
           popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-purple-900 text-purple-200 border border-purple-500 animate-pulse';
-        } else if (isEntry) {
+        } else if (isElevated) {
           popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-emerald-900/90 text-emerald-200 border border-emerald-500';
-        } else if (isCredit) {
-          popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-amber-950/70 text-amber-300 border border-amber-800/60';
+        } else if (isComplacent) {
+          popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-cyan-950/70 text-cyan-300 border border-cyan-800/60';
         } else {
           popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700';
         }
@@ -4254,10 +4263,21 @@ function updateUI(data) {
       if (popPutDelta) popPutDelta.textContent = pDeltaStr;
 
       if (popDesc) {
-        if (rr4mData.iv_skew && rr4mData.iv_skew > 0) {
-          const ratioDesc = rr4mData.skew_ratio ? ` (${fmtNum(rr4mData.skew_ratio, 2)}x ratio)` : '';
-          const bufferDesc = rr4mData.put_buffer_pct ? ` Short put provides ${fmtNum(Math.abs(rr4mData.put_buffer_pct), 1)}% downside cushion.` : '';
-          popDesc.textContent = `Short Put IV (${pIvStr}) exceeds Long Call IV (${cIvStr}) by +${fmtNum(rr4mData.iv_skew, 1)} pts${ratioDesc}, financing upside participation for net credit.${bufferDesc}`;
+        if (skewVal !== null && skewVal !== undefined) {
+          const ratioDesc = ratioVal ? ` (${fmtNum(ratioVal, 2)}x ratio)` : '';
+          const bufferDesc = rr4mData.put_buffer_pct ? ` Short put is ${fmtNum(Math.abs(rr4mData.put_buffer_pct), 1)}% below spot.` : '';
+          const crDesc = (rr4mData.net_credit !== null && rr4mData.net_credit !== undefined && rr4mData.net_credit > 0)
+            ? ` Trade collects ${isNdx ? '$' + fmtNum(rr4mData.net_credit, 2) : fmtNum(rr4mData.net_credit, 1) + ' pts'} credit.`
+            : '';
+          if (isExtreme) {
+            popDesc.textContent = `Extreme 4M Wing Skew (+${fmtNum(skewVal, 1)} pts${ratioDesc} ≥ 90th percentile). Downside put wing is severely dislocated vs calls.${crDesc}${bufferDesc}`;
+          } else if (isElevated) {
+            popDesc.textContent = `Elevated 4M Wing Skew (+${fmtNum(skewVal, 1)} pts${ratioDesc}). Downside put premium exceeds baseline, favoring upside financing.${crDesc}${bufferDesc}`;
+          } else if (isComplacent) {
+            popDesc.textContent = `Complacent 4M Wing Skew (+${fmtNum(skewVal, 1)} pts${ratioDesc}). Unusually flat downside curve indicating low institutional tail hedging demand.${bufferDesc}`;
+          } else {
+            popDesc.textContent = `Normal 4M Wing Skew (+${fmtNum(skewVal, 1)} pts${ratioDesc}). Standard structural term slope across ~120 DTE.${crDesc}${bufferDesc}`;
+          }
         } else {
           popDesc.textContent = `Call & Put wings are monitored for asymmetric skew entry opportunities across ~120 DTE.`;
         }
@@ -4268,17 +4288,17 @@ function updateUI(data) {
         if (cardRr4m) cardRr4m.className = 'relative group bg-purple-950/40 border border-purple-500 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-purple-900 text-purple-200 border border-purple-500 font-bold uppercase animate-pulse';
         rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
-      } else if (isEntry) {
+      } else if (isElevated) {
         if (cardRr4m) cardRr4m.className = 'relative group bg-emerald-950/30 border border-emerald-600 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/90 text-emerald-200 border border-emerald-500 font-bold uppercase';
         rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-emerald-300';
-      } else if (isCredit) {
-        if (cardRr4m) cardRr4m.className = 'relative group bg-amber-950/20 border border-amber-800/80 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
-        tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-semibold uppercase';
-        rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-amber-300';
+      } else if (isComplacent) {
+        if (cardRr4m) cardRr4m.className = 'relative group bg-cyan-950/20 border border-cyan-800/80 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
+        tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-cyan-950/70 text-cyan-300 border border-cyan-800/60 font-semibold uppercase';
+        rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-cyan-300';
       } else {
         if (cardRr4m) cardRr4m.className = 'relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
-        tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-semibold uppercase';
+        tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase';
         rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-slate-300';
       }
     } else {

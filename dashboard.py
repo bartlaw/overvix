@@ -2111,30 +2111,25 @@ def compute_live_payload() -> Dict[str, Any]:
             c_strike = getattr(c_contract, 'strike', None)
             put_buffer_pct = ((spot - p_strike) / spot * 100.0) if (spot and spot > 0 and p_strike) else None
 
-            # Dual-metric normalized regime evaluation (works consistently on both SPX and QQQ)
-            is_credit = net_credit > 0
-            if is_credit and (
-                (iv_skew is not None and iv_skew >= 12.0)
-                or (skew_ratio is not None and skew_ratio >= 1.68)
-                or (credit_pct is not None and credit_pct >= 0.35)
-                or net_credit >= 35.0
-            ):
-                regime = "EXTREME CREDIT"
-                badge = "EXTREME CREDIT"
-            elif is_credit and (
-                (iv_skew is not None and iv_skew >= 7.0)
-                or (skew_ratio is not None and skew_ratio >= 1.35)
-                or (credit_pct is not None and credit_pct >= 0.18)
-                or net_credit >= 15.0
-            ):
-                regime = "ENTRY ZONE"
-                badge = "ENTRY CREDIT"
-            elif is_credit:
-                regime = "MILD CREDIT"
-                badge = "MILD CREDIT"
+            # Skew-based statistical regime evaluation (similar to 25Δ Skew stats across ~120 DTE)
+            # 4M Wing Skew (+10% Call vs -15% Put):
+            # Median ~6.0-6.5 pts | Elevated >= 8.5 pts (or ratio >= 1.45x) | Extreme >= 12.0 pts (or ratio >= 1.65x) | Complacent < 4.5 pts
+            if iv_skew is not None:
+                if iv_skew >= 12.0 or (skew_ratio is not None and skew_ratio >= 1.65):
+                    regime = "EXTREME"
+                    badge = "EXTREME SKEW"
+                elif iv_skew >= 8.5 or (skew_ratio is not None and skew_ratio >= 1.45):
+                    regime = "ELEVATED"
+                    badge = "ELEVATED SKEW"
+                elif iv_skew < 4.5 or (skew_ratio is not None and skew_ratio < 1.30):
+                    regime = "COMPLACENT"
+                    badge = "COMPLACENT"
+                else:
+                    regime = "NORMAL"
+                    badge = "NORMAL SKEW"
             else:
-                regime = "NORMAL (DEBIT)"
-                badge = "NORMAL (DEBIT)"
+                regime = "NORMAL"
+                badge = "NORMAL"
 
             # DTE
             dte = None
