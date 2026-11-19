@@ -142,6 +142,8 @@ class DashboardState:
         self.ndx_rr_val: Optional[float] = None
         self.spx_4m_rr_data: Optional[Dict[str, Any]] = None
         self.ndx_4m_rr_data: Optional[Dict[str, Any]] = None
+        self.spx_4m_locked_strikes: Optional[Tuple[str, float, float]] = None
+        self.ndx_4m_locked_strikes: Optional[Tuple[str, float, float]] = None
 
         # Fallback real-time 1-min bar streams for indices without reqMktData ticks (e.g. NDX/VXN/VIX3M)
         self.live_bars: Dict[str, Any] = {}
@@ -569,16 +571,17 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
                     target_exp_4m = valid_exps_4m[0][1]
                     target_dte_4m = valid_exps_4m[0][2]
                     
-                    spx_spot = None
-                    if state.spx_ticker and state.spx_ticker.marketPrice() and not math.isnan(state.spx_ticker.marketPrice()) and state.spx_ticker.marketPrice() > 0:
-                        spx_spot = state.spx_ticker.marketPrice()
-                    elif state.es_ticker and state.es_ticker.marketPrice() and not math.isnan(state.es_ticker.marketPrice()) and state.es_spx_basis:
-                        spx_spot = state.es_ticker.marketPrice() - state.es_spx_basis
-                    if not spx_spot or spx_spot <= 0:
-                        spx_spot = state.latest_spx_close or 7340.0
-
+                    # Anchor strike selection strictly to official session reference close (latest_spx_close)
+                    # to prevent strike jumping during intraday reconnects or spot market fluctuations
+                    spx_spot = state.latest_spx_close if (state.latest_spx_close and state.latest_spx_close > 0) else 7340.0
                     call_strike_4m = round((spx_spot * 1.10) / 25.0) * 25.0
                     put_strike_4m = round((spx_spot * 0.85) / 25.0) * 25.0
+
+                    # Lock strikes for the session
+                    if state.spx_4m_locked_strikes:
+                        target_exp_4m, call_strike_4m, put_strike_4m = state.spx_4m_locked_strikes
+                    else:
+                        state.spx_4m_locked_strikes = (target_exp_4m, call_strike_4m, put_strike_4m)
 
                     call_opt_4m = Option('SPX', target_exp_4m, call_strike_4m, 'C', 'SMART', tradingClass='SPX')
                     put_opt_4m = Option('SPX', target_exp_4m, put_strike_4m, 'P', 'SMART', tradingClass='SPX')
@@ -588,7 +591,7 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
                         state.spx_4m_rr_put_contract = q_4m[1]
                         state.spx_4m_rr_call_ticker = ib_client.reqMktData(state.spx_4m_rr_call_contract, '106', False, False)
                         state.spx_4m_rr_put_ticker = ib_client.reqMktData(state.spx_4m_rr_put_contract, '106', False, False)
-                        print(f" [4M Skew] SPX 4M OTM RR subscribed ({target_exp_4m}, {target_dte_4m}d): C{call_strike_4m} (+10%) / P{put_strike_4m} (-15%)")
+                        print(f" [4M Skew] SPX 4M OTM RR subscribed ({target_exp_4m}, {target_dte_4m}d): C{call_strike_4m} (+10%) / P{put_strike_4m} (-15%) [Ref: {spx_spot:.2f}]")
     except Exception as e:
         print(f" [4M Skew] Warning: Failed to resolve SPX 4M RR contracts: {e}")
 
@@ -617,6 +620,13 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
                 qqq_spot = (state.latest_ndx_close / 41.0) if (state.latest_ndx_close and state.latest_ndx_close > 0) else 665.0
                 call_qqq_strike_4m = round((qqq_spot * 1.10) / 5.0) * 5.0
                 put_qqq_strike_4m = round((qqq_spot * 0.85) / 5.0) * 5.0
+
+                # Lock strikes for the session
+                if state.ndx_4m_locked_strikes:
+                    target_exp_qqq_4m, call_qqq_strike_4m, put_qqq_strike_4m = state.ndx_4m_locked_strikes
+                else:
+                    state.ndx_4m_locked_strikes = (target_exp_qqq_4m, call_qqq_strike_4m, put_qqq_strike_4m)
+
                 call_qqq_4m = Option('QQQ', target_exp_qqq_4m, call_qqq_strike_4m, 'C', 'SMART')
                 put_qqq_4m = Option('QQQ', target_exp_qqq_4m, put_qqq_strike_4m, 'P', 'SMART')
                 q_qqq_4m = await ib_client.qualifyContractsAsync(call_qqq_4m, put_qqq_4m)
@@ -625,7 +635,7 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
                     state.ndx_4m_rr_put_contract = q_qqq_4m[1]
                     state.ndx_4m_rr_call_ticker = ib_client.reqMktData(state.ndx_4m_rr_call_contract, '106', False, False)
                     state.ndx_4m_rr_put_ticker = ib_client.reqMktData(state.ndx_4m_rr_put_contract, '106', False, False)
-                    print(f" [4M Skew] QQQ 4M OTM RR subscribed ({target_exp_qqq_4m}, {target_dte_qqq_4m}d): C{call_qqq_strike_4m} (+10%) / P{put_qqq_strike_4m} (-15%)")
+                    print(f" [4M Skew] QQQ 4M OTM RR subscribed ({target_exp_qqq_4m}, {target_dte_qqq_4m}d): C{call_qqq_strike_4m} (+10%) / P{put_qqq_strike_4m} (-15%) [Ref: {qqq_spot:.2f}]")
     except Exception as e:
         print(f" [4M Skew] Warning: Failed to resolve QQQ 4M RR contracts: {e}")
 
@@ -2042,7 +2052,7 @@ def compute_live_payload() -> Dict[str, Any]:
             pass
 
     # 4M OTM Risk Reversal Evaluation (Merridew Skew: 10% OTM Call vs 15% OTM Put ~120 DTE)
-    def _calc_4m_rr(c_contract, p_contract, c_ticker, p_ticker, cached_data):
+    def _calc_4m_rr(c_contract, p_contract, c_ticker, p_ticker, cached_data, spot=None):
         if not c_contract or not p_contract:
             return cached_data
 
@@ -2094,15 +2104,32 @@ def compute_live_payload() -> Dict[str, Any]:
             combo_mid = c_mid - p_mid
             net_credit = p_mid - c_mid  # positive when Put > Call (Credit collected)
             iv_skew = (p_iv - c_iv) if (p_iv is not None and c_iv is not None) else None
+            skew_ratio = (p_iv / c_iv) if (p_iv is not None and c_iv is not None and c_iv > 0) else None
+            credit_pct = (net_credit / spot * 100.0) if (spot and spot > 0) else None
 
-            # Regime
-            if net_credit >= 35.0:
+            p_strike = getattr(p_contract, 'strike', None)
+            c_strike = getattr(c_contract, 'strike', None)
+            put_buffer_pct = ((spot - p_strike) / spot * 100.0) if (spot and spot > 0 and p_strike) else None
+
+            # Dual-metric normalized regime evaluation (works consistently on both SPX and QQQ)
+            is_credit = net_credit > 0
+            if is_credit and (
+                (iv_skew is not None and iv_skew >= 12.0)
+                or (skew_ratio is not None and skew_ratio >= 1.68)
+                or (credit_pct is not None and credit_pct >= 0.35)
+                or net_credit >= 35.0
+            ):
                 regime = "EXTREME CREDIT"
                 badge = "EXTREME CREDIT"
-            elif net_credit >= 15.0:
+            elif is_credit and (
+                (iv_skew is not None and iv_skew >= 7.0)
+                or (skew_ratio is not None and skew_ratio >= 1.35)
+                or (credit_pct is not None and credit_pct >= 0.18)
+                or net_credit >= 15.0
+            ):
                 regime = "ENTRY ZONE"
                 badge = "ENTRY CREDIT"
-            elif net_credit >= 0.0:
+            elif is_credit:
                 regime = "MILD CREDIT"
                 badge = "MILD CREDIT"
             else:
@@ -2122,8 +2149,8 @@ def compute_live_payload() -> Dict[str, Any]:
             return {
                 "net_credit": round(net_credit, 2),
                 "combo_mid": round(combo_mid, 2),
-                "call_strike": getattr(c_contract, 'strike', None),
-                "put_strike": getattr(p_contract, 'strike', None),
+                "call_strike": c_strike,
+                "put_strike": p_strike,
                 "dte": dte,
                 "expiration": exp_str,
                 "call_mid": round(c_mid, 2),
@@ -2133,23 +2160,28 @@ def compute_live_payload() -> Dict[str, Any]:
                 "call_delta": round(c_delta, 3) if c_delta is not None else None,
                 "put_delta": round(p_delta, 3) if p_delta is not None else None,
                 "iv_skew": round(iv_skew, 2) if iv_skew is not None else None,
+                "skew_ratio": round(skew_ratio, 2) if skew_ratio is not None else None,
+                "credit_pct": round(credit_pct, 3) if credit_pct is not None else None,
+                "put_buffer_pct": round(put_buffer_pct, 1) if put_buffer_pct is not None else None,
                 "regime": regime,
                 "badge": badge
             }
         return cached_data
 
+    spx_spot_curr = spx_curr if (spx_curr and spx_curr > 0) else state.latest_spx_close
     spx_4m_rr_payload = _calc_4m_rr(
         state.spx_4m_rr_call_contract, state.spx_4m_rr_put_contract,
         state.spx_4m_rr_call_ticker, state.spx_4m_rr_put_ticker,
-        state.spx_4m_rr_data
+        state.spx_4m_rr_data, spot=spx_spot_curr
     )
     if spx_4m_rr_payload:
         state.spx_4m_rr_data = spx_4m_rr_payload
 
+    ndx_spot_curr = (ndx_curr / 41.0) if (ndx_curr and ndx_curr > 0) else (state.latest_ndx_close / 41.0 if state.latest_ndx_close else 665.0)
     ndx_4m_rr_payload = _calc_4m_rr(
         state.ndx_4m_rr_call_contract, state.ndx_4m_rr_put_contract,
         state.ndx_4m_rr_call_ticker, state.ndx_4m_rr_put_ticker,
-        state.ndx_4m_rr_data
+        state.ndx_4m_rr_data, spot=ndx_spot_curr
     )
     if ndx_4m_rr_payload:
         state.ndx_4m_rr_data = ndx_4m_rr_payload

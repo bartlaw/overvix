@@ -4138,11 +4138,18 @@ function updateUI(data) {
       }
       tagRr4m.textContent = rr4mData.badge || rr4mData.regime || '---';
 
-      // Subtitle: Strike Selection & Volatility Info (e.g. C8125: 14.0% · P6275: 27.8%)
+      // Subtitle: Strike Selection & Volatility Info (e.g. C8050: 15.0% · P6225: 28.9% · ΔIV: +13.9% (1.9x))
       if (rr4mData.call_strike && rr4mData.put_strike) {
         const cIvStr = (rr4mData.call_iv !== null && rr4mData.call_iv !== undefined) ? `${fmtNum(rr4mData.call_iv, 1)}%` : '--.-%';
         const pIvStr = (rr4mData.put_iv !== null && rr4mData.put_iv !== undefined) ? `${fmtNum(rr4mData.put_iv, 1)}%` : '--.-%';
-        subRr4m.textContent = `C${rr4mData.call_strike}: ${cIvStr} · P${rr4mData.put_strike}: ${pIvStr}`;
+        let skewSuffix = '';
+        if (rr4mData.iv_skew !== null && rr4mData.iv_skew !== undefined) {
+          const skewSign = rr4mData.iv_skew >= 0 ? '+' : '';
+          const ratioStr = rr4mData.skew_ratio ? ` (${fmtNum(rr4mData.skew_ratio, 1)}x)` : '';
+          skewSuffix = ` · ΔIV: ${skewSign}${fmtNum(rr4mData.iv_skew, 1)}%${ratioStr}`;
+        }
+        subRr4m.textContent = `C${rr4mData.call_strike}: ${cIvStr} · P${rr4mData.put_strike}: ${pIvStr}${skewSuffix}`;
+        subRr4m.title = `Call ${rr4mData.call_strike} IV: ${cIvStr} | Put ${rr4mData.put_strike} IV: ${pIvStr} | Wing Skew: ${rr4mData.iv_skew ? (rr4mData.iv_skew >= 0 ? '+' : '') + fmtNum(rr4mData.iv_skew, 2) + ' pts' : '--'}${rr4mData.skew_ratio ? ' (' + fmtNum(rr4mData.skew_ratio, 2) + 'x)' : ''}`;
       } else if (subRr4m) {
         subRr4m.textContent = '10%C vs 15%P (4M)';
       }
@@ -4173,6 +4180,10 @@ function updateUI(data) {
       const popBadge = document.getElementById('pop-rr4m-badge');
       const popCredit = document.getElementById('pop-rr4m-credit');
       const popCash = document.getElementById('pop-rr4m-cash');
+      const popSkewMetric = document.getElementById('pop-rr4m-skew-metric');
+      const popSkewRatio = document.getElementById('pop-rr4m-skew-ratio');
+      const popBuffer = document.getElementById('pop-rr4m-buffer');
+      const popBufferStrike = document.getElementById('pop-rr4m-buffer-strike');
       const popMat = document.getElementById('pop-rr4m-mat');
       const popDte = document.getElementById('pop-rr4m-dte');
       const popSkew = document.getElementById('pop-rr4m-skew');
@@ -4186,14 +4197,17 @@ function updateUI(data) {
       const popPutDelta = document.getElementById('pop-rr4m-put-delta');
       const popDesc = document.getElementById('pop-rr4m-desc');
 
+      const isExtreme = (rr4mData.regime === 'EXTREME CREDIT' || crVal >= 35.0 || (isCredit && rr4mData.iv_skew && rr4mData.iv_skew >= 12.0) || (isCredit && rr4mData.skew_ratio && rr4mData.skew_ratio >= 1.68));
+      const isEntry = !isExtreme && (rr4mData.regime === 'ENTRY ZONE' || crVal >= 15.0 || (isCredit && rr4mData.iv_skew && rr4mData.iv_skew >= 7.0) || (isCredit && rr4mData.skew_ratio && rr4mData.skew_ratio >= 1.35));
+
       if (popTitle) popTitle.innerHTML = `<span>🦅</span><span>${assetName} 4M Wing Risk Reversal</span>`;
       if (popBadge) {
-        popBadge.textContent = rr4mData.badge || rr4mData.regime || '---';
-        if (crVal >= 35.0 || rr4mData.regime === 'EXTREME CREDIT') {
+        popBadge.textContent = rr4mData.badge || rr4mData.regime || (isCredit ? 'CREDIT' : 'DEBIT');
+        if (isExtreme) {
           popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-purple-900 text-purple-200 border border-purple-500 animate-pulse';
-        } else if (crVal >= 15.0 || rr4mData.regime === 'ENTRY ZONE') {
+        } else if (isEntry) {
           popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-emerald-900/90 text-emerald-200 border border-emerald-500';
-        } else if (crVal >= 0.0) {
+        } else if (isCredit) {
           popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-amber-950/70 text-amber-300 border border-amber-800/60';
         } else {
           popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700';
@@ -4204,6 +4218,21 @@ function updateUI(data) {
         popCredit.className = isCredit ? 'text-sm font-bold font-mono text-emerald-400' : 'text-sm font-bold font-mono text-slate-300';
       }
       if (popCash) popCash.textContent = `(${cashStr} / 1-lot)`;
+
+      if (popSkewMetric) {
+        const skewSign = (rr4mData.iv_skew !== null && rr4mData.iv_skew !== undefined && rr4mData.iv_skew >= 0) ? '+' : '';
+        popSkewMetric.textContent = (rr4mData.iv_skew !== null && rr4mData.iv_skew !== undefined) ? `${skewSign}${fmtNum(rr4mData.iv_skew, 1)} pts` : '-- pts';
+      }
+      if (popSkewRatio) {
+        popSkewRatio.textContent = rr4mData.skew_ratio ? `${fmtNum(rr4mData.skew_ratio, 2)}x Skew Ratio` : 'Put/Call Skew';
+      }
+      if (popBuffer) {
+        popBuffer.textContent = (rr4mData.put_buffer_pct !== null && rr4mData.put_buffer_pct !== undefined) ? `-${fmtNum(Math.abs(rr4mData.put_buffer_pct), 1)}% OTM` : '--.-% OTM';
+      }
+      if (popBufferStrike) {
+        popBufferStrike.textContent = rr4mData.put_strike ? `Short Put P${rr4mData.put_strike}` : 'Short Put Wing';
+      }
+
       if (popMat) popMat.textContent = matStr;
       if (popDte) popDte.textContent = `${dteStr} (~4M)`;
       if (popSkew) popSkew.textContent = `Skew: ${skewStr}`;
@@ -4220,22 +4249,24 @@ function updateUI(data) {
 
       if (popDesc) {
         if (rr4mData.iv_skew && rr4mData.iv_skew > 0) {
-          popDesc.textContent = `Short Put IV exceeds Long Call IV by +${fmtNum(rr4mData.iv_skew, 2)} pts, allowing the upside call to be financed with net credit.`;
+          const ratioDesc = rr4mData.skew_ratio ? ` (${fmtNum(rr4mData.skew_ratio, 2)}x ratio)` : '';
+          const bufferDesc = rr4mData.put_buffer_pct ? ` Short put provides ${fmtNum(Math.abs(rr4mData.put_buffer_pct), 1)}% downside cushion.` : '';
+          popDesc.textContent = `Short Put IV (${pIvStr}) exceeds Long Call IV (${cIvStr}) by +${fmtNum(rr4mData.iv_skew, 1)} pts${ratioDesc}, financing upside participation for net credit.${bufferDesc}`;
         } else {
           popDesc.textContent = `Call & Put wings are monitored for asymmetric skew entry opportunities across ~120 DTE.`;
         }
       }
 
       // Card styling: preserving relative group cursor-pointer select-none
-      if (crVal >= 35.0 || rr4mData.regime === 'EXTREME CREDIT') {
+      if (isExtreme) {
         if (cardRr4m) cardRr4m.className = 'relative group bg-purple-950/40 border border-purple-500 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-purple-900 text-purple-200 border border-purple-500 font-bold uppercase animate-pulse';
         rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
-      } else if (crVal >= 15.0 || rr4mData.regime === 'ENTRY ZONE') {
+      } else if (isEntry) {
         if (cardRr4m) cardRr4m.className = 'relative group bg-emerald-950/30 border border-emerald-600 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/90 text-emerald-200 border border-emerald-500 font-bold uppercase';
         rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-emerald-300';
-      } else if (crVal >= 0.0) {
+      } else if (isCredit) {
         if (cardRr4m) cardRr4m.className = 'relative group bg-amber-950/20 border border-amber-800/80 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
         tagRr4m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-semibold uppercase';
         rr4mValEl.className = 'text-xl font-bold font-mono tracking-tight text-amber-300';
