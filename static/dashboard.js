@@ -16,6 +16,7 @@ let spotVolClickAction = 'anchor'; // 'anchor' | 'load'
 let currentCorrMode = 'dual'; // 'dual', 'corr_only'
 let isVolInverted = true; // Invert volatility axis on correlation overlay for lockstep tracking
 let isBetaScaled = true;  // Beta-locked scale mode (1% Spot = |Slope| pts Vol)
+let isVixHighsMarked = true; // Mark distinct VIX new highs on correlation overlay
 let currentAssetPair = 'SPX'; // 'SPX' | 'NDX'
 
 // Historical Mode State
@@ -641,6 +642,7 @@ function switchAssetPair(pair) {
   } else {
     updateAnchorUI();
   }
+  updateVixHighsUI();
 
   // Re-render charts and UI immediately from cache (preserving freshest live WS snapshot in live mode)
   const activeData = (currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap;
@@ -893,6 +895,8 @@ const corrScaleLabel = document.getElementById('corr-scale-label');
 const btnCorrInvert = document.getElementById('btn-corr-invert');
 const corrInvertGroup = document.getElementById('corr-invert-group');
 const corrInvertIcon = document.getElementById('corr-invert-icon');
+const btnCorrVixHighs = document.getElementById('btn-corr-vix-highs');
+const corrVixHighsLabel = document.getElementById('corr-vix-highs-label');
 const corrTfPill = document.getElementById('corr-tf-pill');
 const corrSubtitle = document.getElementById('corr-subtitle');
 const corrLiveLabel = document.getElementById('corr-live-label');
@@ -900,6 +904,7 @@ const corrLiveLabel = document.getElementById('corr-live-label');
 function setupCorrButtons() {
   if (btnCorrScale) btnCorrScale.addEventListener('click', () => toggleCorrScaleMode());
   if (btnCorrInvert) btnCorrInvert.addEventListener('click', () => toggleCorrVolInvert());
+  if (btnCorrVixHighs) btnCorrVixHighs.addEventListener('click', () => toggleCorrVixHighs());
   setupAnchorButtons();
 }
 
@@ -983,6 +988,26 @@ function toggleCorrVolInvert() {
     }
   }
   renderCorrelationChart(currentCorrMode, currentCorrTf);
+}
+
+function toggleCorrVixHighs() {
+  isVixHighsMarked = !isVixHighsMarked;
+  updateVixHighsUI();
+  renderCorrelationChart(currentCorrMode, currentCorrTf);
+}
+
+function updateVixHighsUI() {
+  const btn = document.getElementById('btn-corr-vix-highs');
+  const label = document.getElementById('corr-vix-highs-label');
+  const volLabel = (currentAssetPair === 'NDX') ? 'VXN' : 'VIX';
+  if (label) label.textContent = `${volLabel} Highs`;
+  if (btn) {
+    if (isVixHighsMarked) {
+      btn.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1 whitespace-nowrap";
+    } else {
+      btn.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1 whitespace-nowrap";
+    }
+  }
 }
 
 function switchCorrMode(mode = 'dual') {
@@ -2661,6 +2686,74 @@ function computeDualRibbonSeries(times, assetPct, volPt, beta, alpha = 0) {
   return { xArr: times, vArr, minArr, maxArr };
 }
 
+function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20) {
+  if (!times || !volRaw || times.length === 0 || volRaw.length === 0) return [];
+
+  // Group point indices by session date (YYYY-MM-DD)
+  const sessions = {};
+  for (let i = 0; i < times.length; i++) {
+    const d = String(times[i]).slice(0, 10);
+    if (!sessions[d]) sessions[d] = [];
+    sessions[d].push(i);
+  }
+
+  const confirmedHighs = [];
+
+  for (const dateStr of Object.keys(sessions)) {
+    const idxs = sessions[dateStr];
+    if (idxs.length === 0) continue;
+
+    let candHigh = volRaw[idxs[0]];
+    let candIdx = idxs[0];
+    let trough = candHigh;
+    let prevConfirmedHigh = -Infinity;
+
+    for (let j = 1; j < idxs.length; j++) {
+      const idx = idxs[j];
+      const v = volRaw[idx];
+      if (typeof v !== 'number' || isNaN(v)) continue;
+
+      if (v > candHigh) {
+        candHigh = v;
+        candIdx = idx;
+        trough = v;
+      } else {
+        if (v < trough) {
+          trough = v;
+        }
+
+        // If pullback threshold exceeded from candidate high
+        if ((candHigh - trough) >= pullbackThresh) {
+          if (candHigh > prevConfirmedHigh) {
+            confirmedHighs.push({
+              idx: candIdx,
+              time: times[candIdx],
+              vixLevel: candHigh,
+              prevHigh: prevConfirmedHigh !== -Infinity ? prevConfirmedHigh : null,
+              pullback: Math.round((candHigh - trough) * 100) / 100
+            });
+            prevConfirmedHigh = candHigh;
+          }
+          trough = v;
+        }
+      }
+    }
+
+    // Session close check: if candidate high at end of session > prevConfirmedHigh
+    if (candHigh > prevConfirmedHigh && candIdx !== -1) {
+      confirmedHighs.push({
+        idx: candIdx,
+        time: times[candIdx],
+        vixLevel: candHigh,
+        prevHigh: prevConfirmedHigh !== -Infinity ? prevConfirmedHigh : null,
+        isSessionHigh: true
+      });
+    }
+  }
+
+  return confirmedHighs;
+}
+
 function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   let targetTf = currentCorrTf;
   if (tf) {
@@ -2842,6 +2935,35 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         width: 2,
         dash: 'dashdot'
       }
+    });
+  }
+
+  // Detect distinct new VIX / VXN highs across sessions (1D, 5D, 10D, etc.)
+  const rawVolSeries = (anchoredSeries && anchoredSeries.volRaw && anchoredSeries.volRaw.length === times.length)
+    ? anchoredSeries.volRaw
+    : getRawSpotVolSeries(c, isNdx).vol;
+  const highEvents = (isVixHighsMarked && rawVolSeries && rawVolSeries.length > 0)
+    ? findDistinctVixHighs(times, rawVolSeries, 0.20)
+    : [];
+
+  // Add subtle vertical dotted reference line through SPX & Overvix Residual for each VIX high
+  if (isVixHighsMarked && highEvents.length > 0) {
+    highEvents.forEach(h => {
+      anchorShapes.push({
+        type: 'line',
+        xref: 'x',
+        yref: 'paper',
+        x0: h.time,
+        x1: h.time,
+        y0: 0,
+        y1: 1,
+        line: {
+          color: 'rgba(245, 158, 11, 0.40)',
+          width: 1,
+          dash: 'dot'
+        },
+        layer: 'below'
+      });
     });
   }
 
@@ -3144,6 +3266,49 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       plotTraces.push(...dualRibbonTraces);
     }
     plotTraces.push(traceAsset, traceVol);
+
+    // VIX / VXN Highs Marker Trace on Volatility Axis (yaxis2)
+    if (isVixHighsMarked && highEvents.length > 0) {
+      const highX = highEvents.map(e => e.time);
+      const highY = highEvents.map(e => volPt[e.idx]);
+      const highCustom = highEvents.map(e => {
+        const sPct = assetPct[e.idx];
+        const sStr = (typeof sPct === 'number' && !isNaN(sPct)) ? (sPct >= 0 ? `+${sPct.toFixed(2)}%` : `${sPct.toFixed(2)}%`) : '-';
+        const vPt = volPt[e.idx];
+        const vPtStr = (typeof vPt === 'number' && !isNaN(vPt)) ? (vPt >= 0 ? `+${vPt.toFixed(2)}` : `${vPt.toFixed(2)}`) : '-';
+        const rawSpot = (anchoredSeries.spotRaw && anchoredSeries.spotRaw[e.idx] !== undefined)
+          ? (typeof anchoredSeries.spotRaw[e.idx] === 'number' ? anchoredSeries.spotRaw[e.idx].toFixed(2) : anchoredSeries.spotRaw[e.idx])
+          : '-';
+        return [
+          volLabel,                    // 0
+          e.vixLevel.toFixed(2),       // 1
+          assetLabel,                  // 2
+          sStr,                        // 3
+          vPtStr,                      // 4
+          rawSpot                      // 5
+        ];
+      });
+
+      const traceVixHighMarks = {
+        x: highX,
+        y: highY,
+        customdata: highCustom,
+        mode: 'markers',
+        name: `${volLabel} Highs`,
+        marker: {
+          symbol: isVolInverted ? 'triangle-down' : 'triangle-up',
+          size: 11,
+          color: '#F59E0B',
+          line: { color: '#FFFFFF', width: 1.5 }
+        },
+        xaxis: 'x',
+        yaxis: 'y2',
+        hovertemplate: `<b>🔺 %{customdata[0]} High: %{customdata[1]}</b><br>Time: %{x|${timeHoverFmt}}<br>${assetLabel}: %{customdata[3]} (%{customdata[5]})<br>${volLabel} Move: %{customdata[4]} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`,
+        showlegend: true
+      };
+      plotTraces.push(traceVixHighMarks);
+    }
+
     plotTraces.push(tracePosFill, traceNegFill, traceResidual, traceZeroLine, traceOvervixAlert, traceVolCrush);
     if (traceAnchorOrigin) {
       plotTraces.push(traceAnchorOrigin);
