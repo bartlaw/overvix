@@ -4118,38 +4118,44 @@ function updateUI(data) {
   if (lblRr4m) lblRr4m.textContent = isNdx ? "QQQ 4M Skew (RR)" : "SPX 4M Skew (RR)";
 
   if (matRr4m) {
-    if (rr4mData && rr4mData.expiration) {
-      matRr4m.textContent = `Exp: ${fmtMaturity(rr4mData.expiration, rr4mData.dte)}`;
-    } else if (rr4mData && rr4mData.dte) {
-      matRr4m.textContent = `Exp: ~${rr4mData.dte}d`;
-    } else {
-      matRr4m.textContent = `Exp: ~120d`;
-    }
-  }
-
-  if (rr4mValEl && tagRr4m) {
+    const expStr = (rr4mData && rr4mData.expiration) ? fmtMaturity(rr4mData.expiration, rr4mData.dte) : (rr4mData && rr4mData.dte ? `~${rr4mData.dte}d` : `~120d`);
+    let crStr = '';
     if (rr4mData && rr4mData.net_credit !== null && rr4mData.net_credit !== undefined) {
       const crVal = rr4mData.net_credit;
       const isCredit = crVal >= 0;
-      if (isCredit) {
-        rr4mValEl.textContent = `${fmtPts(crVal)} pts CR`;
+      if (isNdx) {
+        crStr = ` · ${isCredit ? '+' : ''}$${fmtNum(crVal, 2)} ${isCredit ? 'CR' : 'DB'}`;
       } else {
-        rr4mValEl.textContent = `${fmtPts(crVal)} pts DB`;
+        crStr = ` · ${isCredit ? '+' : ''}${fmtNum(crVal, 1)}pt ${isCredit ? 'CR' : 'DB'}`;
+      }
+    }
+    matRr4m.textContent = `Exp: ${expStr}${crStr}`;
+  }
+
+  if (rr4mValEl && tagRr4m) {
+    if (rr4mData && (rr4mData.iv_skew !== null || rr4mData.net_credit !== null)) {
+      const crVal = rr4mData.net_credit !== undefined ? rr4mData.net_credit : 0;
+      const isCredit = crVal >= 0;
+
+      // Main KPI value: Wing IV Skew (Put IV - Call IV)
+      // Displays structural smile steepness in IV points, completely stable across spot moves
+      if (rr4mData.iv_skew !== null && rr4mData.iv_skew !== undefined) {
+        const skewSign = rr4mData.iv_skew >= 0 ? '+' : '';
+        rr4mValEl.textContent = `${skewSign}${fmtNum(rr4mData.iv_skew, 2)} pts`;
+      } else if (crVal !== null && crVal !== undefined) {
+        rr4mValEl.textContent = `${fmtPts(crVal)} pts ${isCredit ? 'CR' : 'DB'}`;
+      } else {
+        rr4mValEl.textContent = '--.-- pts';
       }
       tagRr4m.textContent = rr4mData.badge || rr4mData.regime || '---';
 
-      // Subtitle: Strike Selection & Volatility Info (e.g. C8050: 15.0% · P6225: 28.9% · ΔIV: +13.9% (1.9x))
+      // Subtitle: Strike Selection, Volatilities & Ratio
       if (rr4mData.call_strike && rr4mData.put_strike) {
         const cIvStr = (rr4mData.call_iv !== null && rr4mData.call_iv !== undefined) ? `${fmtNum(rr4mData.call_iv, 1)}%` : '--.-%';
         const pIvStr = (rr4mData.put_iv !== null && rr4mData.put_iv !== undefined) ? `${fmtNum(rr4mData.put_iv, 1)}%` : '--.-%';
-        let skewSuffix = '';
-        if (rr4mData.iv_skew !== null && rr4mData.iv_skew !== undefined) {
-          const skewSign = rr4mData.iv_skew >= 0 ? '+' : '';
-          const ratioStr = rr4mData.skew_ratio ? ` (${fmtNum(rr4mData.skew_ratio, 1)}x)` : '';
-          skewSuffix = ` · ΔIV: ${skewSign}${fmtNum(rr4mData.iv_skew, 1)}%${ratioStr}`;
-        }
-        subRr4m.textContent = `C${rr4mData.call_strike}: ${cIvStr} · P${rr4mData.put_strike}: ${pIvStr}${skewSuffix}`;
-        subRr4m.title = `Call ${rr4mData.call_strike} IV: ${cIvStr} | Put ${rr4mData.put_strike} IV: ${pIvStr} | Wing Skew: ${rr4mData.iv_skew ? (rr4mData.iv_skew >= 0 ? '+' : '') + fmtNum(rr4mData.iv_skew, 2) + ' pts' : '--'}${rr4mData.skew_ratio ? ' (' + fmtNum(rr4mData.skew_ratio, 2) + 'x)' : ''}`;
+        const ratioStr = rr4mData.skew_ratio ? ` (${fmtNum(rr4mData.skew_ratio, 2)}x ratio)` : '';
+        subRr4m.textContent = `C${rr4mData.call_strike}: ${cIvStr} · P${rr4mData.put_strike}: ${pIvStr}${ratioStr}`;
+        subRr4m.title = `Call ${rr4mData.call_strike} IV: ${cIvStr} | Put ${rr4mData.put_strike} IV: ${pIvStr} | Wing Skew: ${rr4mData.iv_skew ? (rr4mData.iv_skew >= 0 ? '+' : '') + fmtNum(rr4mData.iv_skew, 2) + ' pts' : '--'}${rr4mData.skew_ratio ? ' (' + fmtNum(rr4mData.skew_ratio, 2) + 'x ratio)' : ''}`;
       } else if (subRr4m) {
         subRr4m.textContent = '10%C vs 15%P (4M)';
       }
