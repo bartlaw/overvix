@@ -991,21 +991,29 @@ function toggleCorrVolInvert() {
 }
 
 function toggleCorrVixHighs() {
+  const isEligibleTf = (currentCorrTf === '1D' || currentCorrTf === '5D' || currentCorrTf === '10D');
+  if (!isEligibleTf) return;
   isVixHighsMarked = !isVixHighsMarked;
   updateVixHighsUI();
   renderCorrelationChart(currentCorrMode, currentCorrTf);
 }
 
-function updateVixHighsUI() {
+function updateVixHighsUI(tf = currentCorrTf) {
   const btn = document.getElementById('btn-corr-vix-highs');
   const label = document.getElementById('corr-vix-highs-label');
   const volLabel = (currentAssetPair === 'NDX') ? 'VXN' : 'VIX';
   if (label) label.textContent = `${volLabel} Highs`;
+  const isEligibleTf = (tf === '1D' || tf === '5D' || tf === '10D');
   if (btn) {
-    if (isVixHighsMarked) {
+    if (!isEligibleTf) {
+      btn.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-500 bg-slate-900/60 border border-slate-800 cursor-not-allowed opacity-50 flex items-center space-x-1 whitespace-nowrap";
+      btn.title = `${volLabel} High marks are only available on 1D, 5D, and 10D horizons`;
+    } else if (isVixHighsMarked) {
       btn.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1 whitespace-nowrap";
+      btn.title = `Toggle marks at distinct ${volLabel} new highs across sessions (active on 1D, 5D, 10D)`;
     } else {
       btn.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1 whitespace-nowrap";
+      btn.title = `Toggle marks at distinct ${volLabel} new highs across sessions (active on 1D, 5D, 10D)`;
     }
   }
 }
@@ -1038,6 +1046,7 @@ function switchCorrTf(tf, triggeredBySlider = false) {
     syncCorrAnchorForTimeframe(tf);
   }
   updateCorrMetricDisplay();
+  updateVixHighsUI(tf);
   renderCorrelationChart(currentCorrMode, tf);
 }
 
@@ -2761,6 +2770,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   } else if (modeOrTf && TF_CONFIG[modeOrTf]) {
     targetTf = modeOrTf;
   }
+  updateVixHighsUI(targetTf);
   const isNdx = (currentAssetPair === 'NDX');
   const gthChartOn = (!isNdx && isGthChartActive(targetTf));
   const c = getCorrDataset(isNdx, targetTf);
@@ -2938,16 +2948,17 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     });
   }
 
-  // Detect distinct new VIX / VXN highs across sessions (1D, 5D, 10D, etc.)
+  // Detect distinct new VIX / VXN highs across sessions (restricted strictly up to 10D: 1D, 5D, 10D)
+  const isEligibleTf = (targetTf === '1D' || targetTf === '5D' || targetTf === '10D');
   const rawVolSeries = (anchoredSeries && anchoredSeries.volRaw && anchoredSeries.volRaw.length === times.length)
     ? anchoredSeries.volRaw
     : getRawSpotVolSeries(c, isNdx).vol;
-  const highEvents = (isVixHighsMarked && rawVolSeries && rawVolSeries.length > 0)
+  const highEvents = (isVixHighsMarked && isEligibleTf && rawVolSeries && rawVolSeries.length > 0)
     ? findDistinctVixHighs(times, rawVolSeries, 0.20)
     : [];
 
   // Add subtle vertical dotted reference line through SPX & Overvix Residual for each VIX high
-  if (isVixHighsMarked && highEvents.length > 0) {
+  if (isVixHighsMarked && isEligibleTf && highEvents.length > 0) {
     highEvents.forEach(h => {
       anchorShapes.push({
         type: 'line',
@@ -3267,8 +3278,8 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     }
     plotTraces.push(traceAsset, traceVol);
 
-    // VIX / VXN Highs Marker Trace on Volatility Axis (yaxis2)
-    if (isVixHighsMarked && highEvents.length > 0) {
+    // VIX / VXN Highs Marker Trace on Volatility Axis (yaxis2) - up to 10D only
+    if (isVixHighsMarked && isEligibleTf && highEvents.length > 0) {
       const highX = highEvents.map(e => e.time);
       const highY = highEvents.map(e => volPt[e.idx]);
       const highCustom = highEvents.map(e => {
