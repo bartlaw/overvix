@@ -1754,6 +1754,57 @@ function highlightAnchorScroll() {
   }
 }
 
+// Helper functions to build customdata for Term Structure & Tech Vol charts
+function buildTsCustomdata(times, vix, vix3m, ratio) {
+  return times.map((t, i) => {
+    const v = vix[i];
+    const v3m = vix3m[i];
+    const r = ratio[i];
+    const v3mStr = (typeof v3m === 'number' && !isNaN(v3m)) ? v3m.toFixed(2) : '-';
+    const ratioStr = (typeof r === 'number' && !isNaN(r)) ? r.toFixed(4) : '-';
+    const spread = (typeof v === 'number' && typeof v3m === 'number' && !isNaN(v) && !isNaN(v3m)) ? (v - v3m) : null;
+    const spreadStr = (spread !== null) ? (spread >= 0 ? `+${spread.toFixed(2)} pts` : `${spread.toFixed(2)} pts`) : '-';
+    
+    let regimeBadge = '';
+    if (typeof r === 'number' && !isNaN(r)) {
+      if (r >= 1.00) {
+        regimeBadge = "  <span style='color:#EF4444;font-weight:bold'>🚨 Backwardation (≥1.00)</span>";
+      } else if (r >= 0.90) {
+        regimeBadge = "  <span style='color:#F59E0B;font-weight:bold'>⚠️ Flattening (0.90–1.00)</span>";
+      } else {
+        regimeBadge = "  <span style='color:#10B981;font-weight:bold'>🟢 Contango (&lt;0.90)</span>";
+      }
+    }
+
+    return [v3mStr, ratioStr, spreadStr, regimeBadge];
+  });
+}
+
+function buildTechVolCustomdata(times, vxn, vix, spread, ratio) {
+  return times.map((t, i) => {
+    const vx = vxn[i];
+    const vi = vix[i];
+    const sp = spread[i];
+    const r = ratio[i];
+    const viStr = (typeof vi === 'number' && !isNaN(vi)) ? vi.toFixed(2) : '-';
+    const spStr = (typeof sp === 'number' && !isNaN(sp)) ? (sp >= 0 ? `+${sp.toFixed(2)} pts` : `${sp.toFixed(2)} pts`) : '-';
+    const rStr = (typeof r === 'number' && !isNaN(r)) ? r.toFixed(4) : '-';
+    
+    let regimeBadge = '';
+    if (typeof sp === 'number' && !isNaN(sp)) {
+      if (sp >= 9.0) {
+        regimeBadge = "  <span style='color:#EF4444;font-weight:bold'>🚨 Tech Panic (≥9.0 pts)</span>";
+      } else if (sp >= 5.0) {
+        regimeBadge = "  <span style='color:#F59E0B;font-weight:bold'>⚠️ Elevated Tech Vol</span>";
+      } else {
+        regimeBadge = "  <span style='color:#10B981;font-weight:bold'>🟢 Tech Normal (&lt;5.0 pts)</span>";
+      }
+    }
+
+    return [viStr, spStr, rStr, regimeBadge];
+  });
+}
+
 function renderTechVolChart(tf = currentTimeframe) {
   const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
   const data = cachedTechVol[tf] || cachedTechVol['1D'] || {};
@@ -1767,16 +1818,22 @@ function renderTechVolChart(tf = currentTimeframe) {
   const dEnd = times.length > 0 ? times[times.length - 1] : null;
   const hasValidDates = Boolean(dStart && dEnd);
   const timeHoverFmt = conf.timeHoverFmt;
+  const techCustomdata = buildTechVolCustomdata(times, vxn, vix, spread, ratio);
 
+  // Unified Single Hover Tooltip on Primary Trace (VXN)
   const traceVXN = {
     x: times,
     y: vxn,
+    customdata: techCustomdata,
     name: 'VXN (Tech Vol)',
     mode: 'lines',
     line: { color: '#C084FC', width: 1.8 },
     xaxis: 'x',
     yaxis: 'y',
-    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>VXN: %{y:.2f}<extra></extra>`
+    hovertemplate:
+      `<b>%{x|${timeHoverFmt}}</b>%{customdata[3]}<br>` +
+      `VXN (Tech): <b>%{y:.2f}</b> · VIX (Broad): <b>%{customdata[0]}</b><br>` +
+      `Spread (VXN-VIX): <b>%{customdata[1]}</b> · Ratio: <b>%{customdata[2]}</b><extra></extra>`
   };
 
   const traceVIX = {
@@ -1787,7 +1844,7 @@ function renderTechVolChart(tf = currentTimeframe) {
     line: { color: '#00E5FF', width: 1.5 },
     xaxis: 'x',
     yaxis: 'y',
-    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>VIX: %{y:.2f}<extra></extra>`
+    hoverinfo: 'skip'
   };
 
   const traceSpread = {
@@ -1798,7 +1855,7 @@ function renderTechVolChart(tf = currentTimeframe) {
     line: { color: '#F59E0B', width: 2 },
     xaxis: 'x',
     yaxis: 'y2',
-    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>Spread: %{y:.2f} pts<extra></extra>`
+    hoverinfo: 'skip'
   };
 
   const traceEquilibrium = {
@@ -1809,7 +1866,7 @@ function renderTechVolChart(tf = currentTimeframe) {
     line: { color: '#10B981', width: 1, dash: 'dot' },
     xaxis: 'x',
     yaxis: 'y2',
-    hoverinfo: 'none'
+    hoverinfo: 'skip'
   };
 
   const tracePanic = {
@@ -1820,7 +1877,7 @@ function renderTechVolChart(tf = currentTimeframe) {
     line: { color: '#EF4444', width: 1.5, dash: 'dash' },
     xaxis: 'x',
     yaxis: 'y2',
-    hoverinfo: 'none'
+    hoverinfo: 'skip'
   };
 
   const xTitle = conf.xTitle;
@@ -1830,6 +1887,14 @@ function renderTechVolChart(tf = currentTimeframe) {
     paper_bgcolor: 'transparent',
     plot_bgcolor: 'transparent',
     autosize: true,
+    hovermode: 'x',
+    hoverdistance: 50,
+    hoverlabel: {
+      bgcolor: 'rgba(15, 23, 42, 0.95)',
+      bordercolor: '#C084FC',
+      font: { family: 'monospace', size: 11, color: '#F8FAFC' },
+      align: 'left'
+    },
     margin: { l: 50, r: 20, t: 25, b: 40 },
     xaxis: {
       anchor: 'y2',
@@ -1840,7 +1905,13 @@ function renderTechVolChart(tf = currentTimeframe) {
       gridcolor: '#1e293b',
       tickfont: { color: '#94A3B8', size: 10 },
       showgrid: true,
-      nticks: 10
+      nticks: 10,
+      showspikes: true,
+      spikemode: 'across',
+      spikesnap: 'cursor',
+      spikecolor: '#C084FC',
+      spikethickness: 1,
+      spikedash: 'dot'
     },
     yaxis: {
       domain: [0.48, 1.0],
@@ -1884,18 +1955,23 @@ function renderTermStructureChart(tf = '1D') {
   const dStart = times.length > 0 ? times[0] : null;
   const dEnd = times.length > 0 ? times[times.length - 1] : null;
   const hasValidDates = Boolean(dStart && dEnd);
-
   const timeHoverFmt = conf.timeHoverFmt;
+  const tsCustomdata = buildTsCustomdata(times, vix, vix3m, ratio);
 
+  // Unified Single Hover Tooltip on Primary Trace (VIX)
   const traceVIX = {
     x: times,
     y: vix,
+    customdata: tsCustomdata,
     name: 'VIX (30d)',
     mode: 'lines',
     line: { color: '#00E5FF', width: 1.5 },
     xaxis: 'x',
     yaxis: 'y',
-    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>VIX (30d): %{y:.2f}<extra></extra>`
+    hovertemplate:
+      `<b>%{x|${timeHoverFmt}}</b>%{customdata[3]}<br>` +
+      `VIX (30d): <b>%{y:.2f}</b> · VIX3M (90d): <b>%{customdata[0]}</b><br>` +
+      `Ratio: <b>%{customdata[1]}</b> · Spread: <b>%{customdata[2]}</b><extra></extra>`
   };
 
   const traceVIX3M = {
@@ -1906,7 +1982,7 @@ function renderTermStructureChart(tf = '1D') {
     line: { color: '#FFA726', width: 1.5 },
     xaxis: 'x',
     yaxis: 'y',
-    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>VIX3M (90d): %{y:.2f}<extra></extra>`
+    hoverinfo: 'skip'
   };
 
   const traceRatio = {
@@ -1917,7 +1993,7 @@ function renderTermStructureChart(tf = '1D') {
     line: { color: '#E6D385', width: 2 },
     xaxis: 'x',
     yaxis: 'y2',
-    hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>Ratio: %{y:.4f}<extra></extra>`
+    hoverinfo: 'skip'
   };
 
   const traceFlattening = {
@@ -1928,7 +2004,7 @@ function renderTermStructureChart(tf = '1D') {
     line: { color: '#FFA726', width: 1, dash: 'dot' },
     xaxis: 'x',
     yaxis: 'y2',
-    hoverinfo: 'none'
+    hoverinfo: 'skip'
   };
 
   const traceInversion = {
@@ -1939,7 +2015,7 @@ function renderTermStructureChart(tf = '1D') {
     line: { color: '#EF4444', width: 1.5, dash: 'dash' },
     xaxis: 'x',
     yaxis: 'y2',
-    hoverinfo: 'none'
+    hoverinfo: 'skip'
   };
 
   const xTitle = conf.xTitle;
@@ -1949,6 +2025,14 @@ function renderTermStructureChart(tf = '1D') {
     paper_bgcolor: 'transparent',
     plot_bgcolor: 'transparent',
     autosize: true,
+    hovermode: 'x',
+    hoverdistance: 50,
+    hoverlabel: {
+      bgcolor: 'rgba(15, 23, 42, 0.95)',
+      bordercolor: '#00E5FF',
+      font: { family: 'monospace', size: 11, color: '#F8FAFC' },
+      align: 'left'
+    },
     margin: { l: 50, r: 20, t: 25, b: 40 },
     xaxis: {
       anchor: 'y2',
@@ -1959,7 +2043,13 @@ function renderTermStructureChart(tf = '1D') {
       gridcolor: '#1e293b',
       tickfont: { color: '#94A3B8', size: 10 },
       showgrid: true,
-      nticks: 10
+      nticks: 10,
+      showspikes: true,
+      spikemode: 'across',
+      spikesnap: 'cursor',
+      spikecolor: '#00E5FF',
+      spikethickness: 1,
+      spikedash: 'dot'
     },
     yaxis: {
       domain: [0.48, 1.0],
@@ -5277,6 +5367,9 @@ function updateUI(data) {
           x: [dt.times, dt.times, dt.times],
           y: [dt.vxn, dt.vix, dt.spread]
         }, [0, 1, 2]);
+        Plotly.restyle('term-structure-chart', {
+          customdata: [buildTechVolCustomdata(dt.times, dt.vxn, dt.vix, dt.spread, dt.ratio)]
+        }, [0]);
         if (dt.times.length > 0) {
           Plotly.restyle('term-structure-chart', {
             x: [[dt.times[0], liveDt], [dt.times[0], liveDt]]
@@ -5319,6 +5412,9 @@ function updateUI(data) {
           x: [d1.times, d1.times, d1.times],
           y: [d1.vix, d1.vix3m, d1.ratio]
         }, [0, 1, 2]);
+        Plotly.restyle('term-structure-chart', {
+          customdata: [buildTsCustomdata(d1.times, d1.vix, d1.vix3m, d1.ratio)]
+        }, [0]);
         if (d1.times.length > 0) {
           Plotly.restyle('term-structure-chart', {
             x: [[d1.times[0], liveDt], [d1.times[0], liveDt]]
