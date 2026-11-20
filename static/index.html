@@ -313,7 +313,7 @@
         </div>
 
         <!-- Floating Popover Card for VIX Futures Term Structure -->
-        <div id="popover-vix-futures" class="hidden absolute top-full left-0 md:left-auto md:right-0 mt-2 z-50 w-84 md:w-96 bg-slate-900/95 border border-slate-700/90 rounded-xl shadow-2xl p-3 space-y-2.5 backdrop-blur-md text-left transition">
+        <div id="popover-vix-futures" class="hidden absolute top-full left-0 md:left-auto md:right-0 mt-2 z-50 w-88 sm:w-96 md:w-[440px] bg-slate-900/95 border border-slate-700/90 rounded-xl shadow-2xl p-3 space-y-2.5 backdrop-blur-md text-left transition">
           <!-- Popover Header -->
           <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
             <div>
@@ -348,6 +348,24 @@
               <div id="pop-futures-spot-basis" class="text-xs font-bold font-mono text-cyan-300">-.-- pts</div>
               <div id="pop-futures-inv-pairs" class="text-[9px] font-mono text-slate-400">-/- Inverted</div>
             </div>
+          </div>
+
+          <!-- Small Term Structure Curve Chart -->
+          <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800/80">
+            <div class="text-[10px] font-semibold text-slate-400 uppercase mb-1 flex items-center justify-between">
+              <span>Curve Shape (M1 &ndash; M8)</span>
+              <div id="pop-curve-legend" class="text-[9px] font-mono text-slate-400 flex items-center space-x-2">
+                <span class="flex items-center space-x-1">
+                  <span id="pop-curve-line-swatch" class="inline-block w-2.5 h-0.5 bg-red-400"></span>
+                  <span id="pop-curve-line-lbl">CFE Curve</span>
+                </span>
+                <span class="flex items-center space-x-1">
+                  <span class="inline-block w-2.5 h-0.5 border-t border-dashed border-emerald-400"></span>
+                  <span id="pop-curve-spot-lbl">Spot VIX</span>
+                </span>
+              </div>
+            </div>
+            <div id="pop-futures-curve-chart" class="w-full h-36"></div>
           </div>
 
           <!-- M1..M8 Term Structure Table -->
@@ -1159,8 +1177,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v8.7 - Clean Popovers with Native Tooltip Removed on Skew Cards) -->
-  <script src="/static/dashboard.js?v=8.7"></script>
+  <!-- DASHBOARD SCRIPT (v8.8 - VIX Futures Curve Chart in Term Structure Popover) -->
+  <script src="/static/dashboard.js?v=8.8"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>

@@ -3730,8 +3730,146 @@ function attachCorrelationChartClickListener() {
 // VIX FUTURES TERM STRUCTURE & BACKWARDATION UI ENGINE
 // ==============================================================================
 
+let lastVixFuturesData = null;
+let lastSpotVixVal = null;
+
+function renderVixFuturesCurveChart(vf, spotVix) {
+  const chartEl = document.getElementById('pop-futures-curve-chart');
+  if (!chartEl || !vf || !Array.isArray(vf.contracts) || vf.contracts.length === 0) return;
+
+  const validContracts = vf.contracts.filter(c => typeof c.price === 'number' && !isNaN(c.price));
+  if (validContracts.length === 0) return;
+
+  const regime = vf.regime || 'CONTANGO';
+  const isFullInv = (regime === 'FULL BACKWARDATION');
+  const isFrontInv = (regime === 'FRONT BACKWARDATION');
+
+  // Curve styling by regime
+  let curveColor = '#38BDF8'; // Sky blue / cyan for normal Contango
+  if (isFullInv) {
+    curveColor = '#EF4444'; // Red for Full Backwardation
+  } else if (isFrontInv) {
+    curveColor = '#F59E0B'; // Amber for Front Inversion
+  } else if (regime === 'BELLY INVERSION') {
+    curveColor = '#FB7185'; // Rose for Belly Inversion
+  } else if (regime === 'FLATTENING') {
+    curveColor = '#CBD5E1'; // Slate for Flattening
+  }
+
+  // Update chart legend elements
+  const swatchEl = document.getElementById('pop-curve-line-swatch');
+  if (swatchEl) swatchEl.style.backgroundColor = curveColor;
+  const spotLblEl = document.getElementById('pop-curve-spot-lbl');
+  if (spotLblEl && typeof spotVix === 'number') {
+    spotLblEl.textContent = `Spot VIX (${spotVix.toFixed(2)})`;
+  }
+
+  // X labels: Tenor + Month (e.g. M1 Dec, M2 Jan...)
+  const xLabels = validContracts.map(c => {
+    const mStr = c.month_name ? c.month_name.split(' ')[0] : '';
+    return `${c.tenor} ${mStr}`;
+  });
+  const yValues = validContracts.map(c => c.price);
+  const textLabels = validContracts.map(c => c.price.toFixed(2));
+
+  const traces = [];
+
+  // Trace 0: Spot VIX Reference Line (horizontal dashed)
+  if (typeof spotVix === 'number' && spotVix > 0) {
+    traces.push({
+      x: xLabels,
+      y: xLabels.map(() => spotVix),
+      mode: 'lines',
+      name: `Spot VIX (${spotVix.toFixed(2)})`,
+      line: {
+        color: '#10B981', // Emerald green
+        width: 1.5,
+        dash: 'dash'
+      },
+      hoverinfo: 'name+y'
+    });
+  }
+
+  // Trace 1: Futures Curve Line + Markers + Text Labels
+  traces.push({
+    x: xLabels,
+    y: yValues,
+    mode: 'lines+markers+text',
+    name: 'Futures Curve',
+    text: textLabels,
+    textposition: 'top center',
+    textfont: {
+      family: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+      size: 9,
+      color: '#F8FAFC'
+    },
+    line: {
+      color: curveColor,
+      width: 2.5,
+      shape: 'spline',
+      smoothing: 0.6
+    },
+    marker: {
+      color: curveColor,
+      size: 6,
+      line: {
+        color: '#0F172A',
+        width: 1.5
+      }
+    },
+    hovertemplate: validContracts.map(c => {
+      const spVal = (typeof c.diff === 'number') ? c.diff : (typeof c.spread === 'number' ? c.spread : null);
+      const spStr = (spVal !== null) ? `${spVal >= 0 ? '+' : ''}${spVal.toFixed(2)} pts` : '—';
+      const pctStr = (typeof c.contango_pct === 'number') ? `${c.contango_pct >= 0 ? '+' : ''}${c.contango_pct.toFixed(2)}%` : '—';
+      return `<b>${c.tenor} &bull; ${c.month_name || ''} (${c.symbol || c.localSymbol})</b><br>` +
+             `Price: <b>${c.price.toFixed(2)}</b><br>` +
+             `DTE: <b>${c.dte || '--'}d</b><br>` +
+             `Roll Contango: <b>${pctStr}</b> (${spStr})` +
+             `<extra></extra>`;
+    })
+  });
+
+  const layout = {
+    height: 140,
+    margin: { l: 30, r: 16, t: 18, b: 24 },
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    showlegend: false,
+    xaxis: {
+      tickfont: {
+        size: 9,
+        color: '#94A3B8',
+        family: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+      },
+      gridcolor: 'rgba(51, 65, 85, 0.25)',
+      zeroline: false
+    },
+    yaxis: {
+      tickfont: {
+        size: 9,
+        color: '#94A3B8',
+        family: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+      },
+      tickformat: '.1f',
+      gridcolor: 'rgba(51, 65, 85, 0.35)',
+      zeroline: false,
+      autorange: true
+    }
+  };
+
+  const config = {
+    displayModeBar: false,
+    responsive: true
+  };
+
+  Plotly.react(chartEl, traces, layout, config);
+}
+
 function updateVixFuturesUI(vf, spotVix) {
   if (!vf) return;
+
+  lastVixFuturesData = vf;
+  lastSpotVixVal = spotVix;
 
   const tagRegime = document.getElementById('tag-futures-regime');
   const lblSpreads = document.getElementById('lbl-futures-spreads');
@@ -3852,6 +3990,12 @@ function updateVixFuturesUI(vf, spotVix) {
         </tr>
       `;
     }).join('');
+  }
+
+  // Update curve chart if popover is open
+  const popoverTs = document.getElementById('popover-vix-futures');
+  if (popoverTs && !popoverTs.classList.contains('hidden')) {
+    renderVixFuturesCurveChart(vf, spotVix);
   }
 }
 
@@ -5620,6 +5764,11 @@ function setupRiskReversalPopovers() {
       allPopovers.forEach(p => { if (p && p !== popover) p.classList.add('hidden'); });
       if (willOpen) {
         popover.classList.remove('hidden');
+        if (popoverId === 'popover-vix-futures') {
+          setTimeout(() => {
+            renderVixFuturesCurveChart(lastVixFuturesData, lastSpotVixVal);
+          }, 30);
+        }
       } else {
         popover.classList.add('hidden');
       }
