@@ -991,7 +991,7 @@ function toggleCorrVolInvert() {
 }
 
 function toggleCorrVixHighs() {
-  const isEligibleTf = (currentCorrTf === '1D' || currentCorrTf === '5D' || currentCorrTf === '10D');
+  const isEligibleTf = (currentCorrTf === '1D' || currentCorrTf === '5D' || currentCorrTf === '10D' || currentCorrTf === '1M');
   if (!isEligibleTf) return;
   isVixHighsMarked = !isVixHighsMarked;
   updateVixHighsUI();
@@ -1003,17 +1003,17 @@ function updateVixHighsUI(tf = currentCorrTf) {
   const label = document.getElementById('corr-vix-highs-label');
   const volLabel = (currentAssetPair === 'NDX') ? 'VXN' : 'VIX';
   if (label) label.textContent = `${volLabel} Highs`;
-  const isEligibleTf = (tf === '1D' || tf === '5D' || tf === '10D');
+  const isEligibleTf = (tf === '1D' || tf === '5D' || tf === '10D' || tf === '1M');
   if (btn) {
     if (!isEligibleTf) {
       btn.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-500 bg-slate-900/60 border border-slate-800 cursor-not-allowed opacity-50 flex items-center space-x-1 whitespace-nowrap";
-      btn.title = `${volLabel} High marks are only available on 1D, 5D, and 10D horizons`;
+      btn.title = `${volLabel} High marks are only available on 1D, 5D, 10D, and 1M horizons`;
     } else if (isVixHighsMarked) {
       btn.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1 whitespace-nowrap";
-      btn.title = `Toggle marks at distinct ${volLabel} new highs across sessions (active on 1D, 5D, 10D)`;
+      btn.title = `Toggle marks at distinct ${volLabel} new highs across sessions (active on 1D, 5D, 10D, 1M)`;
     } else {
       btn.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1 whitespace-nowrap";
-      btn.title = `Toggle marks at distinct ${volLabel} new highs across sessions (active on 1D, 5D, 10D)`;
+      btn.title = `Toggle marks at distinct ${volLabel} new highs across sessions (active on 1D, 5D, 10D, 1M)`;
     }
   }
 }
@@ -2695,7 +2695,7 @@ function computeDualRibbonSeries(times, assetPct, volPt, beta, alpha = 0) {
   return { xArr: times, vArr, minArr, maxArr };
 }
 
-function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20, clusterMinutes = 30, maxPerDay = 0) {
+function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20, clusterMinutes = 30, aggregationMode = 'intraday') {
   if (!times || !volRaw || times.length === 0 || volRaw.length === 0) return [];
 
   // Helper to parse ISO / date-time strings safely to milliseconds
@@ -2706,6 +2706,21 @@ function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20, clusterMinut
     return isNaN(ms) ? 0 : ms;
   };
 
+  // Helper to get Monday-anchored calendar week key (YYYY-WMM-DD) for weekly grouping (1M)
+  const getWeekKey = (tStr) => {
+    const iso = String(tStr).replace(' ', 'T');
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return String(tStr).slice(0, 10);
+    const day = d.getDay(); // 0 is Sunday, 1 is Monday, ..., 6 is Saturday
+    const diffToMonday = (day === 0 ? 6 : day - 1);
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - diffToMonday);
+    const y = monday.getFullYear();
+    const m = String(monday.getMonth() + 1).padStart(2, '0');
+    const dt = String(monday.getDate()).padStart(2, '0');
+    return `${y}-W${m}-${dt}`;
+  };
+
   // Group point indices by session date (YYYY-MM-DD)
   const sessions = {};
   for (let i = 0; i < times.length; i++) {
@@ -2714,7 +2729,7 @@ function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20, clusterMinut
     sessions[d].push(i);
   }
 
-  const confirmedHighs = [];
+  const dailyHighs = [];
 
   for (const dateStr of Object.keys(sessions)) {
     const idxs = sessions[dateStr];
@@ -2768,12 +2783,14 @@ function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20, clusterMinut
       });
     }
 
-    // Multi-day constraint: on >= 5D charts (maxPerDay === 1), mark at most 1 high per day (the day's peak VIX)
-    if (maxPerDay === 1 && sessionHighs.length > 0) {
+    if (sessionHighs.length === 0) continue;
+
+    // Daily & Weekly constraints: on >= 5D charts, extract max 1 high per day first
+    if (aggregationMode === 'day' || aggregationMode === 'week' || aggregationMode === 1) {
       const dayPeak = sessionHighs.reduce((best, curr) => curr.vixLevel > best.vixLevel ? curr : best, sessionHighs[0]);
-      confirmedHighs.push(dayPeak);
+      dailyHighs.push(dayPeak);
     } else if (sessionHighs.length > 1 && clusterMinutes > 0) {
-      // Suppress clustered / proximate highs: if multiple highs are near each other, only mark the bigger one
+      // Intraday (1D): Suppress clustered / proximate highs with NMS
       const sorted = [...sessionHighs].sort((a, b) => b.vixLevel - a.vixLevel);
       const suppressed = new Set();
       const kept = [];
@@ -2797,13 +2814,31 @@ function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20, clusterMinut
 
       // Re-sort kept highs chronologically by point index
       kept.sort((a, b) => a.idx - b.idx);
-      confirmedHighs.push(...kept);
+      dailyHighs.push(...kept);
     } else {
-      confirmedHighs.push(...sessionHighs);
+      dailyHighs.push(...sessionHighs);
     }
   }
 
-  return confirmedHighs;
+  // On 1M horizon: group daily peaks by calendar week and mark max 1 high per week
+  if (aggregationMode === 'week') {
+    const weeklyGroups = {};
+    for (const h of dailyHighs) {
+      const wk = getWeekKey(h.time);
+      if (!weeklyGroups[wk]) weeklyGroups[wk] = [];
+      weeklyGroups[wk].push(h);
+    }
+    const weeklyHighs = [];
+    for (const wk of Object.keys(weeklyGroups)) {
+      const pts = weeklyGroups[wk];
+      const best = pts.reduce((b, c) => c.vixLevel > b.vixLevel ? c : b, pts[0]);
+      weeklyHighs.push(best);
+    }
+    weeklyHighs.sort((a, b) => a.idx - b.idx);
+    return weeklyHighs;
+  }
+
+  return dailyHighs;
 }
 
 function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
@@ -2991,15 +3026,15 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     });
   }
 
-  // Detect distinct new VIX / VXN highs across sessions (restricted strictly up to 10D: 1D, 5D, 10D)
-  // On >= 5D charts (5D, 10D), mark at most 1 high per day (the day's peak VIX). On 1D, mark distinct intraday highs.
-  const isEligibleTf = (targetTf === '1D' || targetTf === '5D' || targetTf === '10D');
-  const maxHighsPerDay = (targetTf === '1D') ? 0 : 1;
+  // Detect distinct new VIX / VXN highs across sessions (supported on 1D, 5D, 10D, 1M)
+  // On 1M: max 1 high per week. On 5D/10D: max 1 high per day. On 1D: distinct intraday highs (30m NMS).
+  const isEligibleTf = (targetTf === '1D' || targetTf === '5D' || targetTf === '10D' || targetTf === '1M');
+  const aggregationMode = (targetTf === '1M') ? 'week' : (targetTf === '1D' ? 'intraday' : 'day');
   const rawVolSeries = (anchoredSeries && anchoredSeries.volRaw && anchoredSeries.volRaw.length === times.length)
     ? anchoredSeries.volRaw
     : getRawSpotVolSeries(c, isNdx).vol;
   const highEvents = (isVixHighsMarked && isEligibleTf && rawVolSeries && rawVolSeries.length > 0)
-    ? findDistinctVixHighs(times, rawVolSeries, 0.20, 30, maxHighsPerDay)
+    ? findDistinctVixHighs(times, rawVolSeries, 0.20, 30, aggregationMode)
     : [];
 
   // Add subtle vertical dotted reference line through SPX & Overvix Residual for each VIX high
@@ -3323,7 +3358,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     }
     plotTraces.push(traceAsset, traceVol);
 
-    // VIX / VXN Highs Marker Trace on Volatility Axis (yaxis2) - up to 10D only
+    // VIX / VXN Highs Marker Trace on Volatility Axis (yaxis2) - up to 1M only
     if (isVixHighsMarked && isEligibleTf && highEvents.length > 0) {
       const highX = highEvents.map(e => e.time);
       const highY = highEvents.map(e => volPt[e.idx]);
