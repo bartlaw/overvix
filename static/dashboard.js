@@ -3208,10 +3208,13 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     const raw = (anchoredSeries.spotRaw && anchoredSeries.spotRaw[i] !== undefined)
       ? (typeof anchoredSeries.spotRaw[i] === 'number' ? anchoredSeries.spotRaw[i].toFixed(2) : anchoredSeries.spotRaw[i])
       : '-';
+    const rawVol = (anchoredSeries.volRaw && anchoredSeries.volRaw[i] !== undefined)
+      ? (typeof anchoredSeries.volRaw[i] === 'number' ? anchoredSeries.volRaw[i].toFixed(2) : anchoredSeries.volRaw[i])
+      : '-';
     const s = assetPct[i];
     const sStr = (typeof s === 'number' && !isNaN(s)) ? (s >= 0 ? `+${s.toFixed(2)}` : s.toFixed(2)) : '-';
     const gthTag = (gthChartOn && c.is_gth && c.is_gth[i] === 1) ? ' [ES-Adj]' : '';
-    return [raw, sStr, gthTag];
+    return [raw, sStr, gthTag, rawVol];
   });
 
   const traceAsset = {
@@ -3223,9 +3226,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     line: { color: assetColor, width: 1.8 },
     xaxis: 'x',
     yaxis: 'y',
-    hovertemplate: isAnchored 
-      ? `<b>%{x|${timeHoverFmt}}%{customdata[2]}</b><br>${assetHoverLabel}: %{customdata[1]}%<br>Price: %{customdata[0]}<extra></extra>`
-      : `<b>%{x|${timeHoverFmt}}%{customdata[2]}</b><br>${assetHoverLabel}: %{customdata[1]}%<extra></extra>`
+    hovertemplate: `<b>%{x|${timeHoverFmt}}%{customdata[2]}</b><br>${assetHoverLabel}: %{customdata[1]}%<br>${assetLabel}: %{customdata[0]}<extra></extra>`
   };
 
   // Shaded Divergence Ribbon: dual-color fill area between Spot % and Vol (in % units) when Beta Scaled and Invert Vol are active
@@ -3315,12 +3316,8 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     xaxis: 'x',
     yaxis: 'y2',
     hovertemplate: isBetaScaled
-      ? (isAnchored 
-          ? `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<br>Level: %{customdata[0]}<br>Overvix Residual: %{customdata[1]} pts<extra></extra>`
-          : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<br>Overvix Residual: %{customdata[1]} pts<extra></extra>`)
-      : (isAnchored 
-          ? `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<br>Level: %{customdata[0]}<extra></extra>`
-          : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<extra></extra>`)
+      ? `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<br>${volLabel}: %{customdata[0]}<br>Overvix Residual: %{customdata[1]} pts<extra></extra>`
+      : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<br>${volLabel}: %{customdata[0]}<extra></extra>`
   };
 
     // Subplot 2: Instantaneous Overvix Residual Monitor
@@ -3339,7 +3336,17 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
 
     const posResid = residSeries.map(v => Math.max(0, v));
     const negResid = residSeries.map(v => Math.min(0, v));
-    const residCustomdata = residSeries.map(v => (v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2)));
+    const residCustomdata = times.map((t, i) => {
+      const r = residSeries[i];
+      const rStr = (typeof r === 'number' && !isNaN(r)) ? (r >= 0 ? `+${r.toFixed(2)}` : r.toFixed(2)) : '-';
+      const sRaw = (anchoredSeries.spotRaw && anchoredSeries.spotRaw[i] !== undefined)
+        ? (typeof anchoredSeries.spotRaw[i] === 'number' ? anchoredSeries.spotRaw[i].toFixed(2) : anchoredSeries.spotRaw[i])
+        : '-';
+      const vRaw = (anchoredSeries.volRaw && anchoredSeries.volRaw[i] !== undefined)
+        ? (typeof anchoredSeries.volRaw[i] === 'number' ? anchoredSeries.volRaw[i].toFixed(2) : anchoredSeries.volRaw[i])
+        : '-';
+      return [rStr, sRaw, vRaw];
+    });
 
     // Emerald Green shading to zero when Residual > 0
     const tracePosFill = {
@@ -3378,7 +3385,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       line: { color: isNdx ? '#C084FC' : '#00E5FF', width: 1.8 },
       xaxis: 'x',
       yaxis: 'y3',
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${isNdx ? 'Over-VXN' : 'Overvix'} Residual: %{customdata} pts<extra></extra>`
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${isNdx ? 'Over-VXN' : 'Overvix'} Residual: %{customdata[0]} pts<br>${assetLabel}: %{customdata[1]} | ${volLabel}: %{customdata[2]}<extra></extra>`
     };
 
     const traceZeroLine = {
@@ -3417,6 +3424,9 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       hoverinfo: 'skip'
     };
 
+    const anchorSpotRawStr = (typeof corrAnchor.spotBase === 'number' && !isNaN(corrAnchor.spotBase)) ? corrAnchor.spotBase.toFixed(2) : '-';
+    const anchorVolRawStr = (typeof corrAnchor.volBase === 'number' && !isNaN(corrAnchor.volBase)) ? corrAnchor.volBase.toFixed(2) : '-';
+
     // Anchor Origin Marker: glowing cyan dot at (anchorTime, 0.0) where both curves start
     const traceAnchorOrigin = (isAnchored && anchoredSeries.anchorTime) ? {
       x: [anchoredSeries.anchorTime],
@@ -3432,7 +3442,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       },
       xaxis: 'x',
       yaxis: 'y',
-      hovertemplate: `<b>⚓ Anchor Origin Point</b><br>Time: %{x|${timeHoverFmt}}<br>${assetLabel}: 0.00%<br>${volLabel}: 0.00 pts<extra></extra>`,
+      hovertemplate: `<b>⚓ Anchor Origin Point</b><br>Time: %{x|${timeHoverFmt}}<br>${assetLabel}: ${anchorSpotRawStr} (0.00%)<br>${volLabel}: ${anchorVolRawStr} (0.00 pts)<extra></extra>`,
       showlegend: false
     } : null;
 
@@ -3451,7 +3461,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       },
       xaxis: 'x',
       yaxis: 'y3',
-      hovertemplate: `<b>⚓ Anchor Origin Point</b><br>Time: %{x|${timeHoverFmt}}<br>Residual: 0.00 pts<extra></extra>`,
+      hovertemplate: `<b>⚓ Anchor Origin Point</b><br>Time: %{x|${timeHoverFmt}}<br>Residual: 0.00 pts<br>${assetLabel}: ${anchorSpotRawStr} | ${volLabel}: ${anchorVolRawStr}<extra></extra>`,
       showlegend: false
     } : null;
 
