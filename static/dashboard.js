@@ -2695,8 +2695,16 @@ function computeDualRibbonSeries(times, assetPct, volPt, beta, alpha = 0) {
   return { xArr: times, vArr, minArr, maxArr };
 }
 
-function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20) {
+function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20, clusterMinutes = 30) {
   if (!times || !volRaw || times.length === 0 || volRaw.length === 0) return [];
+
+  // Helper to parse ISO / date-time strings safely to milliseconds
+  const parseTimeMs = (tStr) => {
+    if (!tStr) return 0;
+    const iso = String(tStr).replace(' ', 'T');
+    const ms = new Date(iso).getTime();
+    return isNaN(ms) ? 0 : ms;
+  };
 
   // Group point indices by session date (YYYY-MM-DD)
   const sessions = {};
@@ -2716,6 +2724,7 @@ function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20) {
     let candIdx = idxs[0];
     let trough = candHigh;
     let prevConfirmedHigh = -Infinity;
+    const sessionHighs = [];
 
     for (let j = 1; j < idxs.length; j++) {
       const idx = idxs[j];
@@ -2734,7 +2743,7 @@ function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20) {
         // If pullback threshold exceeded from candidate high
         if ((candHigh - trough) >= pullbackThresh) {
           if (candHigh > prevConfirmedHigh) {
-            confirmedHighs.push({
+            sessionHighs.push({
               idx: candIdx,
               time: times[candIdx],
               vixLevel: candHigh,
@@ -2750,13 +2759,44 @@ function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20) {
 
     // Session close check: if candidate high at end of session > prevConfirmedHigh
     if (candHigh > prevConfirmedHigh && candIdx !== -1) {
-      confirmedHighs.push({
+      sessionHighs.push({
         idx: candIdx,
         time: times[candIdx],
         vixLevel: candHigh,
         prevHigh: prevConfirmedHigh !== -Infinity ? prevConfirmedHigh : null,
         isSessionHigh: true
       });
+    }
+
+    // Suppress clustered / proximate highs: if multiple highs are near each other, only mark the bigger one
+    if (sessionHighs.length > 1 && clusterMinutes > 0) {
+      // Sort candidate peaks by VIX level descending (highest peak first)
+      const sorted = [...sessionHighs].sort((a, b) => b.vixLevel - a.vixLevel);
+      const suppressed = new Set();
+      const kept = [];
+
+      for (let i = 0; i < sorted.length; i++) {
+        if (suppressed.has(i)) continue;
+        const peak = sorted[i];
+        kept.push(peak);
+
+        const tPeak = parseTimeMs(peak.time);
+        for (let j = i + 1; j < sorted.length; j++) {
+          if (suppressed.has(j)) continue;
+          const other = sorted[j];
+          const tOther = parseTimeMs(other.time);
+          const diffMinutes = Math.abs(tPeak - tOther) / (60 * 1000);
+          if (diffMinutes <= clusterMinutes) {
+            suppressed.add(j);
+          }
+        }
+      }
+
+      // Re-sort kept highs chronologically by point index
+      kept.sort((a, b) => a.idx - b.idx);
+      confirmedHighs.push(...kept);
+    } else {
+      confirmedHighs.push(...sessionHighs);
     }
   }
 
@@ -2954,7 +2994,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     ? anchoredSeries.volRaw
     : getRawSpotVolSeries(c, isNdx).vol;
   const highEvents = (isVixHighsMarked && isEligibleTf && rawVolSeries && rawVolSeries.length > 0)
-    ? findDistinctVixHighs(times, rawVolSeries, 0.20)
+    ? findDistinctVixHighs(times, rawVolSeries, 0.20, 30)
     : [];
 
   // Add subtle vertical dotted reference line through SPX & Overvix Residual for each VIX high
