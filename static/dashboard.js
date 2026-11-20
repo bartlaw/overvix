@@ -958,6 +958,33 @@ function setupAnchorButtons() {
       }
     });
   }
+
+  setupCorrHoverTracking();
+}
+
+let isMouseHoveringCorrChart = false;
+let pendingLiveCorrRender = false;
+
+function setupCorrHoverTracking() {
+  const chartEl = document.getElementById('correlation-chart');
+  if (!chartEl || chartEl._hasHoverTracking) return;
+  chartEl._hasHoverTracking = true;
+
+  chartEl.addEventListener('mouseenter', () => {
+    isMouseHoveringCorrChart = true;
+  });
+
+  chartEl.addEventListener('mouseleave', () => {
+    isMouseHoveringCorrChart = false;
+    if (pendingLiveCorrRender) {
+      pendingLiveCorrRender = false;
+      renderCorrelationChart(currentCorrMode, currentCorrTf);
+    }
+  });
+
+  chartEl.addEventListener('mousemove', () => {
+    isMouseHoveringCorrChart = true;
+  });
 }
 
 function toggleCorrScaleMode() {
@@ -3564,7 +3591,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       showlegend: true
     };
 
-  Plotly.newPlot('correlation-chart', plotTraces, layout, {
+  Plotly.react('correlation-chart', plotTraces, layout, {
     responsive: true,
     displayModeBar: false
   }).then(attachCorrelationChartClickListener);
@@ -3575,6 +3602,7 @@ let lastAnchorClickTimestamp = 0;
 function attachCorrelationChartClickListener() {
   const chartEl = document.getElementById('correlation-chart');
   if (!chartEl) return;
+  setupCorrHoverTracking();
 
   // Re-bind plotly_click on the chart element (Plotly.newPlot clears internal events on gd)
   if (typeof chartEl.removeAllListeners === 'function') {
@@ -4843,7 +4871,11 @@ function updateUI(data) {
         syncRawArrays('push');
       }
 
-      renderCorrelationChart('dual', currentCorrTf);
+      if (isMouseHoveringCorrChart) {
+        pendingLiveCorrRender = true;
+      } else {
+        renderCorrelationChart('dual', currentCorrTf);
+      }
     } else if (!isNdx) {
       if (data.is_rth_active) {
         if (!cachedCorr['1D']) cachedCorr['1D'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], spot_raw: [], vol_raw: [] };
@@ -4855,7 +4887,11 @@ function updateUI(data) {
       } else if (data.is_rth_active) {
         appendCorrPoint(cachedCorrGth['1D'], mkt.spx.pct_change, mkt.vix.pt_change, (data.gth && data.gth.rolling_corr) ? data.gth.rolling_corr : (corr ? corr.rolling_corr : -0.75), mkt.spx.current, mkt.vix.current, 0);
       }
-      renderCorrelationChart('dual', currentCorrTf);
+      if (isMouseHoveringCorrChart) {
+        pendingLiveCorrRender = true;
+      } else {
+        renderCorrelationChart('dual', currentCorrTf);
+      }
     }
   }
 }
