@@ -3,7 +3,7 @@
  */
 
 // Global State
-let soundEnabled = false; // Voice alerts muted by default
+let soundEnabled = (localStorage.getItem('overvix_voice_enabled') === 'true'); // Persisted voice alert state
 let lastOvervixSignal = false;
 let lastInversionSignal = false;
 let currentSpxThreshold = 2.0;
@@ -270,7 +270,7 @@ let corrAnchor = {
 
 // Dedicated Voice Alert Subsystem via Web Speech API
 const VoiceManager = {
-  enabled: false,
+  enabled: (localStorage.getItem('overvix_voice_enabled') === 'true'),
   lastAlertTime: 0,
   cooldownMs: 60000,
   lastTroughKey: null,
@@ -375,36 +375,66 @@ function updateVoiceStatusUI() {
   if (cfgVoiceStatus) {
     if (VoiceManager.enabled) {
       cfgVoiceStatus.textContent = 'ACTIVE';
-      cfgVoiceStatus.className = 'text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-emerald-950 text-emerald-300 border border-emerald-800';
+      cfgVoiceStatus.className = 'text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 cursor-pointer hover:bg-emerald-900 transition';
+      cfgVoiceStatus.title = "Voice alerts ACTIVE (Click to mute)";
     } else {
       cfgVoiceStatus.textContent = 'MUTED';
-      cfgVoiceStatus.className = 'text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700';
+      cfgVoiceStatus.className = 'text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700 cursor-pointer hover:bg-slate-700 transition';
+      cfgVoiceStatus.title = "Voice alerts MUTED (Click to enable)";
     }
   }
 }
 
-if (btnSound) {
-  btnSound.addEventListener('click', () => {
-    VoiceManager.enabled = !VoiceManager.enabled;
-    soundEnabled = VoiceManager.enabled;
-    if (VoiceManager.enabled) {
-      if (soundIcon) soundIcon.textContent = '🗣️';
-      if (soundText) soundText.textContent = 'Voice ON';
+function applyVoiceUI(speakFeedback = false) {
+  if (VoiceManager.enabled) {
+    if (soundIcon) soundIcon.textContent = '🗣️';
+    if (soundText) soundText.textContent = 'Voice ON';
+    if (btnSound) {
       btnSound.classList.remove('opacity-60');
       btnSound.title = "Voice alerts enabled (Click to mute)";
+    }
+    if (speakFeedback) {
       VoiceManager.speak("Voice alerts active");
-    } else {
-      if (soundIcon) soundIcon.textContent = '🔇';
-      if (soundText) soundText.textContent = 'Muted';
+    }
+  } else {
+    if (soundIcon) soundIcon.textContent = '🔇';
+    if (soundText) soundText.textContent = 'Muted';
+    if (btnSound) {
       btnSound.classList.add('opacity-60');
       btnSound.title = "Voice alerts muted (Click to enable)";
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
     }
-    updateVoiceStatusUI();
+    if (speakFeedback && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }
+  updateVoiceStatusUI();
+}
+
+function setVoiceEnabled(state, speakFeedback = false) {
+  VoiceManager.enabled = !!state;
+  soundEnabled = VoiceManager.enabled;
+  try {
+    localStorage.setItem('overvix_voice_enabled', VoiceManager.enabled ? 'true' : 'false');
+  } catch (e) {
+    console.warn("localStorage write error for voice enabled state:", e);
+  }
+  applyVoiceUI(speakFeedback);
+}
+
+if (btnSound) {
+  btnSound.addEventListener('click', () => {
+    setVoiceEnabled(!VoiceManager.enabled, true);
   });
 }
+
+if (cfgVoiceStatus) {
+  cfgVoiceStatus.addEventListener('click', () => {
+    setVoiceEnabled(!VoiceManager.enabled, true);
+  });
+}
+
+// Immediately apply saved voice UI state on startup
+applyVoiceUI(false);
 
 // Populate Voice Selector Dropdown
 function populateVoiceSelector() {
