@@ -145,6 +145,11 @@ class DashboardState:
         self.spx_4m_locked_strikes: Optional[Tuple[str, float, float]] = None
         self.ndx_4m_locked_strikes: Optional[Tuple[str, float, float]] = None
 
+        # VIX Futures Contracts & Tickers (Standard Monthly M1 .. M8)
+        self.vix_futures_contracts: List[Any] = []
+        self.vix_futures_tickers: List[Any] = []
+        self.vix_futures_data: Optional[Dict[str, Any]] = None
+
         # Fallback real-time 1-min bar streams for indices without reqMktData ticks (e.g. NDX/VXN/VIX3M)
         self.live_bars: Dict[str, Any] = {}
         self.live_bars_date: Optional[str] = None
@@ -640,6 +645,50 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
         print(f" [4M Skew] Warning: Failed to resolve QQQ 4M RR contracts: {e}")
 
 
+async def resolve_and_subscribe_vix_futures(ib_client):
+    """
+    Resolve and subscribe to standard monthly VIX futures (M1..M8) from CFE.
+    Filters out weeklys (e.g. VX47X6) and keeps standard monthly contracts (e.g. VXZ6, VXF7..).
+    """
+    if Future is None or ib_client is None:
+        return
+    try:
+        details = await ib_client.reqContractDetailsAsync(Future(symbol='VIX', exchange='CFE', currency='USD'))
+        if not details:
+            print("[IBKR] Warning: No VIX futures details found.")
+            return
+
+        today_iso = datetime.now(ET_TZ).strftime('%Y%m%d')
+        monthlies = []
+        for d in details:
+            c = d.contract
+            ls = str(getattr(c, 'localSymbol', '') or '')
+            exp = str(getattr(c, 'lastTradeDateOrContractMonth', '') or '')
+            if exp < today_iso:
+                continue
+            if len(ls) in (4, 5) and ls.startswith('VX'):
+                month_code = ls[2:-1]
+                if month_code.isalpha():
+                    monthlies.append(c)
+
+        monthlies.sort(key=lambda c: getattr(c, 'lastTradeDateOrContractMonth', ''))
+        chosen = monthlies[:8]
+        if not chosen:
+            print("[IBKR] Warning: No valid monthly VIX futures candidates found.")
+            return
+
+        state.vix_futures_contracts = chosen
+        state.vix_futures_tickers = []
+        for c in chosen:
+            t = ib_client.reqMktData(c, '', False, False)
+            state.vix_futures_tickers.append(t)
+
+        symbols_str = ", ".join(f"{c.localSymbol}({c.lastTradeDateOrContractMonth})" for c in chosen)
+        print(f" [VIX Futures] Subscribed to {len(chosen)} monthly futures: {symbols_str}")
+    except Exception as e:
+        print(f" [VIX Futures] Warning: Failed to resolve/subscribe VIX futures: {e}")
+
+
 async def connect_and_init_ibkr(host: str, port: int, client_id: int):
     """
     Connect to IBKR, qualify contracts, fetch historical bars, and subscribe to market data.
@@ -734,6 +783,9 @@ async def connect_and_init_ibkr(host: str, port: int, client_id: int):
 
     # 4. Resolve & Subscribe to 25Δ Risk Reversal Options Contracts (SPX & QQQ)
     await resolve_and_subscribe_rr_contracts(state.ib)
+
+    # 5. Resolve & Subscribe to Standard Monthly VIX Futures Contracts (M1 .. M8)
+    await resolve_and_subscribe_vix_futures(state.ib)
 
     for _ in range(8):
         await asyncio.sleep(0.2)
@@ -2181,6 +2233,182 @@ def compute_live_payload() -> Dict[str, Any]:
     if ndx_4m_rr_payload:
         state.ndx_4m_rr_data = ndx_4m_rr_payload
 
+    # VIX Futures Term Structure & Backwardation Regime Engine (M1 .. M8)
+    def _calc_vix_futures(spot_vix=None):
+        contracts = getattr(state, 'vix_futures_contracts', []) or []
+        tickers = getattr(state, 'vix_futures_tickers', []) or []
+        cached = getattr(state, 'vix_futures_data', None)
+
+        today = datetime.now(ET_TZ).date()
+        month_map = {
+            'F': 'Jan', 'G': 'Feb', 'H': 'Mar', 'J': 'Apr',
+            'K': 'May', 'M': 'Jun', 'N': 'Jul', 'Q': 'Aug',
+            'U': 'Sep', 'V': 'Oct', 'X': 'Nov', 'Z': 'Dec'
+        }
+        items = []
+
+        if contracts and tickers and len(contracts) == len(tickers):
+            for idx, (c, t) in enumerate(zip(contracts, tickers)):
+                price = None
+                if t:
+                    m_price = t.marketPrice()
+                    if m_price and not math.isnan(m_price) and m_price > 0:
+                        price = m_price
+                    elif t.last and not math.isnan(t.last) and t.last > 0:
+                        price = t.last
+                    elif t.close and not math.isnan(t.close) and t.close > 0:
+                        price = t.close
+                    elif t.bid and t.ask and not math.isnan(t.bid) and not math.isnan(t.ask) and t.bid > 0 and t.ask > 0:
+                        price = (t.bid + t.ask) / 2.0
+
+                if price is None and cached and 'contracts' in cached and idx < len(cached['contracts']):
+                    price = cached['contracts'][idx].get('price')
+
+                exp_raw = str(getattr(c, 'lastTradeDateOrContractMonth', '') or '')
+                exp_formatted = f"{exp_raw[:4]}-{exp_raw[4:6]}-{exp_raw[6:8]}" if len(exp_raw) >= 8 else exp_raw
+                dte = None
+                if len(exp_raw) >= 8:
+                    try:
+                        exp_date = datetime.strptime(exp_raw[:8], '%Y%m%d').date()
+                        dte = (exp_date - today).days
+                    except Exception:
+                        pass
+
+                local_sym = getattr(c, 'localSymbol', '') or f"M{idx+1}"
+                month_code = local_sym[2:-1] if len(local_sym) in (4, 5) else ''
+                year_suffix = exp_raw[:4] if len(exp_raw) >= 4 else ''
+                year_short = f"'{year_suffix[2:]}" if len(year_suffix) == 4 else ''
+                month_name = month_map.get(month_code, exp_raw[4:6] if len(exp_raw) >= 6 else f"M{idx+1}")
+                display_month = f"{month_name} {year_short}".strip() if year_short else month_name
+
+                items.append({
+                    "tenor": f"M{idx+1}",
+                    "symbol": local_sym,
+                    "month_name": display_month,
+                    "expiry": exp_formatted,
+                    "dte": dte,
+                    "price": round(price, 2) if (price is not None and not math.isnan(price)) else None,
+                    "diff": None,
+                    "contango_pct": None,
+                    "is_inverted": False
+                })
+
+        elif cached and cached.get('contracts'):
+            items = cached['contracts']
+
+        if not items:
+            ref_vix = spot_vix if (spot_vix and spot_vix > 0) else (state.latest_vix_close or 20.0)
+            ref_v3m = getattr(state, 'latest_vix3m_close', None) or (ref_vix * 1.05)
+            month_names = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8']
+            slope = (ref_v3m - ref_vix) / 2.0
+            for idx, m in enumerate(month_names):
+                p = max(10.0, ref_vix + idx * slope)
+                items.append({
+                    "tenor": m,
+                    "symbol": f"VX_{m}",
+                    "month_name": f"Month {idx+1}",
+                    "expiry": f"+{(idx+1)*30}d",
+                    "dte": (idx + 1) * 30,
+                    "price": round(p, 2),
+                    "diff": None,
+                    "contango_pct": None,
+                    "is_inverted": False
+                })
+
+        n = len(items)
+        for i in range(n - 1):
+            p1 = items[i].get('price')
+            p2 = items[i + 1].get('price')
+            if p1 is not None and p2 is not None and p1 > 0:
+                diff = p2 - p1
+                c_pct = (diff / p1) * 100.0
+                items[i]['diff'] = round(diff, 2)
+                items[i]['contango_pct'] = round(c_pct, 2)
+                items[i]['is_inverted'] = bool(diff < 0)
+
+        m1_price = items[0].get('price') if n > 0 else None
+        m2_price = items[1].get('price') if n > 1 else None
+        m4_price = items[3].get('price') if n > 3 else None
+        m7_price = items[6].get('price') if n > 6 else (items[-1].get('price') if n > 0 else None)
+
+        m1_m2_diff = None
+        m1_m2_pct = None
+        is_front_inverted = False
+        if m1_price and m2_price and m1_price > 0:
+            m1_m2_diff = round(m2_price - m1_price, 2)
+            m1_m2_pct = round((m1_m2_diff / m1_price) * 100.0, 2)
+            is_front_inverted = bool(m1_m2_diff < 0)
+
+        m4_m7_diff = None
+        m4_m7_pct = None
+        is_mid_inverted = False
+        if m4_price and m7_price and m4_price > 0:
+            m4_m7_diff = round(m7_price - m4_price, 2)
+            m4_m7_pct = round((m4_m7_diff / m4_price) * 100.0, 2)
+            is_mid_inverted = bool(m4_m7_diff < 0)
+
+        pair_diffs = [it['diff'] for it in items[:-1] if it.get('diff') is not None]
+        inv_count = sum(1 for d in pair_diffs if d < 0)
+        total_pairs = len(pair_diffs)
+
+        spot_basis = None
+        if spot_vix and m1_price:
+            spot_basis = round(spot_vix - m1_price, 2)
+
+        if total_pairs >= 3 and inv_count >= total_pairs - 1 and is_front_inverted and (is_mid_inverted or total_pairs <= 3):
+            regime = "FULL BACKWARDATION"
+            badge = "FULL BACKWARDATION"
+            badge_class = "bg-red-950/90 text-red-300 border border-red-700 animate-pulse font-bold"
+            tag = "🚨 FULL BACKWARDATION"
+            desc = f"Full Curve Backwardation: {inv_count} of {total_pairs} monthly spreads inverted. Front M1/M2 contango is {m1_m2_pct:+.2f}% ({m1_m2_diff:+.2f} pts). Severe persistent stress."
+        elif is_front_inverted and not is_mid_inverted:
+            regime = "FRONT BACKWARDATION"
+            badge = "FRONT BACKWARDATION"
+            badge_class = "bg-amber-950/80 text-amber-300 border border-amber-800 font-bold"
+            tag = "⚠️ FRONT BACKWARDATION"
+            desc = f"Front-Month Backwardation: Near-term panic (M1/M2: {m1_m2_pct:+.2f}%), but back curve remains in contango (M4/M7: {m4_m7_pct:+.2f}%). Localized event risk."
+        elif not is_front_inverted and is_mid_inverted:
+            regime = "BELLY INVERSION"
+            badge = "BELLY INVERSION"
+            badge_class = "bg-rose-950/80 text-rose-300 border border-rose-800 font-bold"
+            tag = "⚠️ BELLY INVERSION"
+            desc = f"Mid-Curve Inversion: Front roll is in contango, but back curve inverts (M4/M7: {m4_m7_pct:+.2f}%). Intermediate term stress."
+        elif m1_m2_pct is not None and 0.0 <= m1_m2_pct < 1.0:
+            regime = "FLATTENING"
+            badge = "FLATTENING"
+            badge_class = "bg-slate-800 text-amber-200 border border-slate-700 font-semibold"
+            tag = "FLATTENING"
+            desc = f"Curve Flattening: Front contango compressed near zero (M1/M2: {m1_m2_pct:+.2f}%). Pre-inversion transition."
+        else:
+            regime = "CONTANGO"
+            badge = "CONTANGO"
+            badge_class = "bg-emerald-950 text-emerald-300 border border-emerald-800 font-semibold"
+            tag = "CONTANGO"
+            desc = f"Normal Contango: Standard upward-sloping curve (M1/M2: {m1_m2_pct:+.2f}%). Volatility risk premium healthy."
+
+        res_payload = {
+            "regime": regime,
+            "badge": badge,
+            "badge_class": badge_class,
+            "tag": tag,
+            "description": desc,
+            "m1_m2_diff": m1_m2_diff,
+            "m1_m2_pct": m1_m2_pct,
+            "m4_m7_diff": m4_m7_diff,
+            "m4_m7_pct": m4_m7_pct,
+            "is_front_inverted": is_front_inverted,
+            "is_mid_inverted": is_mid_inverted,
+            "inv_count": inv_count,
+            "total_pairs": total_pairs,
+            "spot_basis": spot_basis,
+            "contracts": items
+        }
+        state.vix_futures_data = res_payload
+        return res_payload
+
+    vix_futures_payload = _calc_vix_futures(spot_vix=vix_curr)
+    is_futures_full_inv = bool(vix_futures_payload.get("regime") == "FULL BACKWARDATION")
+
     # Master Confluence Signals (SPX)
     is_dual_alert = bool(is_overvixed and is_inverted)
     is_volcano_alert = bool(cor1m_is_coiled and spx_rr_val is not None and spx_rr_val >= 7.0)
@@ -2192,6 +2420,8 @@ def compute_live_payload() -> Dict[str, Any]:
     if is_dual_alert:
         confluence_tag = "CAPITULATION DUAL ALERT"
         confluence_desc = "High-Conviction Mean-Reversion Long: Overvix Triggered + Vol Curve Inverted (Backwardation)"
+        if is_futures_full_inv:
+            confluence_desc += " [VIX Futures: Full Backwardation]"
     elif is_volcano_alert:
         confluence_tag = "VOLCANO SHOCK WARNING"
         confluence_desc = f"Volcano Confluence: Implied Correlation is coiled ({cor1m_val:.1f} < 8.0) while 25Δ Skew is elevated (+{spx_rr_val:.2f} pts). High risk of correlation shock."
@@ -2202,8 +2432,11 @@ def compute_live_payload() -> Dict[str, Any]:
         confluence_tag = "OVERVIX ALERT"
         confluence_desc = f"Spot-Vol Shock: VIX is {residual_pts:+.2f} pts above expected line."
     elif is_inversion_alert:
-        confluence_tag = "TERM STRUCTURE INVERTED"
-        confluence_desc = f"Backwardation: Front-month VIX exceeds 90-day VIX3M (Ratio: {ratio:.4f})."
+        confluence_tag = "FULL CURVE BACKWARDATION" if is_futures_full_inv else "TERM STRUCTURE INVERTED"
+        if is_futures_full_inv:
+            confluence_desc = f"Deep Systemic Stress: VIX/VIX3M Inverted ({ratio:.4f}) + VIX Futures in Full Backwardation (M1/M2: {vix_futures_payload.get('m1_m2_pct', 0.0):+.2f}%)."
+        else:
+            confluence_desc = f"Backwardation: Front-month VIX exceeds 90-day VIX3M (Ratio: {ratio:.4f})."
     elif is_flattening:
         confluence_tag = "CURVE FLATTENING"
         confluence_desc = f"Pre-Panic: Volatility curve flattening towards 1.00 (Ratio: {ratio:.4f})."
@@ -2569,6 +2802,7 @@ def compute_live_payload() -> Dict[str, Any]:
             "put_strike": getattr(state.spx_rr_put_contract, 'strike', None)
         },
         "rr_4m": spx_4m_rr_payload,
+        "vix_futures": vix_futures_payload,
         "confluence": {
             "tag": confluence_tag,
             "description": confluence_desc,
@@ -3138,7 +3372,8 @@ async def get_bootstrap():
             }
         },
         "ndx": ndx_bootstrap,
-        "tech_vol": tech_vol_bootstrap
+        "tech_vol": tech_vol_bootstrap,
+        "vix_futures": live.get("vix_futures")
     }
 
 

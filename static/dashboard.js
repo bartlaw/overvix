@@ -3727,6 +3727,135 @@ function attachCorrelationChartClickListener() {
 }
 
 // ==============================================================================
+// VIX FUTURES TERM STRUCTURE & BACKWARDATION UI ENGINE
+// ==============================================================================
+
+function updateVixFuturesUI(vf, spotVix) {
+  if (!vf) return;
+
+  const tagRegime = document.getElementById('tag-futures-regime');
+  const lblSpreads = document.getElementById('lbl-futures-spreads');
+  const chartBadge = document.getElementById('chart-futures-badge');
+  const chartSpread = document.getElementById('chart-futures-spread');
+
+  // Popover elements
+  const popBadge = document.getElementById('pop-futures-badge');
+  const popM1M2 = document.getElementById('pop-futures-m1m2');
+  const popM1M2Pts = document.getElementById('pop-futures-m1m2-pts');
+  const popM4M7 = document.getElementById('pop-futures-m4m7');
+  const popM4M7Pts = document.getElementById('pop-futures-m4m7-pts');
+  const popSpotBasis = document.getElementById('pop-futures-spot-basis');
+  const popInvPairs = document.getElementById('pop-futures-inv-pairs');
+  const popDesc = document.getElementById('pop-futures-desc');
+  const popTableBody = document.getElementById('pop-futures-table-body');
+
+  const regime = vf.regime || 'CONTANGO';
+  const isFullInv = (regime === 'FULL BACKWARDATION');
+  const isFrontInv = (regime === 'FRONT BACKWARDATION');
+  const isBellyInv = (regime === 'BELLY INVERSION');
+
+  // Badge styling
+  let badgeClass = 'bg-emerald-950 text-emerald-300 border border-emerald-800 font-semibold';
+  let shortText = 'FUT: CONTANGO';
+  if (isFullInv) {
+    badgeClass = 'bg-red-950/90 text-red-300 border border-red-700 animate-pulse font-bold';
+    shortText = 'FUT: FULL BACKWARDATION';
+  } else if (isFrontInv) {
+    badgeClass = 'bg-amber-950/80 text-amber-300 border border-amber-800 font-bold';
+    shortText = 'FUT: FRONT INVERTED';
+  } else if (isBellyInv) {
+    badgeClass = 'bg-rose-950/80 text-rose-300 border border-rose-800 font-bold';
+    shortText = 'FUT: BELLY INVERTED';
+  } else if (regime === 'FLATTENING') {
+    badgeClass = 'bg-slate-800 text-amber-200 border border-slate-700 font-semibold';
+    shortText = 'FUT: FLATTENING';
+  }
+
+  if (tagRegime) {
+    tagRegime.textContent = shortText;
+    tagRegime.className = `text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider ${badgeClass}`;
+  }
+
+  // Card 5 spreads subtitle
+  const m1m2PctStr = (typeof vf.m1_m2_pct === 'number') ? `${vf.m1_m2_pct >= 0 ? '+' : ''}${vf.m1_m2_pct.toFixed(2)}%` : '-.--%';
+  const m4m7PctStr = (typeof vf.m4_m7_pct === 'number') ? `${vf.m4_m7_pct >= 0 ? '+' : ''}${vf.m4_m7_pct.toFixed(2)}%` : '-.--%';
+  if (lblSpreads) {
+    lblSpreads.textContent = `M1/M2: ${m1m2PctStr}`;
+    lblSpreads.className = `font-mono text-[10px] ${vf.is_front_inverted ? 'text-red-400 font-semibold' : 'text-slate-400'}`;
+  }
+
+  // Chart strip badge & spread
+  if (chartBadge) {
+    chartBadge.textContent = shortText;
+    chartBadge.className = `text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded ${badgeClass}`;
+    chartBadge.classList.remove('hidden');
+  }
+  if (chartSpread) {
+    chartSpread.textContent = `M1/M2: ${m1m2PctStr} | M4/M7: ${m4m7PctStr}`;
+    chartSpread.className = `text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700/80 ${vf.is_front_inverted ? 'text-red-300 font-semibold' : 'text-slate-300'}`;
+    chartSpread.classList.remove('hidden');
+  }
+
+  // Popover Key Metrics Grid
+  if (popBadge) {
+    popBadge.textContent = regime;
+    popBadge.className = `text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${badgeClass}`;
+  }
+  if (popM1M2) {
+    popM1M2.textContent = m1m2PctStr;
+    popM1M2.className = `text-xs font-bold font-mono ${vf.is_front_inverted ? 'text-red-400' : 'text-emerald-400'}`;
+  }
+  if (popM1M2Pts) {
+    const diffStr = (typeof vf.m1_m2_diff === 'number') ? `${vf.m1_m2_diff >= 0 ? '+' : ''}${vf.m1_m2_diff.toFixed(2)} pts` : '-.-- pts';
+    popM1M2Pts.textContent = diffStr;
+  }
+  if (popM4M7) {
+    popM4M7.textContent = m4m7PctStr;
+    popM4M7.className = `text-xs font-bold font-mono ${vf.is_mid_inverted ? 'text-rose-400' : 'text-emerald-400'}`;
+  }
+  if (popM4M7Pts) {
+    const diff47Str = (typeof vf.m4_m7_diff === 'number') ? `${vf.m4_m7_diff >= 0 ? '+' : ''}${vf.m4_m7_diff.toFixed(2)} pts` : '-.-- pts';
+    popM4M7Pts.textContent = diff47Str;
+  }
+  if (popSpotBasis) {
+    const bStr = (typeof vf.spot_basis === 'number') ? `${vf.spot_basis >= 0 ? '+' : ''}${vf.spot_basis.toFixed(2)} pts` : '-.-- pts';
+    popSpotBasis.textContent = bStr;
+  }
+  if (popInvPairs) {
+    popInvPairs.textContent = `${vf.inv_count || 0} / ${vf.total_pairs || 0} Inverted`;
+    popInvPairs.className = `text-[9px] font-mono ${vf.inv_count >= 3 ? 'text-red-400 font-bold' : 'text-slate-400'}`;
+  }
+  if (popDesc) {
+    popDesc.textContent = vf.description || 'Evaluating VIX futures term structure...';
+  }
+
+  // Populate M1..M8 Term Structure Table
+  if (popTableBody && Array.isArray(vf.contracts)) {
+    popTableBody.innerHTML = vf.contracts.map((c, i) => {
+      const isInv = Boolean(c.is_inverted);
+      const isLast = (i === vf.contracts.length - 1);
+      const spreadStr = (typeof c.diff === 'number') ? `${c.diff >= 0 ? '+' : ''}${c.diff.toFixed(2)}` : (isLast ? '—' : '-');
+      const pctStr = (typeof c.contango_pct === 'number') ? `${c.contango_pct >= 0 ? '+' : ''}${c.contango_pct.toFixed(2)}%` : (isLast ? '—' : '-');
+      const spreadColor = isLast ? 'text-slate-500' : (isInv ? 'text-red-400 font-bold' : 'text-emerald-400 font-semibold');
+      const rowBg = isInv ? 'bg-red-950/20' : '';
+      const expStr = c.expiry && c.expiry.length >= 10 ? c.expiry.slice(5) : (c.expiry || '-');
+      const dteStr = (c.dte !== null && c.dte !== undefined) ? `(${c.dte}d)` : '';
+
+      return `
+        <tr class="hover:bg-slate-800/40 transition ${rowBg}">
+          <td class="py-1 px-1.5 font-bold ${isInv ? 'text-red-300' : 'text-white'}">${c.tenor}</td>
+          <td class="py-1 px-1 text-slate-300 whitespace-nowrap">${c.month_name} <span class="text-slate-500 text-[9px]">${c.symbol}</span></td>
+          <td class="py-1 px-1 text-slate-400 whitespace-nowrap">${expStr} <span class="text-cyan-400 text-[9px]">${dteStr}</span></td>
+          <td class="py-1 px-1 text-right text-white font-bold">${c.price !== null ? c.price.toFixed(2) : '-.--'}</td>
+          <td class="py-1 px-1 text-right font-mono ${spreadColor}">${spreadStr}</td>
+          <td class="py-1 px-1.5 text-right font-mono ${spreadColor}">${pctStr}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+}
+
+// ==============================================================================
 // REAL-TIME UPDATE DISPATCHER
 // ==============================================================================
 
@@ -4195,6 +4324,12 @@ function updateUI(data) {
       if (cardCor1m) cardCor1m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
       if (subCor1m) subCor1m.textContent = 'Dispersion @ < 8.0';
     }
+  }
+
+  // Update VIX Futures Term Structure Badges & Popover
+  if (data.vix_futures) {
+    const spotVixVal = (isNdx && ndx && ndx.market && ndx.market.vxn) ? ndx.market.vxn.current : (mkt && mkt.vix ? mkt.vix.current : null);
+    updateVixFuturesUI(data.vix_futures, spotVixVal);
   }
 
   // Card 7: 25Δ Risk Reversal (Put Skew)
@@ -5460,11 +5595,13 @@ function returnToLiveMode() {
 function setupRiskReversalPopovers() {
   const popover25 = document.getElementById('popover-rr25');
   const popover4m = document.getElementById('popover-rr4m');
+  const popoverTs = document.getElementById('popover-vix-futures');
 
-  const attachPopoverHandler = (cardId, popoverId, closeBtnId, otherPopoverId) => {
+  const allPopovers = [popover25, popover4m, popoverTs];
+
+  const attachPopoverHandler = (cardId, popoverId, closeBtnId) => {
     const card = document.getElementById(cardId);
     const popover = document.getElementById(popoverId);
-    const otherPopover = document.getElementById(otherPopoverId);
     const btnClose = document.getElementById(closeBtnId);
 
     if (!card || !popover) return;
@@ -5479,7 +5616,8 @@ function setupRiskReversalPopovers() {
       }
       e.stopPropagation();
       const willOpen = popover.classList.contains('hidden');
-      if (otherPopover) otherPopover.classList.add('hidden');
+      // Close other popovers
+      allPopovers.forEach(p => { if (p && p !== popover) p.classList.add('hidden'); });
       if (willOpen) {
         popover.classList.remove('hidden');
       } else {
@@ -5495,17 +5633,22 @@ function setupRiskReversalPopovers() {
     }
   };
 
-  attachPopoverHandler('card-rr25', 'popover-rr25', 'btn-close-rr25-popover', 'popover-rr4m');
-  attachPopoverHandler('card-rr4m', 'popover-rr4m', 'btn-close-rr4m-popover', 'popover-rr25');
+  attachPopoverHandler('card-rr25', 'popover-rr25', 'btn-close-rr25-popover');
+  attachPopoverHandler('card-rr4m', 'popover-rr4m', 'btn-close-rr4m-popover');
+  attachPopoverHandler('card-term-structure', 'popover-vix-futures', 'btn-close-futures-popover');
 
   document.addEventListener('click', (e) => {
     const card25 = document.getElementById('card-rr25');
     const card4m = document.getElementById('card-rr4m');
+    const cardTs = document.getElementById('card-term-structure');
     if (popover25 && !popover25.classList.contains('hidden') && (!card25 || !card25.contains(e.target))) {
       popover25.classList.add('hidden');
     }
     if (popover4m && !popover4m.classList.contains('hidden') && (!card4m || !card4m.contains(e.target))) {
       popover4m.classList.add('hidden');
+    }
+    if (popoverTs && !popoverTs.classList.contains('hidden') && (!cardTs || !cardTs.contains(e.target))) {
+      popoverTs.classList.add('hidden');
     }
   });
 }

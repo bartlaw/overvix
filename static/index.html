@@ -292,15 +292,93 @@
         </div>
       </div>
 
-      <!-- Card 5: Ratio / Premium (VIX/VIX3M or VXN/VIX) -->
-      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
+      <!-- Card 5: Ratio / Premium (VIX/VIX3M or VXN/VIX) & VIX Futures Term Structure -->
+      <div id="card-term-structure" class="relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none">
         <div class="flex items-center justify-between">
           <span id="lbl-kpi-ratio" class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">VIX / VIX3M</span>
-          <span id="kpi-ratio-badge" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-semibold">---</span>
+          <div class="flex items-center space-x-1.5">
+            <span id="kpi-ratio-badge" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-semibold">---</span>
+            <span id="btn-ts-info" class="text-[11px] text-slate-400 hover:text-amber-400 transition cursor-pointer" title="View Full VIX Futures Term Structure">ⓘ</span>
+          </div>
         </div>
         <div class="mt-2">
-          <div id="kpi-ratio-val" class="text-xl font-bold font-mono tracking-tight text-white">-.----</div>
-          <div id="lbl-kpi-ratio-sub" class="text-[10px] text-slate-400 mt-0.5">Inversion @ &ge; 1.00</div>
+          <div class="flex items-baseline justify-between">
+            <div id="kpi-ratio-val" class="text-xl font-bold font-mono tracking-tight text-white">-.----</div>
+            <span id="tag-futures-regime" class="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider bg-slate-800 text-slate-300 border border-slate-700">FUT: ---</span>
+          </div>
+          <div class="flex items-center justify-between mt-1 text-[10px]">
+            <span id="lbl-kpi-ratio-sub" class="text-slate-400">Inversion @ &ge; 1.00</span>
+            <span id="lbl-futures-spreads" class="font-mono text-slate-400">M1/M2: -.--%</span>
+          </div>
+        </div>
+
+        <!-- Floating Popover Card for VIX Futures Term Structure -->
+        <div id="popover-vix-futures" class="hidden absolute top-full left-0 md:left-auto md:right-0 mt-2 z-50 w-84 md:w-96 bg-slate-900/95 border border-slate-700/90 rounded-xl shadow-2xl p-3 space-y-2.5 backdrop-blur-md text-left transition">
+          <!-- Popover Header -->
+          <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+            <div>
+              <div class="text-xs font-bold text-white flex items-center space-x-1">
+                <span>📈</span>
+                <span>VIX Futures Term Structure</span>
+              </div>
+              <div class="text-[10px] text-slate-400 font-medium">CFE Monthly Contracts (M1 &ndash; M8) &amp; Contango</div>
+            </div>
+            <div class="flex items-center space-x-1.5">
+              <span id="pop-futures-badge" class="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700">
+                ---
+              </span>
+              <button id="btn-close-futures-popover" class="text-slate-400 hover:text-white text-xs px-1 py-0.5 rounded hover:bg-slate-800 transition" title="Close">✕</button>
+            </div>
+          </div>
+
+          <!-- Key Spreads Summary Grid -->
+          <div class="grid grid-cols-3 gap-2 bg-slate-950/70 rounded-lg p-2 border border-slate-800/80 text-center">
+            <div>
+              <div class="text-[9px] text-slate-400 uppercase font-semibold">Front M1/M2</div>
+              <div id="pop-futures-m1m2" class="text-xs font-bold font-mono text-white">-.--%</div>
+              <div id="pop-futures-m1m2-pts" class="text-[9px] font-mono text-slate-400">-.-- pts</div>
+            </div>
+            <div>
+              <div class="text-[9px] text-slate-400 uppercase font-semibold">Mid-Back M4/M7</div>
+              <div id="pop-futures-m4m7" class="text-xs font-bold font-mono text-white">-.--%</div>
+              <div id="pop-futures-m4m7-pts" class="text-[9px] font-mono text-slate-400">-.-- pts</div>
+            </div>
+            <div>
+              <div class="text-[9px] text-slate-400 uppercase font-semibold">Spot &minus; M1 Basis</div>
+              <div id="pop-futures-spot-basis" class="text-xs font-bold font-mono text-cyan-300">-.-- pts</div>
+              <div id="pop-futures-inv-pairs" class="text-[9px] font-mono text-slate-400">-/- Inverted</div>
+            </div>
+          </div>
+
+          <!-- M1..M8 Term Structure Table -->
+          <div>
+            <div class="text-[10px] font-semibold text-slate-400 uppercase mb-1 flex items-center justify-between">
+              <span>Futures Curve Schedule</span>
+              <span class="text-[9px] text-slate-500 font-mono">CFE Delayed/Live</span>
+            </div>
+            <div class="overflow-x-auto max-h-52 overflow-y-auto border border-slate-800/80 rounded-lg">
+              <table class="w-full text-[10px] font-mono">
+                <thead>
+                  <tr class="bg-slate-950 text-slate-400 border-b border-slate-800 text-left">
+                    <th class="py-1 px-1.5">Tenor</th>
+                    <th class="py-1 px-1">Month</th>
+                    <th class="py-1 px-1">Expiry</th>
+                    <th class="py-1 px-1 text-right">Price</th>
+                    <th class="py-1 px-1 text-right">Spread</th>
+                    <th class="py-1 px-1.5 text-right">% Contango</th>
+                  </tr>
+                </thead>
+                <tbody id="pop-futures-table-body" class="divide-y divide-slate-800/50">
+                  <!-- Injected dynamically via JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Interpretation Strip -->
+          <div id="pop-futures-desc" class="text-[10px] text-slate-400 bg-slate-950/60 p-1.5 rounded border border-slate-800/60 leading-relaxed font-sans">
+            Evaluating VIX futures term structure...
+          </div>
         </div>
       </div>
 
@@ -622,9 +700,15 @@
             <span class="text-slate-600">|</span>
             <span>Day Net &Delta;: <strong id="ts-day-delta" class="font-mono text-slate-200">-.----</strong> (<strong id="ts-day-deltapct" class="font-mono text-slate-200">--.--%</strong>)</span>
           </div>
-          <div class="flex items-center space-x-2">
+          <div class="flex items-center space-x-1.5">
             <span id="chart-ratio-tag" class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700">
               Ratio: -.----
+            </span>
+            <span id="chart-futures-badge" class="hidden text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700" title="VIX Futures Term Structure Regime">
+              FUT: ---
+            </span>
+            <span id="chart-futures-spread" class="hidden text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950 text-slate-300 border border-slate-700/80" title="Front-Month Roll (M1/M2) Contango">
+              M1/M2: -.--%
             </span>
           </div>
         </div>
