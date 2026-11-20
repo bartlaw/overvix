@@ -3072,16 +3072,36 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     ? findDistinctVixHighs(times, rawVolSeries, 0.20, 30, aggregationMode)
     : [];
 
-  // Determine lowest low / maximum VIX among detected highs
-  const maxVixLevel = (isVixHighsMarked && isEligibleTf && highEvents.length > 0)
-    ? Math.max(...highEvents.map(e => e.vixLevel))
-    : -Infinity;
+  // Identify the single true lowest low on chart (maximum VIX / deepest trough)
+  // Guarantees strictly at most 1 red triangle and 1 red reference line across the entire chart
+  let lowestLowEventIdx = -1;
+  if (isVixHighsMarked && isEligibleTf && highEvents.length > 0) {
+    let maxVix = -Infinity;
+    let deepestSpot = Infinity;
+    for (let i = 0; i < highEvents.length; i++) {
+      const h = highEvents[i];
+      const sPct = (assetPct && typeof assetPct[h.idx] === 'number' && !isNaN(assetPct[h.idx]))
+        ? assetPct[h.idx]
+        : 0;
+      if (h.vixLevel > maxVix + 1e-4) {
+        maxVix = h.vixLevel;
+        deepestSpot = sPct;
+        lowestLowEventIdx = i;
+      } else if (Math.abs(h.vixLevel - maxVix) <= 1e-4) {
+        // Tie-breaker: if identical VIX level, pick deeper spot drop, then latest occurrence
+        if (sPct < deepestSpot - 1e-4 || (Math.abs(sPct - deepestSpot) <= 1e-4 && i > lowestLowEventIdx)) {
+          deepestSpot = sPct;
+          lowestLowEventIdx = i;
+        }
+      }
+    }
+  }
 
   // Add subtle vertical dotted reference line through SPX & Overvix Residual for each VIX high
-  // The lowest low (chart extreme peak) is emphasized with a red dotted line
+  // Only the single lowest low event is emphasized with a red dotted line; all other highs are amber
   if (isVixHighsMarked && isEligibleTf && highEvents.length > 0) {
-    highEvents.forEach(h => {
-      const isLowestLow = (Math.abs(h.vixLevel - maxVixLevel) < 1e-4);
+    highEvents.forEach((h, i) => {
+      const isLowestLow = (i === lowestLowEventIdx);
       anchorShapes.push({
         type: 'line',
         xref: 'x',
@@ -3402,13 +3422,12 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
 
     // VIX / VXN Highs Marker Trace on Volatility Axis (yaxis2) - up to 1M only
     if (isVixHighsMarked && isEligibleTf && highEvents.length > 0) {
-      const maxVix = Math.max(...highEvents.map(e => e.vixLevel));
       const highX = highEvents.map(e => e.time);
       const highY = highEvents.map(e => volPt[e.idx]);
-      const highColors = highEvents.map(e => (Math.abs(e.vixLevel - maxVix) < 1e-4 ? '#EF4444' : '#F59E0B'));
-      const highSizes = highEvents.map(e => (Math.abs(e.vixLevel - maxVix) < 1e-4 ? 13 : 11));
-      const highCustom = highEvents.map(e => {
-        const isLowestLow = (Math.abs(e.vixLevel - maxVix) < 1e-4);
+      const highColors = highEvents.map((e, i) => (i === lowestLowEventIdx ? '#EF4444' : '#F59E0B'));
+      const highSizes = highEvents.map((e, i) => (i === lowestLowEventIdx ? 13 : 11));
+      const highCustom = highEvents.map((e, i) => {
+        const isLowestLow = (i === lowestLowEventIdx);
         const sPct = assetPct[e.idx];
         const sStr = (typeof sPct === 'number' && !isNaN(sPct)) ? (sPct >= 0 ? `+${sPct.toFixed(2)}%` : `${sPct.toFixed(2)}%`) : '-';
         const vPt = volPt[e.idx];
