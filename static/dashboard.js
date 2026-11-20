@@ -3,10 +3,9 @@
  */
 
 // Global State
-let soundEnabled = false; // Muted by default
+let soundEnabled = false; // Voice alerts muted by default
 let lastOvervixSignal = false;
 let lastInversionSignal = false;
-let audioCtx = null;
 let currentSpxThreshold = 2.0;
 let currentNdxThreshold = 2.5;
 let currentThreshold = 2.0;
@@ -269,55 +268,80 @@ let corrAnchor = {
   label: 'Session Baseline'
 };
 
-// Initialize Sound Synthesizer via Web Audio API
-function initAudio() {
-  if (!audioCtx) {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (AudioContext) {
-      audioCtx = new AudioContext();
+// Dedicated Voice Alert Subsystem via Web Speech API
+const VoiceManager = {
+  enabled: false,
+  lastAlertTime: 0,
+  cooldownMs: 60000,
+  lastTroughKey: null,
+  isInitialized: false,
+
+  speak(text) {
+    if (!this.enabled && text !== "Voice alerts active" && !text.startsWith("New market low")) {
+      return;
+    }
+    if (!('speechSynthesis' in window)) {
+      console.warn("Speech Synthesis API not supported in this browser.");
+      return;
+    }
+    try {
+      window.speechSynthesis.cancel(); // Stop any pending speech immediately
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.rate = 1.05;
+      utter.pitch = 1.0;
+      utter.volume = 1.0;
+      
+      const voices = window.speechSynthesis.getVoices();
+      if (voices && voices.length > 0) {
+        const enVoice = voices.find(v => v.lang && v.lang.startsWith('en') && (
+          v.name.includes('Natural') || v.name.includes('Online') || v.name.includes('Google') || 
+          v.name.includes('Microsoft') || v.name.includes('David') || v.name.includes('Zira') || 
+          v.name.includes('Aria') || v.name.includes('Jenny')
+        ));
+        if (enVoice) utter.voice = enVoice;
+      }
+      
+      window.speechSynthesis.speak(utter);
+    } catch (e) {
+      console.warn("VoiceManager speech error:", e);
+    }
+  },
+
+  checkRedTriangleAlert(lowestLowEvent, assetName, assetPct, volLabel, vixLevel) {
+    if (!lowestLowEvent) return;
+    
+    // Skip if historical session replay
+    if (cachedBootstrap && cachedBootstrap.is_historical) return;
+
+    const eventKey = `${lowestLowEvent.time}_${vixLevel.toFixed(2)}`;
+
+    // Seed on first run without firing retroactive alert
+    if (!this.isInitialized) {
+      this.lastTroughKey = eventKey;
+      this.isInitialized = true;
+      return;
+    }
+
+    if (!this.enabled) return;
+
+    const now = Date.now();
+    // If it's a new or deeper trough event, check cooldown
+    if (eventKey !== this.lastTroughKey) {
+      if (now - this.lastAlertTime >= this.cooldownMs) {
+        this.lastAlertTime = now;
+        this.lastTroughKey = eventKey;
+        const dir = (assetPct >= 0) ? 'up' : 'down';
+        const absPct = Math.abs(assetPct).toFixed(2);
+        const phrase = `New market low. ${assetName} ${dir} ${absPct} percent, ${volLabel} at ${vixLevel.toFixed(2)}.`;
+        this.speak(phrase);
+      }
     }
   }
-}
+};
 
+// Legacy sound stub (all previous synth chimes retired in favor of VoiceManager)
 function playAlertSound(type = 'overvix') {
-  if (!soundEnabled) return;
-  try {
-    initAudio();
-    if (!audioCtx) return;
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
-
-    const now = audioCtx.currentTime;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-
-    if (type === 'dual') {
-      // Dual Capitulation Alert: High urgency triple chime
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(880, now);
-      osc.frequency.setValueAtTime(1174.66, now + 0.12);
-      osc.frequency.setValueAtTime(1760, now + 0.25);
-      gain.gain.setValueAtTime(0.3, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-      osc.start(now);
-      osc.stop(now + 0.5);
-    } else {
-      // Single Overvix Alert: Clean ping chime
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, now); // D5
-      osc.frequency.exponentialRampToValueAtTime(880, now + 0.2); // A5
-      gain.gain.setValueAtTime(0.25, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
-      osc.start(now);
-      osc.stop(now + 0.4);
-    }
-  } catch (err) {
-    console.warn("Audio playback error:", err);
-  }
+  // Retired
 }
 
 // Formatters
@@ -335,25 +359,57 @@ const fmtMaturity = (expStr, dte) => {
   return `${d} ${mName} '${y.slice(2)}${dteStr}`;
 };
 
-// Sound Toggle Handler
+// Voice Alerts Toggle Handler
 const btnSound = document.getElementById('btn-sound');
 const soundIcon = document.getElementById('sound-icon');
 const soundText = document.getElementById('sound-text');
+const cfgVoiceStatus = document.getElementById('cfg-voice-status');
 
-btnSound.addEventListener('click', () => {
-  initAudio();
-  soundEnabled = !soundEnabled;
-  if (soundEnabled) {
-    soundIcon.textContent = '🔊';
-    soundText.textContent = 'Sound ON';
-    btnSound.classList.remove('opacity-60');
-    playAlertSound('test');
-  } else {
-    soundIcon.textContent = '🔇';
-    soundText.textContent = 'Muted';
-    btnSound.classList.add('opacity-60');
+function updateVoiceStatusUI() {
+  if (cfgVoiceStatus) {
+    if (VoiceManager.enabled) {
+      cfgVoiceStatus.textContent = 'ACTIVE';
+      cfgVoiceStatus.className = 'text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-emerald-950 text-emerald-300 border border-emerald-800';
+    } else {
+      cfgVoiceStatus.textContent = 'MUTED';
+      cfgVoiceStatus.className = 'text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700';
+    }
   }
-});
+}
+
+if (btnSound) {
+  btnSound.addEventListener('click', () => {
+    VoiceManager.enabled = !VoiceManager.enabled;
+    soundEnabled = VoiceManager.enabled;
+    if (VoiceManager.enabled) {
+      if (soundIcon) soundIcon.textContent = '🗣️';
+      if (soundText) soundText.textContent = 'Voice ON';
+      btnSound.classList.remove('opacity-60');
+      btnSound.title = "Voice alerts enabled (Click to mute)";
+      VoiceManager.speak("Voice alerts active");
+    } else {
+      if (soundIcon) soundIcon.textContent = '🔇';
+      if (soundText) soundText.textContent = 'Muted';
+      btnSound.classList.add('opacity-60');
+      btnSound.title = "Voice alerts muted (Click to enable)";
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    }
+    updateVoiceStatusUI();
+  });
+}
+
+// Test Voice Button in Config Modal
+const btnTestVoice = document.getElementById('btn-test-voice');
+if (btnTestVoice) {
+  btnTestVoice.addEventListener('click', () => {
+    const isNdx = (currentAssetPair === 'NDX');
+    const asset = isNdx ? "Nasdaq" : "SPX";
+    const vol = isNdx ? "VXN" : "VIX";
+    VoiceManager.speak(`New market low. ${asset} down 1.45 percent, ${vol} at 24.69.`);
+  });
+}
 
 // Settings Modal
 const btnSettings = document.getElementById('btn-settings');
@@ -367,6 +423,7 @@ btnSettings.addEventListener('click', () => {
   const inputNdx = document.getElementById('input-ndx-threshold');
   if (inputSpx) inputSpx.value = currentSpxThreshold;
   if (inputNdx) inputNdx.value = currentNdxThreshold;
+  updateVoiceStatusUI();
   modalSettings.classList.remove('hidden');
 });
 modalClose.addEventListener('click', () => modalSettings.classList.add('hidden'));
@@ -3130,6 +3187,16 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         }
       }
     }
+
+    // Trigger Voice Alert on new Red Triangle (lowest low / peak VIX)
+    if (lowestLowEventIdx !== -1) {
+      const lowestEvt = highEvents[lowestLowEventIdx];
+      const sPct = (assetPct && typeof assetPct[lowestEvt.idx] === 'number' && !isNaN(assetPct[lowestEvt.idx]))
+        ? assetPct[lowestEvt.idx]
+        : 0;
+      const aName = isNdx ? "Nasdaq" : "SPX";
+      VoiceManager.checkRedTriangleAlert(lowestEvt, aName, sPct, volLabel, lowestEvt.vixLevel);
+    }
   }
 
   // Add subtle vertical dotted reference line through SPX & Overvix Residual for each VIX high
@@ -4136,11 +4203,6 @@ function updateUI(data) {
       confDesc.textContent = `Normal tech spot-vol pricing (${fmtPts(ndxOv.residual_pts)} pts). Tech vol spread: ${fmtPts(techVol ? techVol.spread : 0)} pts (${fmtNum(techVol ? techVol.ratio : 1.0, 3)}x).`;
     }
 
-    if ((isDualNdx || isTechSpreadPanic) && (!lastOvervixSignal || !lastInversionSignal)) {
-      playAlertSound('dual');
-    } else if (ndxOv.is_overvixed && !lastOvervixSignal) {
-      playAlertSound('overvix');
-    }
     lastOvervixSignal = ndxOv.is_overvixed;
     lastInversionSignal = ts.is_inverted;
 
@@ -4157,7 +4219,6 @@ function updateUI(data) {
         confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-amber-500 text-black";
         confBadge.textContent = "⚠️ GTH OVERVIX TRIGGER";
         confDesc.textContent = gConf.description || `GTH Spot-Vol Shock: VIX is ${fmtPts(gOv.residual_pts)} pts above expected trendline.`;
-        if (!lastOvervixSignal) playAlertSound('overvix');
       } else {
         confBanner.className = "flex items-center justify-between px-4 py-2.5 rounded-lg bg-indigo-950/40 border border-indigo-700/70 transition duration-300";
         confBadge.className = "px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider bg-indigo-600 text-white";
@@ -4202,11 +4263,6 @@ function updateUI(data) {
     }
 
     if (!useGthBanner) {
-      if (conf.is_dual_alert && (!lastOvervixSignal || !lastInversionSignal)) {
-        playAlertSound('dual');
-      } else if (ov.is_overvixed && !lastOvervixSignal) {
-        playAlertSound('overvix');
-      }
       lastOvervixSignal = ov.is_overvixed;
       lastInversionSignal = ts.is_inverted;
     }
