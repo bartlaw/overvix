@@ -1457,6 +1457,10 @@ function attachOvervixChartClickListener() {
 }
 
 function extractIsoDate(targetStr) {
+  if (typeof targetStr === 'number' && targetStr > 1e9) {
+    const ms = (targetStr < 1e11) ? (targetStr * 1000) : targetStr;
+    return new Date(ms).toISOString().slice(0, 10);
+  }
   if (typeof targetStr !== 'string') return null;
   const match = targetStr.trim().match(/^(\d{4}-\d{2}-\d{2})/);
   return match ? match[1] : null;
@@ -1904,6 +1908,27 @@ function getRawSpotVolSeries(c, isNdx) {
   return { spot, vol };
 }
 
+function parseTimeToUtcMs(target) {
+  if (target === null || target === undefined) return NaN;
+  if (typeof target === 'number') {
+    return (target < 1e11) ? (target * 1000) : target;
+  }
+  const clean = String(target).trim();
+  if (!clean) return NaN;
+  const num = Number(clean);
+  if (!isNaN(num) && num > 1e9) {
+    return (num < 1e11) ? (num * 1000) : num;
+  }
+  const iso = clean.replace(' ', 'T');
+  if (iso.endsWith('Z') || iso.includes('+') || (iso.includes('-') && iso.lastIndexOf('-') > 7)) {
+    return Date.parse(iso);
+  }
+  const withZ = (iso.length === 16) ? (iso + ':00Z') : (iso.length === 10 ? (iso + 'T00:00:00Z') : (iso + 'Z'));
+  const ms = Date.parse(withZ);
+  if (!isNaN(ms)) return ms;
+  return Date.parse(iso);
+}
+
 function findClosestTimeIndex(times, target) {
   if (!times || times.length === 0 || target === null || target === undefined) return -1;
   
@@ -1920,9 +1945,11 @@ function findClosestTimeIndex(times, target) {
     if (times[i] === clean) return i;
   }
 
-  // 3. Substring match (either way: times[i] inside clean or clean inside times[i])
-  for (let i = 0; i < times.length; i++) {
-    if (clean.includes(times[i]) || times[i].includes(clean)) return i;
+  // 3. Substring match (either way: times[i] inside clean or clean inside times[i], only when clean has date granularity)
+  if (clean.length >= 10) {
+    for (let i = 0; i < times.length; i++) {
+      if (clean.includes(times[i]) || times[i].includes(clean)) return i;
+    }
   }
 
   // 4. Prefix match up to minutes (e.g. '2026-11-06 10:45:00'[:16] === '2026-11-06 10:45')
@@ -1934,33 +1961,14 @@ function findClosestTimeIndex(times, target) {
     }
   }
 
-  // 5. Full Timestamp / Date comparison (Chronological Distance in ms)
-  // Must execute BEFORE stripping time-of-day so multi-month dates are never confused
-  const parsedTarget = Date.parse(clean.replace(' ', 'T'));
-  if (!isNaN(parsedTarget)) {
+  // 5. Full Timestamp / UTC Milliseconds comparison
+  // Ensures numeric epoch timestamps from Plotly p2c and date strings are compared in the same UTC coordinate frame
+  const targetMs = parseTimeToUtcMs(target);
+  if (!isNaN(targetMs)) {
     let closestIdx = 0;
     let minDiff = Infinity;
     for (let i = 0; i < times.length; i++) {
-      const tMs = Date.parse(times[i].replace(' ', 'T'));
-      if (!isNaN(tMs)) {
-        const diff = Math.abs(tMs - parsedTarget);
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestIdx = i;
-        }
-      }
-    }
-    return closestIdx;
-  }
-
-  // 6. Epoch timestamp comparison (if numeric string or number > 1e9)
-  const num = Number(clean);
-  if (!isNaN(num) && num > 1e9) {
-    const targetMs = (num < 1e11) ? (num * 1000) : num;
-    let closestIdx = 0;
-    let minDiff = Infinity;
-    for (let i = 0; i < times.length; i++) {
-      const tMs = Date.parse(times[i].replace(' ', 'T'));
+      const tMs = parseTimeToUtcMs(times[i]);
       if (!isNaN(tMs)) {
         const diff = Math.abs(tMs - targetMs);
         if (diff < minDiff) {
@@ -1972,7 +1980,7 @@ function findClosestTimeIndex(times, target) {
     return closestIdx;
   }
 
-  // 7. Time HH:MM comparison (intraday only fallback if no date supplied)
+  // 6. Time HH:MM comparison (intraday only fallback if no date supplied)
   let cleanTime = clean;
   if (clean.includes(' ')) {
     cleanTime = clean.split(' ')[1];
@@ -3610,12 +3618,24 @@ function attachCorrelationChartClickListener() {
   }
   chartEl.on('plotly_click', function(eventData) {
     if (Date.now() - lastAnchorClickTimestamp < 300) return;
-    if (eventData && eventData.points && eventData.points.length > 0) {
-      const pt = eventData.points[0];
-      if (pt && pt.x !== undefined && pt.x !== null) {
-        lastAnchorClickTimestamp = Date.now();
-        setCorrAnchor('custom', pt.x);
-      }
+    if (!eventData || !eventData.points || eventData.points.length === 0) return;
+
+    // Filter points to prefer full time-series data traces, avoiding 2-point boundary lines (zero line, alert, vol crush)
+    const validNames = ['SPX % Move', 'SPX % Since Anchor', 'NDX % Move', 'NDX % Since Anchor',
+                        'VIX Point Move', 'VIX Pt Since Anchor', 'VXN Point Move', 'VXN Pt Since Anchor',
+                        'Overvix Residual', 'Over-VXN Residual', 'VIX Highs', 'VXN Highs'];
+    let chosenPt = eventData.points.find(p => p.data && validNames.some(name => p.data.name && p.data.name.includes(name)));
+    if (!chosenPt) {
+      // Pick any trace that is not a 2-point helper/boundary line
+      chosenPt = eventData.points.find(p => p.data && p.data.x && p.data.x.length > 2);
+    }
+    if (!chosenPt) {
+      chosenPt = eventData.points[0];
+    }
+
+    if (chosenPt && chosenPt.x !== undefined && chosenPt.x !== null) {
+      lastAnchorClickTimestamp = Date.now();
+      setCorrAnchor('custom', chosenPt.x);
     }
   });
 
@@ -3641,7 +3661,21 @@ function attachCorrelationChartClickListener() {
       const xLength = (xaxis._length !== undefined) ? xaxis._length : (rect.width - 100);
 
       if (clickX >= xOffset && clickX <= xOffset + xLength) {
-        // Try axis coordinate conversion first
+        // For 1D timeframe, proportional mapping across session times is 100% direct and jitter-free
+        if (currentCorrTf === '1D') {
+          const isNdx = (currentAssetPair === 'NDX');
+          const c = getCorrDataset(isNdx, currentCorrTf);
+          const times = (c && c.times) ? c.times : [];
+          if (times.length > 0) {
+            lastAnchorClickTimestamp = Date.now();
+            const frac = Math.max(0, Math.min(1, (clickX - xOffset) / xLength));
+            const idx = Math.round(frac * (times.length - 1));
+            setCorrAnchor('custom', times[idx]);
+            return;
+          }
+        }
+
+        // Try axis coordinate conversion first for multi-day/rangebreak horizons
         if (typeof xaxis.p2c === 'function') {
           const dataCoord = xaxis.p2c(clickX - xOffset);
           if (dataCoord !== undefined && dataCoord !== null) {
