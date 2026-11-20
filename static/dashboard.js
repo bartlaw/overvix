@@ -271,14 +271,17 @@ let corrAnchor = {
 // Dedicated Voice Alert Subsystem via Web Speech API
 const VoiceManager = {
   enabled: (localStorage.getItem('overvix_voice_enabled') === 'true'),
-  lastAlertTime: 0,
+  pageLoadedAt: Date.now(),
+  startupGracePeriodMs: 8000, // 8-second silence window on load while bootstrap & initial ticks hydrate
+  lastAlertTime: Date.now(),   // Start cooldown timer at page load to prevent instant triggers
   cooldownMs: 60000,
   lastTroughKey: null,
   isInitialized: false,
   selectedVoiceURI: localStorage.getItem('overvix_voice_uri') || '',
 
-  speak(text) {
-    if (!this.enabled && text !== "Voice alerts active" && text !== "Voice selected." && !text.startsWith("New market low")) {
+  speak(text, force = false) {
+    // Only speak if voice alerts are enabled, or if explicitly forced by direct user action (test button / voice picker)
+    if (!this.enabled && !force) {
       return;
     }
     if (!('speechSynthesis' in window)) {
@@ -320,9 +323,10 @@ const VoiceManager = {
     if (cachedBootstrap && cachedBootstrap.is_historical) return;
 
     const eventKey = `${lowestLowEvent.time}_${vixLevel.toFixed(2)}`;
+    const now = Date.now();
 
-    // Seed on first run without firing retroactive alert
-    if (!this.isInitialized) {
+    // During startup or initial hydration window, silently calibrate the baseline without speaking
+    if (!this.isInitialized || (now - this.pageLoadedAt < this.startupGracePeriodMs)) {
       this.lastTroughKey = eventKey;
       this.isInitialized = true;
       return;
@@ -330,8 +334,7 @@ const VoiceManager = {
 
     if (!this.enabled) return;
 
-    const now = Date.now();
-    // If it's a new or deeper trough event, check cooldown
+    // Only fire if a brand-new or deeper trough event occurs during active live streaming
     if (eventKey !== this.lastTroughKey) {
       if (now - this.lastAlertTime >= this.cooldownMs) {
         this.lastAlertTime = now;
@@ -394,7 +397,7 @@ function applyVoiceUI(speakFeedback = false) {
       btnSound.title = "Voice alerts enabled (Click to mute)";
     }
     if (speakFeedback) {
-      VoiceManager.speak("Voice alerts active");
+      VoiceManager.speak("Voice alerts active", true);
     }
   } else {
     if (soundIcon) soundIcon.textContent = '🔇';
@@ -475,7 +478,7 @@ if (selectVoice) {
   selectVoice.addEventListener('change', (e) => {
     VoiceManager.selectedVoiceURI = e.target.value;
     localStorage.setItem('overvix_voice_uri', e.target.value);
-    VoiceManager.speak("Voice selected.");
+    VoiceManager.speak("Voice selected.", true);
   });
 }
 
@@ -486,7 +489,7 @@ if (btnTestVoice) {
     const isNdx = (currentAssetPair === 'NDX');
     const asset = isNdx ? "Nasdaq" : "SPX";
     const vol = isNdx ? "VXN" : "VIX";
-    VoiceManager.speak(`New market low. ${asset} down 1.45 percent, ${vol} at 24.69.`);
+    VoiceManager.speak(`New market low. ${asset} down 1.45 percent, ${vol} at 24.69.`, true);
   });
 }
 
