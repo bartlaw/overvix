@@ -3152,6 +3152,22 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         },
         layer: 'below'
       });
+      if (isLowestLow) {
+        anchorAnnotations.push({
+          xref: 'x',
+          yref: 'paper',
+          x: h.time,
+          y: 1.0,
+          yanchor: 'top',
+          text: `${volLabel}: ${h.vixLevel.toFixed(2)}`,
+          showarrow: false,
+          font: { color: '#EF4444', size: 9, family: 'monospace', weight: 'bold' },
+          bgcolor: 'rgba(15, 23, 42, 0.90)',
+          bordercolor: '#EF4444',
+          borderwidth: 1,
+          borderpad: 2
+        });
+      }
     });
   }
 
