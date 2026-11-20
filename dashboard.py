@@ -25,7 +25,7 @@ import argparse
 import asyncio
 import warnings
 import webbrowser
-from datetime import datetime, time as dtime
+from datetime import datetime, timedelta, time as dtime
 from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
 import pickle
@@ -144,6 +144,12 @@ class DashboardState:
         self.ndx_4m_rr_data: Optional[Dict[str, Any]] = None
         self.spx_4m_locked_strikes: Optional[Tuple[str, float, float]] = None
         self.ndx_4m_locked_strikes: Optional[Tuple[str, float, float]] = None
+        self.spx_4m_ref_spot: Optional[float] = None
+        self.spx_4m_ref_time: Optional[str] = None
+        self.spx_4m_ref_mode: str = 'session_close'
+        self.ndx_4m_ref_spot: Optional[float] = None
+        self.ndx_4m_ref_time: Optional[str] = None
+        self.ndx_4m_ref_mode: str = 'session_close'
 
         # VIX Futures Contracts & Tickers (Standard Monthly M1 .. M8)
         self.vix_futures_contracts: List[Any] = []
@@ -587,6 +593,9 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
                         target_exp_4m, call_strike_4m, put_strike_4m = state.spx_4m_locked_strikes
                     else:
                         state.spx_4m_locked_strikes = (target_exp_4m, call_strike_4m, put_strike_4m)
+                        state.spx_4m_ref_spot = spx_spot
+                        state.spx_4m_ref_time = datetime.now(ET_TZ).strftime('%H:%M ET')
+                        state.spx_4m_ref_mode = 'session_close'
 
                     call_opt_4m = Option('SPX', target_exp_4m, call_strike_4m, 'C', 'SMART', tradingClass='SPX')
                     put_opt_4m = Option('SPX', target_exp_4m, put_strike_4m, 'P', 'SMART', tradingClass='SPX')
@@ -631,6 +640,9 @@ async def resolve_and_subscribe_rr_contracts(ib_client):
                     target_exp_qqq_4m, call_qqq_strike_4m, put_qqq_strike_4m = state.ndx_4m_locked_strikes
                 else:
                     state.ndx_4m_locked_strikes = (target_exp_qqq_4m, call_qqq_strike_4m, put_qqq_strike_4m)
+                    state.ndx_4m_ref_spot = qqq_spot
+                    state.ndx_4m_ref_time = datetime.now(ET_TZ).strftime('%H:%M ET')
+                    state.ndx_4m_ref_mode = 'session_close'
 
                 call_qqq_4m = Option('QQQ', target_exp_qqq_4m, call_qqq_strike_4m, 'C', 'SMART')
                 put_qqq_4m = Option('QQQ', target_exp_qqq_4m, put_qqq_strike_4m, 'P', 'SMART')
@@ -1813,6 +1825,298 @@ async def refresh_historical_data():
         print(f"[IBKR Error] Historical data refresh failed: {ex}")
 
 
+# 4M OTM Risk Reversal Evaluation (Merridew Skew: 10% OTM Call vs 15% OTM Put ~120 DTE)
+def _calc_4m_rr(c_contract, p_contract, c_ticker, p_ticker, cached_data, spot=None, ref_spot=None, ref_time=None, ref_mode=None):
+    if not c_contract or not p_contract:
+        if cached_data:
+            if ref_spot is not None:
+                cached_data["ref_spot"] = round(ref_spot, 2)
+            if ref_time is not None:
+                cached_data["ref_time"] = ref_time
+            if ref_mode is not None:
+                cached_data["ref_mode"] = ref_mode
+        return cached_data
+
+    c_mid = None
+    p_mid = None
+    c_iv = None
+    p_iv = None
+    c_delta = None
+    p_delta = None
+
+    if c_ticker:
+        c_mid = c_ticker.marketPrice()
+        if c_mid is None or math.isnan(c_mid) or c_mid <= 0:
+            if c_ticker.bid and c_ticker.ask and not math.isnan(c_ticker.bid) and not math.isnan(c_ticker.ask) and c_ticker.bid > 0:
+                c_mid = (c_ticker.bid + c_ticker.ask) / 2.0
+            elif c_ticker.close and not math.isnan(c_ticker.close) and c_ticker.close > 0:
+                c_mid = c_ticker.close
+        if c_ticker.modelGreeks:
+            mg = c_ticker.modelGreeks
+            if mg.impliedVol and not math.isnan(mg.impliedVol) and mg.impliedVol > 0:
+                c_iv = mg.impliedVol * 100.0
+            if mg.delta and not math.isnan(mg.delta):
+                c_delta = mg.delta
+
+    if p_ticker:
+        p_mid = p_ticker.marketPrice()
+        if p_mid is None or math.isnan(p_mid) or p_mid <= 0:
+            if p_ticker.bid and p_ticker.ask and not math.isnan(p_ticker.bid) and not math.isnan(p_ticker.ask) and p_ticker.bid > 0:
+                p_mid = (p_ticker.bid + p_ticker.ask) / 2.0
+            elif p_ticker.close and not math.isnan(p_ticker.close) and p_ticker.close > 0:
+                p_mid = p_ticker.close
+        if p_ticker.modelGreeks:
+            mg = p_ticker.modelGreeks
+            if mg.impliedVol and not math.isnan(mg.impliedVol) and mg.impliedVol > 0:
+                p_iv = mg.impliedVol * 100.0
+            if mg.delta and not math.isnan(mg.delta):
+                p_delta = mg.delta
+
+    # Fallback to cache if missing
+    if (c_mid is None or p_mid is None) and cached_data:
+        c_mid = c_mid or cached_data.get('call_mid')
+        p_mid = p_mid or cached_data.get('put_mid')
+        c_iv = c_iv or cached_data.get('call_iv')
+        p_iv = p_iv or cached_data.get('put_iv')
+        c_delta = c_delta or cached_data.get('call_delta')
+        p_delta = p_delta or cached_data.get('put_delta')
+
+    if c_mid is not None and p_mid is not None:
+        combo_mid = c_mid - p_mid
+        net_credit = p_mid - c_mid  # positive when Put > Call (Credit collected)
+        iv_skew = (p_iv - c_iv) if (p_iv is not None and c_iv is not None) else None
+        skew_ratio = (p_iv / c_iv) if (p_iv is not None and c_iv is not None and c_iv > 0) else None
+        credit_pct = (net_credit / spot * 100.0) if (spot and spot > 0) else None
+
+        p_strike = getattr(p_contract, 'strike', None)
+        c_strike = getattr(c_contract, 'strike', None)
+        put_buffer_pct = ((spot - p_strike) / spot * 100.0) if (spot and spot > 0 and p_strike) else None
+
+        # Skew-based statistical regime evaluation (similar to 25Δ Skew stats across ~120 DTE)
+        # 4M Wing Skew (+10% Call vs -15% Put):
+        # Median ~6.0-6.5 pts | Elevated >= 8.5 pts (or ratio >= 1.45x) | Extreme >= 12.0 pts (or ratio >= 1.65x) | Complacent < 4.5 pts
+        if iv_skew is not None:
+            if iv_skew >= 12.0 or (skew_ratio is not None and skew_ratio >= 1.65):
+                regime = "EXTREME"
+                badge = "EXTREME SKEW"
+            elif iv_skew >= 8.5 or (skew_ratio is not None and skew_ratio >= 1.45):
+                regime = "ELEVATED"
+                badge = "ELEVATED SKEW"
+            elif iv_skew < 4.5 or (skew_ratio is not None and skew_ratio < 1.30):
+                regime = "COMPLACENT"
+                badge = "COMPLACENT"
+            else:
+                regime = "NORMAL"
+                badge = "NORMAL SKEW"
+        else:
+            regime = "NORMAL"
+            badge = "NORMAL"
+
+        # DTE
+        dte = None
+        exp_str = getattr(c_contract, 'lastTradeDateOrContractMonth', '')
+        if exp_str:
+            try:
+                exp_date = datetime.strptime(exp_str, '%Y%m%d').date()
+                dte = (exp_date - datetime.now().date()).days
+            except Exception:
+                pass
+
+        return {
+            "net_credit": round(net_credit, 2),
+            "combo_mid": round(combo_mid, 2),
+            "call_strike": c_strike,
+            "put_strike": p_strike,
+            "dte": dte,
+            "expiration": exp_str,
+            "call_mid": round(c_mid, 2),
+            "put_mid": round(p_mid, 2),
+            "call_iv": round(c_iv, 2) if c_iv is not None else None,
+            "put_iv": round(p_iv, 2) if p_iv is not None else None,
+            "call_delta": round(c_delta, 3) if c_delta is not None else None,
+            "put_delta": round(p_delta, 3) if p_delta is not None else None,
+            "iv_skew": round(iv_skew, 2) if iv_skew is not None else None,
+            "skew_ratio": round(skew_ratio, 2) if skew_ratio is not None else None,
+            "credit_pct": round(credit_pct, 3) if credit_pct is not None else None,
+            "put_buffer_pct": round(put_buffer_pct, 1) if put_buffer_pct is not None else None,
+            "regime": regime,
+            "badge": badge,
+            "ref_spot": round(ref_spot, 2) if ref_spot is not None else None,
+            "ref_time": ref_time,
+            "ref_mode": ref_mode or "session_close"
+        }
+    if cached_data:
+        if ref_spot is not None:
+            cached_data["ref_spot"] = round(ref_spot, 2)
+        if ref_time is not None:
+            cached_data["ref_time"] = ref_time
+        if ref_mode is not None:
+            cached_data["ref_mode"] = ref_mode
+        return cached_data
+    return cached_data
+
+
+async def recalibrate_4m_risk_reversal(asset: str = "SPX", mode: str = "spot") -> Dict[str, Any]:
+    """
+    On-demand recalibration of 4M Wing Risk Reversal (~120 DTE, +10% Call vs -15% Put).
+    mode: 'spot' (uses live cash SPX during RTH or synthetic GTH ES-adj SPX)
+          'session_close' (resets strikes back to official session close baseline)
+    """
+    is_spx = (asset.upper() == "SPX")
+    now_et = datetime.now(ET_TZ)
+    ref_time = now_et.strftime('%H:%M ET')
+    win = classify_market_window(now_et)
+    is_rth = win["is_rth_window"]
+
+    if is_spx:
+        if mode == "session_close":
+            ref_spot = state.latest_spx_close if (state.latest_spx_close and state.latest_spx_close > 0) else 7340.0
+            ref_mode = "session_close"
+        else:
+            ref_mode = "live_spot"
+            spx_curr, spx_src = get_current_price(state.spx_ticker, state.latest_spx_close)
+            if is_rth and spx_curr and spx_curr > 0:
+                ref_spot = spx_curr
+            else:
+                # Extended hours: check synthetic GTH SPX (ES - basis)
+                es_curr, _ = get_current_price(state.es_ticker, state.eod_es_close or state.latest_es_close)
+                active_basis = state.eod_es_spx_basis if state.eod_es_spx_basis is not None else state.es_spx_basis
+                if es_curr and es_curr > 0 and active_basis is not None:
+                    ref_spot = round(es_curr - active_basis, 2)
+                elif spx_curr and spx_curr > 0:
+                    ref_spot = spx_curr
+                else:
+                    ref_spot = state.latest_spx_close if (state.latest_spx_close and state.latest_spx_close > 0) else 7340.0
+
+        call_strike = round((ref_spot * 1.10) / 25.0) * 25.0
+        put_strike = round((ref_spot * 0.85) / 25.0) * 25.0
+
+        target_exp = state.spx_4m_locked_strikes[0] if state.spx_4m_locked_strikes else None
+        if not target_exp and state.spx_4m_rr_call_contract:
+            target_exp = getattr(state.spx_4m_rr_call_contract, 'lastTradeDateOrContractMonth', None)
+        if not target_exp:
+            target_exp = (datetime.now().date() + timedelta(days=120)).strftime('%Y%m%d')
+
+        if state.ib and state.ib.isConnected():
+            if state.spx_4m_rr_call_contract:
+                try: state.ib.cancelMktData(state.spx_4m_rr_call_contract)
+                except Exception: pass
+            if state.spx_4m_rr_put_contract:
+                try: state.ib.cancelMktData(state.spx_4m_rr_put_contract)
+                except Exception: pass
+
+            try:
+                c_opt = Option('SPX', target_exp, call_strike, 'C', 'SMART', tradingClass='SPX')
+                p_opt = Option('SPX', target_exp, put_strike, 'P', 'SMART', tradingClass='SPX')
+                q = await state.ib.qualifyContractsAsync(c_opt, p_opt)
+                if len(q) == 2:
+                    state.spx_4m_rr_call_contract = q[0]
+                    state.spx_4m_rr_put_contract = q[1]
+                    state.spx_4m_rr_call_ticker = state.ib.reqMktData(state.spx_4m_rr_call_contract, '106', False, False)
+                    state.spx_4m_rr_put_ticker = state.ib.reqMktData(state.spx_4m_rr_put_contract, '106', False, False)
+            except Exception as e:
+                print(f" [4M Skew] Recalibration subscription error: {e}")
+
+        state.spx_4m_locked_strikes = (target_exp, call_strike, put_strike)
+        state.spx_4m_ref_spot = ref_spot
+        state.spx_4m_ref_time = ref_time
+        state.spx_4m_ref_mode = ref_mode
+
+        state.spx_4m_rr_data = _calc_4m_rr(
+            state.spx_4m_rr_call_contract, state.spx_4m_rr_put_contract,
+            state.spx_4m_rr_call_ticker, state.spx_4m_rr_put_ticker,
+            state.spx_4m_rr_data, spot=ref_spot,
+            ref_spot=ref_spot, ref_time=ref_time, ref_mode=ref_mode
+        )
+        if state.spx_4m_rr_data:
+            state.spx_4m_rr_data["call_strike"] = call_strike
+            state.spx_4m_rr_data["put_strike"] = put_strike
+            state.spx_4m_rr_data["ref_spot"] = round(ref_spot, 2)
+            state.spx_4m_rr_data["ref_time"] = ref_time
+            state.spx_4m_rr_data["ref_mode"] = ref_mode
+
+        print(f" [4M Skew] SPX 4M Skew Recalibrated ({mode}): Ref={ref_spot:.2f} [{ref_mode}], C{call_strike} / P{put_strike}")
+        return {
+            "asset": "SPX",
+            "mode": ref_mode,
+            "ref_spot": ref_spot,
+            "ref_time": ref_time,
+            "target_exp": target_exp,
+            "call_strike": call_strike,
+            "put_strike": put_strike
+        }
+    else:
+        # NDX / Tech mode
+        if mode == "session_close":
+            ref_spot = (state.latest_ndx_close / 41.0) if (state.latest_ndx_close and state.latest_ndx_close > 0) else 665.0
+            ref_mode = "session_close"
+        else:
+            ref_mode = "live_spot"
+            ndx_curr, _ = get_current_price(state.ndx_ticker, state.latest_ndx_close)
+            if ndx_curr and ndx_curr > 0:
+                ref_spot = round(ndx_curr / 41.0, 2)
+            else:
+                ref_spot = round(state.latest_ndx_close / 41.0, 2) if state.latest_ndx_close else 665.0
+
+        call_strike = round((ref_spot * 1.10) / 5.0) * 5.0
+        put_strike = round((ref_spot * 0.85) / 5.0) * 5.0
+
+        target_exp = state.ndx_4m_locked_strikes[0] if state.ndx_4m_locked_strikes else None
+        if not target_exp and state.ndx_4m_rr_call_contract:
+            target_exp = getattr(state.ndx_4m_rr_call_contract, 'lastTradeDateOrContractMonth', None)
+        if not target_exp:
+            target_exp = (datetime.now().date() + timedelta(days=120)).strftime('%Y%m%d')
+
+        if state.ib and state.ib.isConnected():
+            if state.ndx_4m_rr_call_contract:
+                try: state.ib.cancelMktData(state.ndx_4m_rr_call_contract)
+                except Exception: pass
+            if state.ndx_4m_rr_put_contract:
+                try: state.ib.cancelMktData(state.ndx_4m_rr_put_contract)
+                except Exception: pass
+
+            try:
+                c_opt = Option('QQQ', target_exp, call_strike, 'C', 'SMART')
+                p_opt = Option('QQQ', target_exp, put_strike, 'P', 'SMART')
+                q = await state.ib.qualifyContractsAsync(c_opt, p_opt)
+                if len(q) == 2:
+                    state.ndx_4m_rr_call_contract = q[0]
+                    state.ndx_4m_rr_put_contract = q[1]
+                    state.ndx_4m_rr_call_ticker = state.ib.reqMktData(state.ndx_4m_rr_call_contract, '106', False, False)
+                    state.ndx_4m_rr_put_ticker = state.ib.reqMktData(state.ndx_4m_rr_put_contract, '106', False, False)
+            except Exception as e:
+                print(f" [4M Skew] NDX Recalibration subscription error: {e}")
+
+        state.ndx_4m_locked_strikes = (target_exp, call_strike, put_strike)
+        state.ndx_4m_ref_spot = ref_spot
+        state.ndx_4m_ref_time = ref_time
+        state.ndx_4m_ref_mode = ref_mode
+
+        state.ndx_4m_rr_data = _calc_4m_rr(
+            state.ndx_4m_rr_call_contract, state.ndx_4m_rr_put_contract,
+            state.ndx_4m_rr_call_ticker, state.ndx_4m_rr_put_ticker,
+            state.ndx_4m_rr_data, spot=ref_spot,
+            ref_spot=ref_spot, ref_time=ref_time, ref_mode=ref_mode
+        )
+        if state.ndx_4m_rr_data:
+            state.ndx_4m_rr_data["call_strike"] = call_strike
+            state.ndx_4m_rr_data["put_strike"] = put_strike
+            state.ndx_4m_rr_data["ref_spot"] = round(ref_spot, 2)
+            state.ndx_4m_rr_data["ref_time"] = ref_time
+            state.ndx_4m_rr_data["ref_mode"] = ref_mode
+
+        print(f" [4M Skew] NDX 4M Skew Recalibrated ({mode}): Ref={ref_spot:.2f} [{ref_mode}], C{call_strike} / P{put_strike}")
+        return {
+            "asset": "NDX",
+            "mode": ref_mode,
+            "ref_spot": ref_spot,
+            "ref_time": ref_time,
+            "target_exp": target_exp,
+            "call_strike": call_strike,
+            "put_strike": put_strike
+        }
+
+
 def compute_live_payload() -> Dict[str, Any]:
     """
     Compute full real-time snapshot of market prices, Overvix residuals,
@@ -2103,123 +2407,15 @@ def compute_live_payload() -> Dict[str, Any]:
         except Exception:
             pass
 
-    # 4M OTM Risk Reversal Evaluation (Merridew Skew: 10% OTM Call vs 15% OTM Put ~120 DTE)
-    def _calc_4m_rr(c_contract, p_contract, c_ticker, p_ticker, cached_data, spot=None):
-        if not c_contract or not p_contract:
-            return cached_data
-
-        c_mid = None
-        p_mid = None
-        c_iv = None
-        p_iv = None
-        c_delta = None
-        p_delta = None
-
-        if c_ticker:
-            c_mid = c_ticker.marketPrice()
-            if c_mid is None or math.isnan(c_mid) or c_mid <= 0:
-                if c_ticker.bid and c_ticker.ask and not math.isnan(c_ticker.bid) and not math.isnan(c_ticker.ask) and c_ticker.bid > 0:
-                    c_mid = (c_ticker.bid + c_ticker.ask) / 2.0
-                elif c_ticker.close and not math.isnan(c_ticker.close) and c_ticker.close > 0:
-                    c_mid = c_ticker.close
-            if c_ticker.modelGreeks:
-                mg = c_ticker.modelGreeks
-                if mg.impliedVol and not math.isnan(mg.impliedVol) and mg.impliedVol > 0:
-                    c_iv = mg.impliedVol * 100.0
-                if mg.delta and not math.isnan(mg.delta):
-                    c_delta = mg.delta
-
-        if p_ticker:
-            p_mid = p_ticker.marketPrice()
-            if p_mid is None or math.isnan(p_mid) or p_mid <= 0:
-                if p_ticker.bid and p_ticker.ask and not math.isnan(p_ticker.bid) and not math.isnan(p_ticker.ask) and p_ticker.bid > 0:
-                    p_mid = (p_ticker.bid + p_ticker.ask) / 2.0
-                elif p_ticker.close and not math.isnan(p_ticker.close) and p_ticker.close > 0:
-                    p_mid = p_ticker.close
-            if p_ticker.modelGreeks:
-                mg = p_ticker.modelGreeks
-                if mg.impliedVol and not math.isnan(mg.impliedVol) and mg.impliedVol > 0:
-                    p_iv = mg.impliedVol * 100.0
-                if mg.delta and not math.isnan(mg.delta):
-                    p_delta = mg.delta
-
-        # Fallback to cache if missing
-        if (c_mid is None or p_mid is None) and cached_data:
-            c_mid = c_mid or cached_data.get('call_mid')
-            p_mid = p_mid or cached_data.get('put_mid')
-            c_iv = c_iv or cached_data.get('call_iv')
-            p_iv = p_iv or cached_data.get('put_iv')
-            c_delta = c_delta or cached_data.get('call_delta')
-            p_delta = p_delta or cached_data.get('put_delta')
-
-        if c_mid is not None and p_mid is not None:
-            combo_mid = c_mid - p_mid
-            net_credit = p_mid - c_mid  # positive when Put > Call (Credit collected)
-            iv_skew = (p_iv - c_iv) if (p_iv is not None and c_iv is not None) else None
-            skew_ratio = (p_iv / c_iv) if (p_iv is not None and c_iv is not None and c_iv > 0) else None
-            credit_pct = (net_credit / spot * 100.0) if (spot and spot > 0) else None
-
-            p_strike = getattr(p_contract, 'strike', None)
-            c_strike = getattr(c_contract, 'strike', None)
-            put_buffer_pct = ((spot - p_strike) / spot * 100.0) if (spot and spot > 0 and p_strike) else None
-
-            # Skew-based statistical regime evaluation (similar to 25Δ Skew stats across ~120 DTE)
-            # 4M Wing Skew (+10% Call vs -15% Put):
-            # Median ~6.0-6.5 pts | Elevated >= 8.5 pts (or ratio >= 1.45x) | Extreme >= 12.0 pts (or ratio >= 1.65x) | Complacent < 4.5 pts
-            if iv_skew is not None:
-                if iv_skew >= 12.0 or (skew_ratio is not None and skew_ratio >= 1.65):
-                    regime = "EXTREME"
-                    badge = "EXTREME SKEW"
-                elif iv_skew >= 8.5 or (skew_ratio is not None and skew_ratio >= 1.45):
-                    regime = "ELEVATED"
-                    badge = "ELEVATED SKEW"
-                elif iv_skew < 4.5 or (skew_ratio is not None and skew_ratio < 1.30):
-                    regime = "COMPLACENT"
-                    badge = "COMPLACENT"
-                else:
-                    regime = "NORMAL"
-                    badge = "NORMAL SKEW"
-            else:
-                regime = "NORMAL"
-                badge = "NORMAL"
-
-            # DTE
-            dte = None
-            exp_str = getattr(c_contract, 'lastTradeDateOrContractMonth', '')
-            if exp_str:
-                try:
-                    exp_date = datetime.strptime(exp_str, '%Y%m%d').date()
-                    dte = (exp_date - datetime.now().date()).days
-                except Exception:
-                    pass
-
-            return {
-                "net_credit": round(net_credit, 2),
-                "combo_mid": round(combo_mid, 2),
-                "call_strike": c_strike,
-                "put_strike": p_strike,
-                "dte": dte,
-                "expiration": exp_str,
-                "call_mid": round(c_mid, 2),
-                "put_mid": round(p_mid, 2),
-                "call_iv": round(c_iv, 2) if c_iv is not None else None,
-                "put_iv": round(p_iv, 2) if p_iv is not None else None,
-                "call_delta": round(c_delta, 3) if c_delta is not None else None,
-                "put_delta": round(p_delta, 3) if p_delta is not None else None,
-                "iv_skew": round(iv_skew, 2) if iv_skew is not None else None,
-                "skew_ratio": round(skew_ratio, 2) if skew_ratio is not None else None,
-                "credit_pct": round(credit_pct, 3) if credit_pct is not None else None,
-                "put_buffer_pct": round(put_buffer_pct, 1) if put_buffer_pct is not None else None,
-                "regime": regime,
-                "badge": badge
-            }
-        return cached_data
-
+    # 4M OTM Risk Reversal Evaluation (SPX & NDX / QQQ)
     spx_spot_curr = spx_curr if (spx_curr and spx_curr > 0) else state.latest_spx_close
     spx_4m_rr_payload = _calc_4m_rr(
         state.spx_4m_rr_call_contract, state.spx_4m_rr_put_contract,
         state.spx_4m_rr_call_ticker, state.spx_4m_rr_put_ticker,
-        state.spx_4m_rr_data, spot=spx_spot_curr
+        state.spx_4m_rr_data, spot=spx_spot_curr,
+        ref_spot=state.spx_4m_ref_spot or state.latest_spx_close,
+        ref_time=state.spx_4m_ref_time,
+        ref_mode=state.spx_4m_ref_mode
     )
     if spx_4m_rr_payload:
         state.spx_4m_rr_data = spx_4m_rr_payload
@@ -2228,7 +2424,10 @@ def compute_live_payload() -> Dict[str, Any]:
     ndx_4m_rr_payload = _calc_4m_rr(
         state.ndx_4m_rr_call_contract, state.ndx_4m_rr_put_contract,
         state.ndx_4m_rr_call_ticker, state.ndx_4m_rr_put_ticker,
-        state.ndx_4m_rr_data, spot=ndx_spot_curr
+        state.ndx_4m_rr_data, spot=ndx_spot_curr,
+        ref_spot=state.ndx_4m_ref_spot or (state.latest_ndx_close / 41.0 if state.latest_ndx_close else 665.0),
+        ref_time=state.ndx_4m_ref_time,
+        ref_mode=state.ndx_4m_ref_mode
     )
     if ndx_4m_rr_payload:
         state.ndx_4m_rr_data = ndx_4m_rr_payload
@@ -3511,6 +3710,33 @@ async def post_config(req: ConfigRequest):
         "window": state.window_days, 
         "interval": state.interval
     }
+
+
+class Recalibrate4mRequest(BaseModel):
+    asset: str = "SPX"
+    mode: str = "spot"
+
+
+@app.post("/api/recalibrate_4m_skew")
+async def post_recalibrate_4m_skew(req: Recalibrate4mRequest):
+    try:
+        res = await recalibrate_4m_risk_reversal(asset=req.asset, mode=req.mode)
+        live = compute_live_payload()
+        rr_data = live.get("rr_4m") if req.asset.upper() == "SPX" else (live.get("ndx", {}).get("rr_4m"))
+        return {
+            "status": "ok",
+            "asset": req.asset,
+            "mode": res.get("mode"),
+            "ref_spot": res.get("ref_spot"),
+            "ref_time": res.get("ref_time"),
+            "call_strike": res.get("call_strike"),
+            "put_strike": res.get("put_strike"),
+            "rr_4m": rr_data
+        }
+    except Exception as ex:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"status": "error", "detail": str(ex)})
 
 
 @app.websocket("/ws/live")

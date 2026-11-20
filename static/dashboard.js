@@ -4753,6 +4753,37 @@ function updateUI(data) {
       }
       if (popCash) popCash.textContent = `(${cashStr} / 1-lot)`;
 
+      // Populate Reference Spot Bar inside #popover-rr4m
+      const popRefLabel = document.getElementById('pop-rr4m-ref-label');
+      const popRefPrice = document.getElementById('pop-rr4m-ref-price');
+      const popRefBadge = document.getElementById('pop-rr4m-ref-mode-badge');
+      const popRefSub = document.getElementById('pop-rr4m-ref-sub');
+
+      if (popRefLabel) popRefLabel.textContent = isNdx ? "QQQ Ref" : "SPX Ref";
+      if (popRefPrice) {
+        if (rr4mData && rr4mData.ref_spot) {
+          popRefPrice.textContent = fmtNum(rr4mData.ref_spot, 2);
+        } else {
+          popRefPrice.textContent = isNdx ? (data.ndx && data.ndx.market ? fmtNum(data.ndx.market.ndx_close / 41.0, 2) : '---.--')
+                                          : (data.reference_closes && data.reference_closes.spx ? fmtNum(data.reference_closes.spx, 2) : '-,---.--');
+        }
+      }
+      if (popRefBadge && popRefSub) {
+        const mode = (rr4mData && rr4mData.ref_mode) || 'session_close';
+        const timeStr = (rr4mData && rr4mData.ref_time) ? ` @ ${rr4mData.ref_time}` : '';
+        if (mode === 'live_spot' || mode === 'spot') {
+          popRefBadge.textContent = 'Live Spot';
+          popRefBadge.className = 'text-[9px] px-1 py-0.2 rounded font-semibold bg-cyan-950 text-cyan-300 border border-cyan-700';
+          popRefSub.textContent = `Recalibrated to live spot${timeStr}`;
+          popRefSub.className = 'text-[9px] text-cyan-400 font-mono mt-0.5';
+        } else {
+          popRefBadge.textContent = 'Close';
+          popRefBadge.className = 'text-[9px] px-1 py-0.2 rounded font-semibold bg-slate-800 text-slate-300 border border-slate-700';
+          popRefSub.textContent = `Session close baseline${timeStr} (strikes fixed)`;
+          popRefSub.className = 'text-[9px] text-slate-500 font-mono mt-0.5';
+        }
+      }
+
       if (popSkewMetric) {
         const skewSign = (rr4mData.iv_skew !== null && rr4mData.iv_skew !== undefined && rr4mData.iv_skew >= 0) ? '+' : '';
         popSkewMetric.textContent = (rr4mData.iv_skew !== null && rr4mData.iv_skew !== undefined) ? `${skewSign}${fmtNum(rr4mData.iv_skew, 1)} pts` : '-- pts';
@@ -5805,6 +5836,69 @@ function setupRiskReversalPopovers() {
       popoverTs.classList.add('hidden');
     }
   });
+
+  // 4M Skew On-Demand Recalibration & Reset Handlers
+  const btnRecalibrate = document.getElementById('btn-recalibrate-4m-spot');
+  const btnReset = document.getElementById('btn-reset-4m-close');
+  const spinRecalibrate = document.getElementById('spinner-recalibrate-4m');
+  const iconRecalibrate = document.getElementById('icon-recalibrate-4m');
+
+  const triggerRecalibration = async (mode) => {
+    const isNdx = (currentAssetPair === 'NDX');
+    const asset = isNdx ? 'NDX' : 'SPX';
+
+    if (btnRecalibrate) btnRecalibrate.disabled = true;
+    if (btnReset) btnReset.disabled = true;
+    if (mode === 'spot' && spinRecalibrate && iconRecalibrate) {
+      spinRecalibrate.classList.remove('hidden');
+      iconRecalibrate.classList.add('hidden');
+    }
+
+    try {
+      const resp = await fetch('/api/recalibrate_4m_skew', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset, mode })
+      });
+      if (resp.ok) {
+        const result = await resp.json();
+        if (result && result.rr_4m && lastLiveUpdatePayload) {
+          if (isNdx) {
+            if (!lastLiveUpdatePayload.ndx) lastLiveUpdatePayload.ndx = {};
+            lastLiveUpdatePayload.ndx.rr_4m = result.rr_4m;
+          } else {
+            lastLiveUpdatePayload.rr_4m = result.rr_4m;
+          }
+          updateUI(lastLiveUpdatePayload);
+        }
+      } else {
+        console.error('Failed to recalibrate 4M skew:', resp.statusText);
+      }
+    } catch (err) {
+      console.error('Recalibration request error:', err);
+    } finally {
+      if (btnRecalibrate) btnRecalibrate.disabled = false;
+      if (btnReset) btnReset.disabled = false;
+      if (spinRecalibrate && iconRecalibrate) {
+        spinRecalibrate.classList.add('hidden');
+        iconRecalibrate.classList.remove('hidden');
+      }
+    }
+  };
+
+  if (btnRecalibrate) {
+    btnRecalibrate.addEventListener('click', (e) => {
+      e.stopPropagation();
+      triggerRecalibration('spot');
+    });
+  }
+
+  if (btnReset) {
+    btnReset.addEventListener('click', (e) => {
+      e.stopPropagation();
+      triggerRecalibration('session_close');
+    });
+  }
 }
 
 // Start Dashboard on load

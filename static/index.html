@@ -541,6 +541,28 @@
             </div>
           </div>
 
+          <!-- Reference Spot & Recalibration Bar -->
+          <div class="flex items-center justify-between bg-slate-950/80 rounded-lg p-2 border border-slate-800">
+            <div class="flex flex-col">
+              <div class="flex items-center space-x-1.5">
+                <span id="pop-rr4m-ref-label" class="text-[10px] text-slate-400 font-semibold uppercase">SPX Ref</span>
+                <span id="pop-rr4m-ref-price" class="text-xs font-bold font-mono text-cyan-300">-,---.--</span>
+                <span id="pop-rr4m-ref-mode-badge" class="text-[9px] px-1 py-0.2 rounded font-semibold bg-slate-800 text-slate-300 border border-slate-700">Close</span>
+              </div>
+              <div id="pop-rr4m-ref-sub" class="text-[9px] text-slate-500 font-mono mt-0.5">Session close baseline (strikes fixed)</div>
+            </div>
+            <div class="flex items-center space-x-1">
+              <button id="btn-recalibrate-4m-spot" class="px-2 py-1 bg-cyan-950 hover:bg-cyan-900 text-cyan-300 hover:text-cyan-200 border border-cyan-700/60 rounded text-[10px] font-semibold flex items-center space-x-1 transition disabled:opacity-50 cursor-pointer shadow-sm" title="Recalibrate strikes (+10% / -15%) to current live spot price">
+                <span id="spinner-recalibrate-4m" class="hidden animate-spin text-[10px]">⟳</span>
+                <span id="icon-recalibrate-4m">↺</span>
+                <span>Live Spot</span>
+              </button>
+              <button id="btn-reset-4m-close" class="px-1.5 py-1 bg-slate-800/80 hover:bg-slate-700/80 text-slate-400 hover:text-slate-200 border border-slate-700/60 rounded text-[10px] font-medium transition disabled:opacity-50 cursor-pointer" title="Reset strikes back to session close baseline">
+                <span>Reset</span>
+              </button>
+            </div>
+          </div>
+
           <!-- Key Metrics Grid -->
           <div class="grid grid-cols-2 gap-2 bg-slate-950/70 rounded-lg p-2 border border-slate-800/80">
             <div>
@@ -1177,8 +1199,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v8.9 - Robust VIX Futures Backwardation Engine & Neutral Spreads) -->
-  <script src="/static/dashboard.js?v=8.9"></script>
+  <!-- DASHBOARD SCRIPT (v9.0 - 4M Wing Skew On-Demand Recalibration & Reference Spot) -->
+  <script src="/static/dashboard.js?v=9.0"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>
