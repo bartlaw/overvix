@@ -2695,7 +2695,7 @@ function computeDualRibbonSeries(times, assetPct, volPt, beta, alpha = 0) {
   return { xArr: times, vArr, minArr, maxArr };
 }
 
-function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20, clusterMinutes = 30) {
+function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20, clusterMinutes = 30, maxPerDay = 0) {
   if (!times || !volRaw || times.length === 0 || volRaw.length === 0) return [];
 
   // Helper to parse ISO / date-time strings safely to milliseconds
@@ -2768,9 +2768,12 @@ function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20, clusterMinut
       });
     }
 
-    // Suppress clustered / proximate highs: if multiple highs are near each other, only mark the bigger one
-    if (sessionHighs.length > 1 && clusterMinutes > 0) {
-      // Sort candidate peaks by VIX level descending (highest peak first)
+    // Multi-day constraint: on >= 5D charts (maxPerDay === 1), mark at most 1 high per day (the day's peak VIX)
+    if (maxPerDay === 1 && sessionHighs.length > 0) {
+      const dayPeak = sessionHighs.reduce((best, curr) => curr.vixLevel > best.vixLevel ? curr : best, sessionHighs[0]);
+      confirmedHighs.push(dayPeak);
+    } else if (sessionHighs.length > 1 && clusterMinutes > 0) {
+      // Suppress clustered / proximate highs: if multiple highs are near each other, only mark the bigger one
       const sorted = [...sessionHighs].sort((a, b) => b.vixLevel - a.vixLevel);
       const suppressed = new Set();
       const kept = [];
@@ -2989,12 +2992,14 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   }
 
   // Detect distinct new VIX / VXN highs across sessions (restricted strictly up to 10D: 1D, 5D, 10D)
+  // On >= 5D charts (5D, 10D), mark at most 1 high per day (the day's peak VIX). On 1D, mark distinct intraday highs.
   const isEligibleTf = (targetTf === '1D' || targetTf === '5D' || targetTf === '10D');
+  const maxHighsPerDay = (targetTf === '1D') ? 0 : 1;
   const rawVolSeries = (anchoredSeries && anchoredSeries.volRaw && anchoredSeries.volRaw.length === times.length)
     ? anchoredSeries.volRaw
     : getRawSpotVolSeries(c, isNdx).vol;
   const highEvents = (isVixHighsMarked && isEligibleTf && rawVolSeries && rawVolSeries.length > 0)
-    ? findDistinctVixHighs(times, rawVolSeries, 0.20, 30)
+    ? findDistinctVixHighs(times, rawVolSeries, 0.20, 30, maxHighsPerDay)
     : [];
 
   // Add subtle vertical dotted reference line through SPX & Overvix Residual for each VIX high
