@@ -2828,10 +2828,45 @@ function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20, clusterMinut
       if (!weeklyGroups[wk]) weeklyGroups[wk] = [];
       weeklyGroups[wk].push(h);
     }
+
+    // Map each week key to its boundary indices in the times series
+    const weekBounds = {};
+    for (let i = 0; i < times.length; i++) {
+      const wk = getWeekKey(times[i]);
+      if (!weekBounds[wk]) {
+        weekBounds[wk] = { firstIdx: i, lastIdx: i };
+      } else {
+        weekBounds[wk].lastIdx = i;
+      }
+    }
+
     const weeklyHighs = [];
     for (const wk of Object.keys(weeklyGroups)) {
       const pts = weeklyGroups[wk];
       const best = pts.reduce((b, c) => c.vixLevel > b.vixLevel ? c : b, pts[0]);
+      
+      const wb = weekBounds[wk];
+      if (wb) {
+        // Check if candidate high is on the start edge of the week (e.g. Monday morning open)
+        const isStartEdge = (best.idx === wb.firstIdx || (best.idx <= wb.firstIdx + 1 && String(best.time).slice(11) <= '10:00'));
+        if (isStartEdge && wb.firstIdx > 0) {
+          const priorWeekClose = volRaw[wb.firstIdx - 1];
+          // If high is on edge of week and <= prior close (or lower), it's a downward continuation, not a high
+          if (typeof priorWeekClose === 'number' && best.vixLevel <= priorWeekClose) {
+            continue;
+          }
+        }
+
+        // Check if candidate high is on the end edge of the week (e.g. Friday close)
+        const isEndEdge = (best.idx === wb.lastIdx);
+        if (isEndEdge && wb.lastIdx < volRaw.length - 1) {
+          const nextWeekOpen = volRaw[wb.lastIdx + 1];
+          if (typeof nextWeekOpen === 'number' && best.vixLevel <= nextWeekOpen) {
+            continue;
+          }
+        }
+      }
+
       weeklyHighs.push(best);
     }
     weeklyHighs.sort((a, b) => a.idx - b.idx);
