@@ -3072,9 +3072,16 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     ? findDistinctVixHighs(times, rawVolSeries, 0.20, 30, aggregationMode)
     : [];
 
+  // Determine lowest low / maximum VIX among detected highs
+  const maxVixLevel = (isVixHighsMarked && isEligibleTf && highEvents.length > 0)
+    ? Math.max(...highEvents.map(e => e.vixLevel))
+    : -Infinity;
+
   // Add subtle vertical dotted reference line through SPX & Overvix Residual for each VIX high
+  // The lowest low (chart extreme peak) is emphasized with a red dotted line
   if (isVixHighsMarked && isEligibleTf && highEvents.length > 0) {
     highEvents.forEach(h => {
+      const isLowestLow = (Math.abs(h.vixLevel - maxVixLevel) < 1e-4);
       anchorShapes.push({
         type: 'line',
         xref: 'x',
@@ -3084,8 +3091,8 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         y0: 0,
         y1: 1,
         line: {
-          color: 'rgba(245, 158, 11, 0.40)',
-          width: 1,
+          color: isLowestLow ? 'rgba(239, 68, 68, 0.65)' : 'rgba(245, 158, 11, 0.40)',
+          width: isLowestLow ? 1.5 : 1,
           dash: 'dot'
         },
         layer: 'below'
@@ -3395,9 +3402,13 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
 
     // VIX / VXN Highs Marker Trace on Volatility Axis (yaxis2) - up to 1M only
     if (isVixHighsMarked && isEligibleTf && highEvents.length > 0) {
+      const maxVix = Math.max(...highEvents.map(e => e.vixLevel));
       const highX = highEvents.map(e => e.time);
       const highY = highEvents.map(e => volPt[e.idx]);
+      const highColors = highEvents.map(e => (Math.abs(e.vixLevel - maxVix) < 1e-4 ? '#EF4444' : '#F59E0B'));
+      const highSizes = highEvents.map(e => (Math.abs(e.vixLevel - maxVix) < 1e-4 ? 13 : 11));
       const highCustom = highEvents.map(e => {
+        const isLowestLow = (Math.abs(e.vixLevel - maxVix) < 1e-4);
         const sPct = assetPct[e.idx];
         const sStr = (typeof sPct === 'number' && !isNaN(sPct)) ? (sPct >= 0 ? `+${sPct.toFixed(2)}%` : `${sPct.toFixed(2)}%`) : '-';
         const vPt = volPt[e.idx];
@@ -3405,13 +3416,15 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         const rawSpot = (anchoredSeries.spotRaw && anchoredSeries.spotRaw[e.idx] !== undefined)
           ? (typeof anchoredSeries.spotRaw[e.idx] === 'number' ? anchoredSeries.spotRaw[e.idx].toFixed(2) : anchoredSeries.spotRaw[e.idx])
           : '-';
+        const titleTag = isLowestLow ? `🚨 ${volLabel} High (Chart Lowest Low)` : `🔺 ${volLabel} High`;
         return [
           volLabel,                    // 0
           e.vixLevel.toFixed(2),       // 1
           assetLabel,                  // 2
           sStr,                        // 3
           vPtStr,                      // 4
-          rawSpot                      // 5
+          rawSpot,                     // 5
+          titleTag                     // 6
         ];
       });
 
@@ -3423,13 +3436,13 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         name: `${volLabel} Highs`,
         marker: {
           symbol: isVolInverted ? 'triangle-down' : 'triangle-up',
-          size: 11,
-          color: '#F59E0B',
+          size: highSizes,
+          color: highColors,
           line: { color: '#FFFFFF', width: 1.5 }
         },
         xaxis: 'x',
         yaxis: 'y2',
-        hovertemplate: `<b>🔺 %{customdata[0]} High: %{customdata[1]}</b><br>Time: %{x|${timeHoverFmt}}<br>${assetLabel}: %{customdata[3]} (%{customdata[5]})<br>${volLabel} Move: %{customdata[4]} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`,
+        hovertemplate: `<b>%{customdata[6]}: %{customdata[1]}</b><br>Time: %{x|${timeHoverFmt}}<br>${assetLabel}: %{customdata[3]} (%{customdata[5]})<br>${volLabel} Move: %{customdata[4]} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`,
         showlegend: true
       };
       plotTraces.push(traceVixHighMarks);
