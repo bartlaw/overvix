@@ -4564,6 +4564,38 @@ function updateUI(data) {
           popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700';
         }
       }
+
+      // Populate Reference Spot Bar inside #popover-rr25
+      const pop25RefLabel = document.getElementById('pop-rr25-ref-label');
+      const pop25RefPrice = document.getElementById('pop-rr25-ref-price');
+      const pop25RefBadge = document.getElementById('pop-rr25-ref-mode-badge');
+      const pop25RefSub = document.getElementById('pop-rr25-ref-sub');
+
+      if (pop25RefLabel) pop25RefLabel.textContent = isNdx ? "QQQ Ref" : "SPX Ref";
+      if (pop25RefPrice) {
+        if (rrData && rrData.ref_spot) {
+          pop25RefPrice.textContent = fmtNum(rrData.ref_spot, 2);
+        } else {
+          pop25RefPrice.textContent = isNdx ? (data.ndx && data.ndx.market ? fmtNum(data.ndx.market.ndx_close / 41.0, 2) : '---.--')
+                                            : (data.reference_closes && data.reference_closes.spx ? fmtNum(data.reference_closes.spx, 2) : '-,---.--');
+        }
+      }
+      if (pop25RefBadge && pop25RefSub) {
+        const mode = (rrData && rrData.ref_mode) || 'session_close';
+        const timeStr = (rrData && rrData.ref_time) ? ` @ ${rrData.ref_time}` : '';
+        if (mode === 'live_spot' || mode === 'spot') {
+          pop25RefBadge.textContent = 'Live Spot';
+          pop25RefBadge.className = 'text-[9px] px-1 py-0.2 rounded font-semibold bg-cyan-950 text-cyan-300 border border-cyan-700';
+          pop25RefSub.textContent = `Recalibrated to live spot${timeStr}`;
+          pop25RefSub.className = 'text-[9px] text-cyan-400 font-mono mt-0.5';
+        } else {
+          pop25RefBadge.textContent = 'Close';
+          pop25RefBadge.className = 'text-[9px] px-1 py-0.2 rounded font-semibold bg-slate-800 text-slate-300 border border-slate-700';
+          pop25RefSub.textContent = `Session close baseline${timeStr} (strikes fixed)`;
+          pop25RefSub.className = 'text-[9px] text-slate-500 font-mono mt-0.5';
+        }
+      }
+
       if (popSkew) popSkew.textContent = `${fmtPts(rrVal)} pts`;
       if (popStatus) {
         popStatus.textContent = rrVal >= 7.5 ? 'ELEVATED SKEW (Fear)' : (rrVal < 3.5 ? 'COMPLACENT (Low Skew)' : 'NORMAL SKEW');
@@ -5897,6 +5929,69 @@ function setupRiskReversalPopovers() {
     btnReset.addEventListener('click', (e) => {
       e.stopPropagation();
       triggerRecalibration('session_close');
+    });
+  }
+
+  // 25Δ Skew On-Demand Recalibration & Reset Handlers
+  const btnRecalibrate25 = document.getElementById('btn-recalibrate-25-spot');
+  const btnReset25 = document.getElementById('btn-reset-25-close');
+  const spinRecalibrate25 = document.getElementById('spinner-recalibrate-25');
+  const iconRecalibrate25 = document.getElementById('icon-recalibrate-25');
+
+  const triggerRecalibration25 = async (mode) => {
+    const isNdx = (currentAssetPair === 'NDX');
+    const asset = isNdx ? 'NDX' : 'SPX';
+
+    if (btnRecalibrate25) btnRecalibrate25.disabled = true;
+    if (btnReset25) btnReset25.disabled = true;
+    if (mode === 'spot' && spinRecalibrate25 && iconRecalibrate25) {
+      spinRecalibrate25.classList.remove('hidden');
+      iconRecalibrate25.classList.add('hidden');
+    }
+
+    try {
+      const resp = await fetch('/api/recalibrate_25d_skew', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset, mode })
+      });
+      if (resp.ok) {
+        const result = await resp.json();
+        if (result && result.risk_reversal && lastLiveUpdatePayload) {
+          if (isNdx) {
+            if (!lastLiveUpdatePayload.ndx) lastLiveUpdatePayload.ndx = {};
+            lastLiveUpdatePayload.ndx.risk_reversal = result.risk_reversal;
+          } else {
+            lastLiveUpdatePayload.risk_reversal = result.risk_reversal;
+          }
+          updateUI(lastLiveUpdatePayload);
+        }
+      } else {
+        console.error('Failed to recalibrate 25Δ skew:', resp.statusText);
+      }
+    } catch (err) {
+      console.error('25Δ Recalibration request error:', err);
+    } finally {
+      if (btnRecalibrate25) btnRecalibrate25.disabled = false;
+      if (btnReset25) btnReset25.disabled = false;
+      if (spinRecalibrate25 && iconRecalibrate25) {
+        spinRecalibrate25.classList.add('hidden');
+        iconRecalibrate25.classList.remove('hidden');
+      }
+    }
+  };
+
+  if (btnRecalibrate25) {
+    btnRecalibrate25.addEventListener('click', (e) => {
+      e.stopPropagation();
+      triggerRecalibration25('spot');
+    });
+  }
+
+  if (btnReset25) {
+    btnReset25.addEventListener('click', (e) => {
+      e.stopPropagation();
+      triggerRecalibration25('session_close');
     });
   }
 }
