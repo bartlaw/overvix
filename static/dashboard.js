@@ -3819,12 +3819,15 @@ function renderVixFuturesCurveChart(vf, spotVix) {
     },
     hovertemplate: validContracts.map(c => {
       const spVal = (typeof c.diff === 'number') ? c.diff : (typeof c.spread === 'number' ? c.spread : null);
+      const isInv = (spVal !== null && spVal < -0.01);
+      const isFlat = (spVal !== null && Math.abs(spVal) <= 0.01);
+      const spType = isInv ? 'Backwardation' : (isFlat ? 'Flat' : 'Contango');
       const spStr = (spVal !== null) ? `${spVal >= 0 ? '+' : ''}${spVal.toFixed(2)} pts` : '—';
       const pctStr = (typeof c.contango_pct === 'number') ? `${c.contango_pct >= 0 ? '+' : ''}${c.contango_pct.toFixed(2)}%` : '—';
       return `<b>${c.tenor} &bull; ${c.month_name || ''} (${c.symbol || c.localSymbol})</b><br>` +
              `Price: <b>${c.price.toFixed(2)}</b><br>` +
              `DTE: <b>${c.dte || '--'}d</b><br>` +
-             `Roll Contango: <b>${pctStr}</b> (${spStr})` +
+             `Roll: <b>${pctStr}</b> (${spStr} &bull; ${spType})` +
              `<extra></extra>`;
     })
   });
@@ -3970,18 +3973,20 @@ function updateVixFuturesUI(vf, spotVix) {
   // Populate M1..M8 Term Structure Table
   if (popTableBody && Array.isArray(vf.contracts)) {
     popTableBody.innerHTML = vf.contracts.map((c, i) => {
-      const isInv = Boolean(c.is_inverted);
+      const diffVal = (typeof c.diff === 'number') ? c.diff : (typeof c.spread === 'number' ? c.spread : null);
+      const isInv = Boolean(c.is_inverted) || (diffVal !== null && diffVal < -0.01);
+      const isFlat = Boolean(c.is_flat) || (diffVal !== null && Math.abs(diffVal) <= 0.01);
       const isLast = (i === vf.contracts.length - 1);
-      const spreadStr = (typeof c.diff === 'number') ? `${c.diff >= 0 ? '+' : ''}${c.diff.toFixed(2)}` : (isLast ? '—' : '-');
+      const spreadStr = (diffVal !== null) ? `${diffVal >= 0 ? '+' : ''}${diffVal.toFixed(2)}` : (isLast ? '—' : '-');
       const pctStr = (typeof c.contango_pct === 'number') ? `${c.contango_pct >= 0 ? '+' : ''}${c.contango_pct.toFixed(2)}%` : (isLast ? '—' : '-');
-      const spreadColor = isLast ? 'text-slate-500' : (isInv ? 'text-red-400 font-bold' : 'text-emerald-400 font-semibold');
-      const rowBg = isInv ? 'bg-red-950/20' : '';
+      const spreadColor = isLast ? 'text-slate-500' : (isInv ? 'text-red-400 font-bold' : (isFlat ? 'text-slate-400 font-medium' : 'text-emerald-400 font-semibold'));
+      const rowBg = isInv ? 'bg-red-950/20' : (isFlat ? 'bg-slate-900/40' : '');
       const expStr = c.expiry && c.expiry.length >= 10 ? c.expiry.slice(5) : (c.expiry || '-');
       const dteStr = (c.dte !== null && c.dte !== undefined) ? `(${c.dte}d)` : '';
 
       return `
         <tr class="hover:bg-slate-800/40 transition ${rowBg}">
-          <td class="py-1 px-1.5 font-bold ${isInv ? 'text-red-300' : 'text-white'}">${c.tenor}</td>
+          <td class="py-1 px-1.5 font-bold ${isInv ? 'text-red-300' : (isFlat ? 'text-slate-300' : 'text-white')}">${c.tenor}</td>
           <td class="py-1 px-1 text-slate-300 whitespace-nowrap">${c.month_name} <span class="text-slate-500 text-[9px]">${c.symbol}</span></td>
           <td class="py-1 px-1 text-slate-400 whitespace-nowrap">${expStr} <span class="text-cyan-400 text-[9px]">${dteStr}</span></td>
           <td class="py-1 px-1 text-right text-white font-bold">${c.price !== null ? c.price.toFixed(2) : '-.--'}</td>

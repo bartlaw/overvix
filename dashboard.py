@@ -2324,7 +2324,8 @@ def compute_live_payload() -> Dict[str, Any]:
                 c_pct = (diff / p1) * 100.0
                 items[i]['diff'] = round(diff, 2)
                 items[i]['contango_pct'] = round(c_pct, 2)
-                items[i]['is_inverted'] = bool(diff < 0)
+                items[i]['is_inverted'] = bool(diff < -0.01)
+                items[i]['is_flat'] = bool(abs(diff) <= 0.01)
 
         m1_price = items[0].get('price') if n > 0 else None
         m2_price = items[1].get('price') if n > 1 else None
@@ -2337,7 +2338,7 @@ def compute_live_payload() -> Dict[str, Any]:
         if m1_price and m2_price and m1_price > 0:
             m1_m2_diff = round(m2_price - m1_price, 2)
             m1_m2_pct = round((m1_m2_diff / m1_price) * 100.0, 2)
-            is_front_inverted = bool(m1_m2_diff < 0)
+            is_front_inverted = bool(m1_m2_diff < -0.01)
 
         m4_m7_diff = None
         m4_m7_pct = None
@@ -2345,40 +2346,65 @@ def compute_live_payload() -> Dict[str, Any]:
         if m4_price and m7_price and m4_price > 0:
             m4_m7_diff = round(m7_price - m4_price, 2)
             m4_m7_pct = round((m4_m7_diff / m4_price) * 100.0, 2)
-            is_mid_inverted = bool(m4_m7_diff < 0)
+            is_mid_inverted = bool(m4_m7_diff < -0.01)
 
         pair_diffs = [it['diff'] for it in items[:-1] if it.get('diff') is not None]
-        inv_count = sum(1 for d in pair_diffs if d < 0)
+        inv_count = sum(1 for d in pair_diffs if d < -0.01)
+        flat_count = sum(1 for d in pair_diffs if abs(d) <= 0.01)
         total_pairs = len(pair_diffs)
 
         spot_basis = None
         if spot_vix and m1_price:
             spot_basis = round(spot_vix - m1_price, 2)
 
-        if total_pairs >= 3 and inv_count >= total_pairs - 1 and is_front_inverted and (is_mid_inverted or total_pairs <= 3):
+        # Macro curve slope: M1 vs back month (M7 or last available)
+        is_macro_inverted = bool(m1_price and m7_price and (m7_price - m1_price) < -0.01)
+
+        # Standard Classification:
+        # 1. FULL BACKWARDATION:
+        #    Front is inverted (M1/M2 < 0) AND:
+        #    - mid-curve is inverted (M4/M7 < 0), OR
+        #    - macro curve is inverted (M1 > M7), OR
+        #    - majority of adjacent pairs are inverted (>= half of pairs).
+        if is_front_inverted and (is_mid_inverted or is_macro_inverted or (total_pairs > 0 and inv_count >= (total_pairs + 1) // 2)):
             regime = "FULL BACKWARDATION"
             badge = "FULL BACKWARDATION"
             badge_class = "bg-red-950/90 text-red-300 border border-red-700 animate-pulse font-bold"
             tag = "🚨 FULL BACKWARDATION"
-            desc = f"Full Curve Backwardation: {inv_count} of {total_pairs} monthly spreads inverted. Front M1/M2 contango is {m1_m2_pct:+.2f}% ({m1_m2_diff:+.2f} pts). Severe persistent stress."
-        elif is_front_inverted and not is_mid_inverted:
+            desc = f"Full Curve Backwardation: {inv_count} of {total_pairs} monthly spreads inverted. Front M1/M2 contango is {m1_m2_pct:+.2f}% ({m1_m2_diff:+.2f} pts). Severe persistent stress across term structure."
+        # 2. FRONT BACKWARDATION:
+        #    Front is inverted (M1/M2 < 0), but mid/back curve remains in contango.
+        elif is_front_inverted and not is_mid_inverted and not is_macro_inverted:
             regime = "FRONT BACKWARDATION"
             badge = "FRONT BACKWARDATION"
             badge_class = "bg-amber-950/80 text-amber-300 border border-amber-800 font-bold"
             tag = "⚠️ FRONT BACKWARDATION"
             desc = f"Front-Month Backwardation: Near-term panic (M1/M2: {m1_m2_pct:+.2f}%), but back curve remains in contango (M4/M7: {m4_m7_pct:+.2f}%). Localized event risk."
+        # 3. BELLY INVERSION:
+        #    Front is in contango (M1/M2 >= 0), but mid/back curve inverts (M4/M7 < 0).
         elif not is_front_inverted and is_mid_inverted:
             regime = "BELLY INVERSION"
             badge = "BELLY INVERSION"
             badge_class = "bg-rose-950/80 text-rose-300 border border-rose-800 font-bold"
             tag = "⚠️ BELLY INVERSION"
             desc = f"Mid-Curve Inversion: Front roll is in contango, but back curve inverts (M4/M7: {m4_m7_pct:+.2f}%). Intermediate term stress."
-        elif m1_m2_pct is not None and 0.0 <= m1_m2_pct < 1.0:
+        # Fallback for any front inversion not caught by strict rules
+        elif is_front_inverted:
+            regime = "FRONT BACKWARDATION"
+            badge = "FRONT BACKWARDATION"
+            badge_class = "bg-amber-950/80 text-amber-300 border border-amber-800 font-bold"
+            tag = "⚠️ FRONT BACKWARDATION"
+            desc = f"Front-Month Backwardation: Near-term inversion (M1/M2: {m1_m2_pct:+.2f}%). Event risk."
+        # 4. FLATTENING:
+        #    Front roll contango is very narrow (0.0% <= M1/M2 < 1.0%), and curve is not inverted.
+        elif m1_m2_pct is not None and 0.0 <= m1_m2_pct < 1.0 and not is_macro_inverted:
             regime = "FLATTENING"
             badge = "FLATTENING"
             badge_class = "bg-slate-800 text-amber-200 border border-slate-700 font-semibold"
             tag = "FLATTENING"
             desc = f"Curve Flattening: Front contango compressed near zero (M1/M2: {m1_m2_pct:+.2f}%). Pre-inversion transition."
+        # 5. CONTANGO:
+        #    Normal upward-sloping curve (M1/M2 >= 1.0% and M7 >= M1).
         else:
             regime = "CONTANGO"
             badge = "CONTANGO"
