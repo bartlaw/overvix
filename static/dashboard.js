@@ -3773,7 +3773,7 @@ function updateVixFuturesUI(vf, spotVix) {
 
   if (tagRegime) {
     tagRegime.textContent = shortText;
-    tagRegime.className = `text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider ${badgeClass}`;
+    tagRegime.className = `text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap ${badgeClass}`;
   }
 
   // Card 5 spreads subtitle

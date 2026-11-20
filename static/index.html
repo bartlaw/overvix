@@ -294,18 +294,18 @@
 
       <!-- Card 5: Ratio / Premium (VIX/VIX3M or VXN/VIX) & VIX Futures Term Structure -->
       <div id="card-term-structure" class="relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none">
-        <div class="flex items-center justify-between">
+        <div class="flex items-start justify-between">
           <span id="lbl-kpi-ratio" class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">VIX / VIX3M</span>
-          <div class="flex items-center space-x-1.5">
-            <span id="kpi-ratio-badge" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-semibold">---</span>
-            <span id="btn-ts-info" class="text-[11px] text-slate-400 hover:text-amber-400 transition cursor-pointer" title="View Full VIX Futures Term Structure">ⓘ</span>
+          <div class="flex flex-col items-end space-y-1">
+            <div class="flex items-center space-x-1.5">
+              <span id="kpi-ratio-badge" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-semibold">---</span>
+              <span id="btn-ts-info" class="text-[11px] text-slate-400 hover:text-amber-400 transition cursor-pointer" title="View Full VIX Futures Term Structure">ⓘ</span>
+            </div>
+            <span id="tag-futures-regime" class="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider bg-slate-800 text-slate-300 border border-slate-700">FUT: ---</span>
           </div>
         </div>
         <div class="mt-2">
-          <div class="flex items-baseline justify-between">
-            <div id="kpi-ratio-val" class="text-xl font-bold font-mono tracking-tight text-white">-.----</div>
-            <span id="tag-futures-regime" class="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider bg-slate-800 text-slate-300 border border-slate-700">FUT: ---</span>
-          </div>
+          <div id="kpi-ratio-val" class="text-xl font-bold font-mono tracking-tight text-white">-.----</div>
           <div class="flex items-center justify-between mt-1 text-[10px]">
             <span id="lbl-kpi-ratio-sub" class="text-slate-400">Inversion @ &ge; 1.00</span>
             <span id="lbl-futures-spreads" class="font-mono text-slate-400">M1/M2: -.--%</span>
