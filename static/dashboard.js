@@ -275,9 +275,10 @@ const VoiceManager = {
   cooldownMs: 60000,
   lastTroughKey: null,
   isInitialized: false,
+  selectedVoiceURI: localStorage.getItem('overvix_voice_uri') || '',
 
   speak(text) {
-    if (!this.enabled && text !== "Voice alerts active" && !text.startsWith("New market low")) {
+    if (!this.enabled && text !== "Voice alerts active" && text !== "Voice selected." && !text.startsWith("New market low")) {
       return;
     }
     if (!('speechSynthesis' in window)) {
@@ -293,12 +294,17 @@ const VoiceManager = {
       
       const voices = window.speechSynthesis.getVoices();
       if (voices && voices.length > 0) {
-        const enVoice = voices.find(v => v.lang && v.lang.startsWith('en') && (
-          v.name.includes('Natural') || v.name.includes('Online') || v.name.includes('Google') || 
-          v.name.includes('Microsoft') || v.name.includes('David') || v.name.includes('Zira') || 
-          v.name.includes('Aria') || v.name.includes('Jenny')
-        ));
-        if (enVoice) utter.voice = enVoice;
+        if (this.selectedVoiceURI) {
+          const match = voices.find(v => v.voiceURI === this.selectedVoiceURI || v.name === this.selectedVoiceURI);
+          if (match) utter.voice = match;
+        } else {
+          const enVoice = voices.find(v => v.lang && v.lang.startsWith('en') && (
+            v.name.includes('Natural') || v.name.includes('Online') || v.name.includes('Google') || 
+            v.name.includes('Microsoft') || v.name.includes('David') || v.name.includes('Zira') || 
+            v.name.includes('Aria') || v.name.includes('Jenny')
+          ));
+          if (enVoice) utter.voice = enVoice;
+        }
       }
       
       window.speechSynthesis.speak(utter);
@@ -400,6 +406,49 @@ if (btnSound) {
   });
 }
 
+// Populate Voice Selector Dropdown
+function populateVoiceSelector() {
+  const select = document.getElementById('select-voice');
+  if (!select || !('speechSynthesis' in window)) return;
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices || voices.length === 0) return;
+
+  const cur = VoiceManager.selectedVoiceURI;
+  select.innerHTML = '<option value="">System Default</option>';
+
+  const sorted = [...voices].sort((a, b) => {
+    const aEn = a.lang && a.lang.startsWith('en');
+    const bEn = b.lang && b.lang.startsWith('en');
+    if (aEn && !bEn) return -1;
+    if (!aEn && bEn) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  sorted.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v.voiceURI || v.name;
+    if (cur && (v.voiceURI === cur || v.name === cur)) {
+      opt.selected = true;
+    }
+    opt.textContent = `${v.name} (${v.lang})${v.default ? ' — Default' : ''}`;
+    select.appendChild(opt);
+  });
+}
+
+if ('speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = populateVoiceSelector;
+  populateVoiceSelector();
+}
+
+const selectVoice = document.getElementById('select-voice');
+if (selectVoice) {
+  selectVoice.addEventListener('change', (e) => {
+    VoiceManager.selectedVoiceURI = e.target.value;
+    localStorage.setItem('overvix_voice_uri', e.target.value);
+    VoiceManager.speak("Voice selected.");
+  });
+}
+
 // Test Voice Button in Config Modal
 const btnTestVoice = document.getElementById('btn-test-voice');
 if (btnTestVoice) {
@@ -424,6 +473,7 @@ btnSettings.addEventListener('click', () => {
   if (inputSpx) inputSpx.value = currentSpxThreshold;
   if (inputNdx) inputNdx.value = currentNdxThreshold;
   updateVoiceStatusUI();
+  populateVoiceSelector();
   modalSettings.classList.remove('hidden');
 });
 modalClose.addEventListener('click', () => modalSettings.classList.add('hidden'));
@@ -3199,6 +3249,17 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     }
   }
 
+  // Map high events by timestamp index for instant lookup in unified hover
+  const highEventMap = {};
+  if (isVixHighsMarked && isEligibleTf && highEvents.length > 0) {
+    highEvents.forEach((h, i) => {
+      const isLowestLow = (i === lowestLowEventIdx);
+      highEventMap[h.idx] = isLowestLow 
+        ? "  <span style='color:#EF4444;font-weight:bold'>🚨 Lowest Low</span>" 
+        : "  <span style='color:#F59E0B;font-weight:bold'>🔺 VIX High</span>";
+    });
+  }
+
   // Add subtle vertical dotted reference line through SPX & Overvix Residual for each VIX high
   // Only the single lowest low event is emphasized with a red dotted line; all other highs are amber
   if (isVixHighsMarked && isEligibleTf && highEvents.length > 0) {
@@ -3293,7 +3354,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     line: { color: assetColor, width: 1.8 },
     xaxis: 'x',
     yaxis: 'y',
-    hovertemplate: `<b>%{x|${timeHoverFmt}}%{customdata[2]}</b><br>${assetHoverLabel}: %{customdata[1]}%<br>${assetLabel}: %{customdata[0]}<extra></extra>`
+    hoverinfo: 'skip'
   };
 
   // Shaded Divergence Ribbon: dual-color fill area between Spot % and Vol (in % units) when Beta Scaled and Invert Vol are active
@@ -3353,12 +3414,18 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     }
   }
 
-  // Vol Customdata: [volRaw, instantaneous Overvix residual, volPtStr]
+  // Vol Customdata for Unified Single Tooltip:
+  // [0: rawSpot, 1: sPctStr, 2: rawVol, 3: vPtStr, 4: residStr, 5: gthTag, 6: highTag, 7: assetLabel, 8: volLabel]
   const volCustomdata = times.map((t, i) => {
+    const rawSpot = (anchoredSeries.spotRaw && anchoredSeries.spotRaw[i] !== undefined)
+      ? (typeof anchoredSeries.spotRaw[i] === 'number' ? anchoredSeries.spotRaw[i].toFixed(2) : anchoredSeries.spotRaw[i])
+      : '-';
+    const sPct = assetPct[i] || 0;
+    const sPctStr = (typeof sPct === 'number' && !isNaN(sPct)) ? (sPct >= 0 ? `+${sPct.toFixed(2)}%` : `${sPct.toFixed(2)}%`) : '-';
+
     const raw = (anchoredSeries.volRaw && anchoredSeries.volRaw[i] !== undefined) 
       ? (typeof anchoredSeries.volRaw[i] === 'number' ? anchoredSeries.volRaw[i].toFixed(2) : anchoredSeries.volRaw[i]) 
       : '-';
-    const sPct = assetPct[i] || 0;
     const vPt = volPt[i] || 0;
     // Expected VIX move = alpha + slope * sPct = alpha - beta * sPct
     // For Prior Close anchor or 1D unanchored session baseline, alpha is the daily intercept from the baseline regression
@@ -3366,9 +3433,12 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     const alpha = isSessionBaseline ? rawIntercept : 0;
     // Overvix residual = vPt - (alpha - beta * sPct) = vPt - alpha + beta * sPct
     const resid = vPt - alpha + beta * sPct;
-    const residStr = (resid >= 0 ? `+${resid.toFixed(2)}` : resid.toFixed(2));
+    const residStr = (resid >= 0 ? `+${resid.toFixed(2)} pts` : `${resid.toFixed(2)} pts`);
     const vPtStr = (typeof vPt === 'number' && !isNaN(vPt)) ? (vPt >= 0 ? `+${vPt.toFixed(2)}` : vPt.toFixed(2)) : '-';
-    return [raw, residStr, vPtStr];
+    const gthTag = (gthChartOn && c.is_gth && c.is_gth[i] === 1) ? ' [ES-Adj]' : '';
+    const highTag = highEventMap[i] || '';
+
+    return [rawSpot, sPctStr, raw, vPtStr, residStr, gthTag, highTag, assetLabel, volLabel];
   });
 
   const traceVol = {
@@ -3382,9 +3452,11 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     line: { color: volColor, width: 1.8 },
     xaxis: 'x',
     yaxis: 'y2',
-    hovertemplate: isBetaScaled
-      ? `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<br>${volLabel}: %{customdata[0]}<br>Overvix Residual: %{customdata[1]} pts<extra></extra>`
-      : `<b>%{x|${timeHoverFmt}}</b><br>${volHoverLabel}: %{customdata[2]} pts<br>${volLabel}: %{customdata[0]}<extra></extra>`
+    hovertemplate: 
+      `<b>%{x|${timeHoverFmt}}%{customdata[5]}</b>%{customdata[6]}<br>` +
+      `%{customdata[7]}: <b>%{customdata[0]}</b> (%{customdata[1]})<br>` +
+      `%{customdata[8]}: <b>%{customdata[2]}</b> (%{customdata[3]} pts) · Resid: <b>%{customdata[4]}</b><br>` +
+      `<span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`
   };
 
     // Subplot 2: Instantaneous Overvix Residual Monitor
@@ -3589,7 +3661,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         },
         xaxis: 'x',
         yaxis: 'y2',
-        hovertemplate: `<b>%{customdata[6]}: %{customdata[1]}</b><br>Time: %{x|${timeHoverFmt}}<br>${assetLabel}: %{customdata[3]} (%{customdata[5]})<br>${volLabel} Move: %{customdata[4]} pts<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`,
+        hoverinfo: 'skip',
         showlegend: true
       };
       plotTraces.push(traceVixHighMarks);
@@ -3613,6 +3685,12 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       dragmode: false,
       clickmode: 'event',
       hoverdistance: 50,
+      hoverlabel: {
+        bgcolor: 'rgba(15, 23, 42, 0.95)',
+        bordercolor: '#00E5FF',
+        font: { family: 'monospace', size: 11, color: '#F8FAFC' },
+        align: 'left'
+      },
       margin: { l: 55, r: 60, t: 25, b: 35 },
       xaxis: {
         anchor: 'y3',
