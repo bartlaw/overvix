@@ -341,7 +341,7 @@ const VoiceManager = {
         this.lastTroughKey = eventKey;
         const dir = (assetPct >= 0) ? 'up' : 'down';
         const absPct = Math.abs(assetPct).toFixed(2);
-        const phrase = `New market low. ${assetName} ${dir} ${absPct} percent, ${volLabel} at ${vixLevel.toFixed(2)}.`;
+        const phrase = `New ${volLabel} high. ${assetName} ${dir} ${absPct} percent, ${volLabel} at ${vixLevel.toFixed(2)}.`;
         this.speak(phrase);
       }
     }
@@ -489,7 +489,7 @@ if (btnTestVoice) {
     const isNdx = (currentAssetPair === 'NDX');
     const asset = isNdx ? "Nasdaq" : "SPX";
     const vol = isNdx ? "VXN" : "VIX";
-    VoiceManager.speak(`New market low. ${asset} down 1.45 percent, ${vol} at 24.69.`, true);
+    VoiceManager.speak(`New ${vol} high. ${asset} down 1.45 percent, ${vol} at 24.69.`, true);
   });
 }
 
