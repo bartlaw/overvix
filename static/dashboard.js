@@ -2719,6 +2719,30 @@ function computeAnchoredSeries(c, isNdx) {
       }
     }
 
+    // For the active/latest session day:
+    // 1. If market is currently open (is_rth_active === true), never inject an official 16:00 terminal close.
+    // 2. If session is completed/closed, ensure official close is anchored strictly to the official Cash Market Bell close from bootstrap.market (never post-market curb prints)!
+    const latestDay = days[days.length - 1];
+    if (cachedBootstrap) {
+      if (cachedBootstrap.is_rth_active === true) {
+        delete officialCloses[latestDay];
+      } else {
+        const liveSpot = isNdx
+          ? (cachedBootstrap.ndx && cachedBootstrap.ndx.market ? cachedBootstrap.ndx.market.current : null)
+          : (cachedBootstrap.market && cachedBootstrap.market.spx ? cachedBootstrap.market.spx.current : null);
+        const liveVol = isNdx
+          ? (cachedBootstrap.ndx && cachedBootstrap.ndx.market && cachedBootstrap.ndx.market.vxn ? cachedBootstrap.ndx.market.vxn.current : null)
+          : (cachedBootstrap.market && cachedBootstrap.market.vix ? cachedBootstrap.market.vix.current : null);
+
+        if (liveSpot && liveVol) {
+          officialCloses[latestDay] = {
+            spot: liveSpot,
+            vol: liveVol
+          };
+        }
+      }
+    }
+
     // Determine prior close anchor for each day
     const dayPriorCloses = {};
     for (let k = 0; k < days.length; k++) {
@@ -2820,7 +2844,6 @@ function computeAnchoredSeries(c, isNdx) {
       dayMap[d] = dayIndices;
     }
 
-    const latestDay = days[days.length - 1];
     const latestIndices = dayMap[latestDay];
     const latestAnchorIdx = latestIndices[0];
 

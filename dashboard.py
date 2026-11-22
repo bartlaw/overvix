@@ -1451,6 +1451,35 @@ def compute_spotvol_baselines(df_daily: pd.DataFrame, active_sess_date: Optional
     print(f" NDX Spot-Vol Baseline ({len(state.df_spotvol_ndx)} bars): R²={state.ndx_r_squared:.4f}, Slope={state.ndx_slope:.4f}")
 
 
+def harmonize_daily_close_with_rth(df_daily: pd.DataFrame, active_sess_date: Optional[str]) -> pd.DataFrame:
+    """Ensure completed active session row in df_daily reflects Cash Market Bell closing prices, not post-curb VIX."""
+    if df_daily is None or df_daily.empty or not active_sess_date:
+        return df_daily
+    d_str = str(active_sess_date)[:10]
+    if d_str in df_daily.index:
+        spx_c = None
+        vix_c = None
+        vix3m_c = None
+        ndx_c = None
+        vxn_c = None
+
+        if hasattr(state, 'df_spx_vix_1d') and not state.df_spx_vix_1d.empty:
+            spx_c = float(state.df_spx_vix_1d['spx'].iloc[-1])
+            vix_c = float(state.df_spx_vix_1d['vix'].iloc[-1])
+        if hasattr(state, 'df_ts_1d') and not state.df_ts_1d.empty:
+            vix3m_c = float(state.df_ts_1d['vix3m'].iloc[-1])
+        if hasattr(state, 'df_ndx_vxn_1d') and not state.df_ndx_vxn_1d.empty:
+            ndx_c = float(state.df_ndx_vxn_1d['ndx'].iloc[-1])
+            vxn_c = float(state.df_ndx_vxn_1d['vxn'].iloc[-1])
+
+        if spx_c is not None and spx_c > 0: df_daily.loc[d_str, 'spx'] = spx_c
+        if vix_c is not None and vix_c > 0: df_daily.loc[d_str, 'vix'] = vix_c
+        if vix3m_c is not None and vix3m_c > 0: df_daily.loc[d_str, 'vix3m'] = vix3m_c
+        if ndx_c is not None and ndx_c > 0: df_daily.loc[d_str, 'ndx'] = ndx_c
+        if vxn_c is not None and vxn_c > 0: df_daily.loc[d_str, 'vxn'] = vxn_c
+    return df_daily
+
+
 def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.DataFrame, active_sess_date: Optional[str], today_et: str, dfs_1m: Optional[Dict[str, pd.DataFrame]] = None):
     if not dfs_pool or 'spx' not in dfs_pool or dfs_pool['spx'].empty:
         return
@@ -1505,6 +1534,7 @@ def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.D
 
     # Daily Macro Horizons (MAX, 1Y, YTD)
     if not df_daily.empty:
+        df_daily = harmonize_daily_close_with_rth(df_daily, active_sess_date)
         state.df_daily = df_daily
 
         # MAX
@@ -1589,6 +1619,7 @@ async def hydrate_deep_history_background(active_sess_date: Optional[str], today
         df_n2y = safe_to_series(ndx_bars_2y, 'ndx')
         df_vx2y = safe_to_series(vxn_bars_2y, 'vxn')
         df_daily = pd.concat([df_s2y, df_v2y, df_v32y, df_n2y, df_vx2y], axis=1).dropna()
+        df_daily = harmonize_daily_close_with_rth(df_daily, active_sess_date)
 
         # Save to disk cache
         save_history_cache(dfs_pool, df_daily, today_et, dfs_1m=dfs_1m)
@@ -1724,6 +1755,7 @@ async def refresh_historical_data():
             df_n4m = safe_to_series(ndx_d, 'ndx')
             df_vx4m = safe_to_series(vxn_d, 'vxn')
             df_daily_init = pd.concat([df_s4m, df_v4m, df_v34m, df_n4m, df_vx4m], axis=1).dropna()
+            df_daily_init = harmonize_daily_close_with_rth(df_daily_init, active_sess_date)
             state.df_daily = df_daily_init
             daily_ref_df = df_daily_init
             compute_spotvol_baselines(df_daily_init, active_sess_date, today_et)
