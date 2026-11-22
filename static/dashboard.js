@@ -4223,7 +4223,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         });
       });
 
-      // 3. Vol Lines for each day
+      // 3. Vol Lines for each day (Visual rendering per day)
       days.forEach((d, dIdx) => {
         const idxs = dayMap[d];
         const start = idxs[0];
@@ -4241,12 +4241,28 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
           line: { color: volColor, width: 1.8 },
           xaxis: 'x',
           yaxis: 'y2',
-          hovertemplate: 
-            `<b>%{x|${timeHoverFmt}}%{customdata[5]}</b>%{customdata[6]}<br>` +
-            `%{customdata[7]}: <b>%{customdata[0]}</b> (%{customdata[1]})<br>` +
-            `%{customdata[8]}: <b>%{customdata[2]}</b> (%{customdata[3]} pts) · Resid: <b>%{customdata[4]}</b><br>` +
-            `<span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`
+          hoverinfo: 'skip'
         });
+      });
+
+      // Unified Constant Cursor Hover Trace (Single continuous trace across all timestamps)
+      plotTraces.push({
+        x: times,
+        y: volPt,
+        customdata: volCustomdata,
+        name: isVolInverted 
+          ? `${volLabel} Pt (Daily Reset Inv ▼)` 
+          : `${volLabel} Pt (Daily Reset)`,
+        mode: 'lines',
+        line: { color: 'transparent', width: 0 },
+        xaxis: 'x',
+        yaxis: 'y2',
+        showlegend: false,
+        hovertemplate: 
+          `<b>%{x|${timeHoverFmt}}%{customdata[5]}</b>%{customdata[6]}<br>` +
+          `%{customdata[7]}: <b>%{customdata[0]}</b> (%{customdata[1]})<br>` +
+          `%{customdata[8]}: <b>%{customdata[2]}</b> (%{customdata[3]} pts) · Resid: <b>%{customdata[4]}</b><br>` +
+          `<span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`
       });
 
       // 4. VIX Highs Markers (if any)
@@ -4292,7 +4308,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         });
       });
 
-      // 7. Residual Lines for each day
+      // 7. Residual Lines for each day (Visual rendering per day)
       days.forEach((d, dIdx) => {
         const idxs = dayMap[d];
         const start = idxs[0];
@@ -4308,8 +4324,22 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
           line: { color: isNdx ? '#C084FC' : '#00E5FF', width: 1.8 },
           xaxis: 'x',
           yaxis: 'y3',
-          hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[3]}<br>${isNdx ? 'Over-VXN' : 'Overvix'} Residual: %{customdata[0]} pts<br>${assetLabel}: %{customdata[1]} | ${volLabel}: %{customdata[2]}<extra></extra>`
+          hoverinfo: 'skip'
         });
+      });
+
+      // Unified Constant Cursor Hover Trace on Subplot 2 (Single continuous trace across all timestamps)
+      plotTraces.push({
+        x: times,
+        y: residSeries,
+        customdata: residCustomdata,
+        name: isNdx ? 'Over-VXN Residual' : 'Overvix Residual',
+        mode: 'lines',
+        line: { color: 'transparent', width: 0 },
+        xaxis: 'x',
+        yaxis: 'y3',
+        showlegend: false,
+        hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[3]}<br>${isNdx ? 'Over-VXN' : 'Overvix'} Residual: %{customdata[0]} pts<br>${assetLabel}: %{customdata[1]} | ${volLabel}: %{customdata[2]}<extra></extra>`
       });
 
       // 8. Horizontal Reference Lines
@@ -4425,10 +4455,10 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       paper_bgcolor: 'transparent',
       plot_bgcolor: 'transparent',
       autosize: true,
-      hovermode: 'closest',
+      hovermode: 'x',
       dragmode: false,
       clickmode: 'event',
-      hoverdistance: 25,
+      hoverdistance: 20,
       hoverlabel: {
         bgcolor: 'rgba(15, 23, 42, 0.95)',
         bordercolor: '#00E5FF',
