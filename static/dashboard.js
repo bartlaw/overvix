@@ -4332,6 +4332,93 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       }
     }
 
+    // 9. Overvix Alert Markers on Session Close (Daily Reset mode)
+    if (corrAnchor.mode === 'daily_reset' && anchoredSeries.days) {
+      const alertCloseTimes = [];
+      const alertCloseResids = [];
+      const alertCloseCustomdata = [];
+      const days = anchoredSeries.days;
+      const dayMap = anchoredSeries.dayMap;
+
+      days.forEach(d => {
+        const idxs = dayMap ? dayMap[d] : null;
+        if (!idxs || idxs.length === 0) return;
+        const termIdx = idxs[idxs.length - 1];
+        const rVal = residSeries[termIdx];
+
+        // Trigger condition: official terminal close residual >= +threshold
+        if (typeof rVal === 'number' && !isNaN(rVal) && rVal >= thresh) {
+          const tClose = times[termIdx];
+          const rStr = (rVal >= 0 ? `+${rVal.toFixed(2)}` : rVal.toFixed(2)) + ' pts';
+
+          const rawSpotNum = anchoredSeries.spotRaw ? anchoredSeries.spotRaw[termIdx] : null;
+          const sRawFormatted = (typeof rawSpotNum === 'number' && !isNaN(rawSpotNum))
+            ? rawSpotNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            : (rawSpotNum || '-');
+
+          const sPct = assetPct[termIdx];
+          const sPctStr = (typeof sPct === 'number' && !isNaN(sPct))
+            ? (sPct >= 0 ? `+${sPct.toFixed(2)}%` : `${sPct.toFixed(2)}%`)
+            : '-';
+
+          const rawVolNum = anchoredSeries.volRaw ? anchoredSeries.volRaw[termIdx] : null;
+          const vRawFormatted = (typeof rawVolNum === 'number' && !isNaN(rawVolNum))
+            ? rawVolNum.toFixed(2)
+            : (rawVolNum || '-');
+
+          const vPt = volPt[termIdx];
+          const vPtStr = (typeof vPt === 'number' && !isNaN(vPt))
+            ? (vPt >= 0 ? `+${vPt.toFixed(2)}` : `${vPt.toFixed(2)}`)
+            : '-';
+
+          alertCloseTimes.push(tClose);
+          alertCloseResids.push(rVal);
+          alertCloseCustomdata.push([
+            rStr,           // 0: Overvix Residual
+            sRawFormatted,  // 1: Spot close raw
+            vRawFormatted,  // 2: Vol close raw
+            sPctStr,        // 3: Spot %
+            vPtStr,         // 4: Vol pt
+            assetLabel,     // 5: Asset label (e.g. SPX)
+            volLabel        // 6: Vol label (e.g. VIX)
+          ]);
+        }
+      });
+
+      if (alertCloseTimes.length > 0) {
+        const traceOvervixAlertClose = {
+          x: alertCloseTimes,
+          y: alertCloseResids,
+          customdata: alertCloseCustomdata,
+          mode: 'markers',
+          cliponaxis: false,
+          name: isNdx ? 'Over-VXN Alert Close' : 'Overvix Alert Close',
+          marker: {
+            color: '#FF1744',
+            size: 12,
+            symbol: 'diamond',
+            line: { color: '#FFFFFF', width: 2 }
+          },
+          hoverlabel: {
+            bgcolor: 'rgba(15, 23, 42, 0.95)',
+            bordercolor: '#FF1744',
+            font: { family: 'monospace', size: 11, color: '#F8FAFC' },
+            align: 'left'
+          },
+          hovertemplate:
+            `<b>%{x|${timeHoverFmt}}</b>  <span style="color:#FF5370;font-weight:bold">🚨 ${isNdx ? 'OVER-VXN' : 'OVERVIX'} ALERT CLOSE</span><br>` +
+            `${isNdx ? 'Over-VXN' : 'Overvix'} Residual: <b>%{customdata[0]}</b><br>` +
+            `%{customdata[5]} Close: <b>%{customdata[1]} (%{customdata[3]})</b><br>` +
+            `%{customdata[6]} Close: <b>%{customdata[2]} (%{customdata[4]} pts)</b><br>` +
+            `<span style="color:#00E5FF;font-size:10px">👉 Click to Anchor at this Session Close</span><extra></extra>`,
+          xaxis: 'x',
+          yaxis: 'y3',
+          showlegend: true
+        };
+        plotTraces.push(traceOvervixAlertClose);
+      }
+    }
+
     const hasSpan = Boolean(dStart && dEnd && dStart !== dEnd);
 
     const layout = {
@@ -4451,7 +4538,8 @@ function attachCorrelationChartClickListener() {
     // Filter points to prefer full time-series data traces, avoiding 2-point boundary lines (zero line, alert, vol crush)
     const validNames = ['SPX % Move', 'SPX % Since Anchor', 'NDX % Move', 'NDX % Since Anchor',
                         'VIX Point Move', 'VIX Pt Since Anchor', 'VXN Point Move', 'VXN Pt Since Anchor',
-                        'Daily Reset', 'Overvix Residual', 'Over-VXN Residual', 'VIX Highs', 'VXN Highs'];
+                        'Daily Reset', 'Overvix Residual', 'Over-VXN Residual', 'VIX Highs', 'VXN Highs',
+                        'Overvix Alert Close', 'Over-VXN Alert Close'];
     let chosenPt = eventData.points.find(p => p.data && validNames.some(name => p.data.name && p.data.name.includes(name)));
     if (!chosenPt) {
       // Pick any trace that is not a 2-point helper/boundary line
