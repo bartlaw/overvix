@@ -52,7 +52,7 @@ const TF_CONFIG = {
     xTitle: 'Today Intraday Time (US/Eastern)',
     tickformat: '%H:%M',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ pattern: 'hour', bounds: [16.0, 9.5] }]
+    rangebreaks: [{ pattern: 'hour', bounds: [16.01, 9.5] }]
   },
   '5D': {
     step: 1,
@@ -69,7 +69,7 @@ const TF_CONFIG = {
     xTitle: '5-Day Timeline (US/Eastern)',
     tickformat: '%b %d %H:%M',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.0, 9.5] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.01, 9.5] }]
   },
   '10D': {
     step: 2,
@@ -86,7 +86,7 @@ const TF_CONFIG = {
     xTitle: '10-Day Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.0, 9.5] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.01, 9.5] }]
   },
   '1M': {
     step: 3,
@@ -103,7 +103,7 @@ const TF_CONFIG = {
     xTitle: '1-Month Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.0, 9.5] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.01, 9.5] }]
   },
   '3M': {
     step: 4,
@@ -120,7 +120,7 @@ const TF_CONFIG = {
     xTitle: '3-Month Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.0, 9.5] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.01, 9.5] }]
   },
   '6M': {
     step: 5,
@@ -137,7 +137,7 @@ const TF_CONFIG = {
     xTitle: '6-Month Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.0, 9.5] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.01, 9.5] }]
   },
   'YTD': {
     step: 6,
@@ -2636,46 +2636,69 @@ function computeAnchoredSeries(c, isNdx) {
 
   // Daily Reset Anchor Mode: each day anchored to its prior official close
   if (corrAnchor.mode === 'daily_reset') {
-    const dayMap = {};
+    const rawDayMap = {};
     for (let i = 0; i < times.length; i++) {
       const dStr = times[i].slice(0, 10);
-      if (!dayMap[dStr]) dayMap[dStr] = [];
-      dayMap[dStr].push(i);
+      if (!rawDayMap[dStr]) rawDayMap[dStr] = [];
+      rawDayMap[dStr].push(i);
     }
-    const days = Object.keys(dayMap);
+    const days = Object.keys(rawDayMap);
 
+    // Look up official daily closes for each date from dailyDs (1Y or YTD)
+    const officialCloses = {};
+    let dailyDatesList = [];
+    if (cachedBootstrap && cachedBootstrap.intraday_correlation) {
+      const dailyDs = cachedBootstrap.intraday_correlation['1Y'] || cachedBootstrap.intraday_correlation['YTD'];
+      if (dailyDs && dailyDs.dates && dailyDs.dates.length > 0) {
+        dailyDatesList = dailyDs.dates;
+        const dSpot = isNdx ? (dailyDs.ndx_raw || dailyDs.spot_raw) : (dailyDs.spx_raw || dailyDs.spot_raw);
+        const dVol = isNdx ? (dailyDs.vxn_raw || dailyDs.vol_raw) : (dailyDs.vix_raw || dailyDs.vol_raw);
+        for (let j = 0; j < dailyDatesList.length; j++) {
+          if (dSpot && dSpot[j] !== undefined && dVol && dVol[j] !== undefined) {
+            officialCloses[dailyDatesList[j]] = {
+              spot: dSpot[j],
+              vol: dVol[j]
+            };
+          }
+        }
+      }
+    }
+
+    // Determine prior close anchor for each day
     const dayPriorCloses = {};
     for (let k = 0; k < days.length; k++) {
       const d = days[k];
       if (k > 0) {
         const prevDay = days[k - 1];
-        const prevIndices = dayMap[prevDay];
-        const lastIdx = prevIndices[prevIndices.length - 1];
-        dayPriorCloses[d] = {
-          spot: spotRaw[lastIdx],
-          vol: volRaw[lastIdx]
-        };
+        if (officialCloses[prevDay] && officialCloses[prevDay].spot && officialCloses[prevDay].vol) {
+          dayPriorCloses[d] = {
+            spot: officialCloses[prevDay].spot,
+            vol: officialCloses[prevDay].vol
+          };
+        } else {
+          const prevIndices = rawDayMap[prevDay];
+          const lastIdx = prevIndices[prevIndices.length - 1];
+          dayPriorCloses[d] = {
+            spot: spotRaw[lastIdx],
+            vol: volRaw[lastIdx]
+          };
+        }
       } else {
-        // Day 0: look up from daily history if available
+        // Day 0: look up latest official close prior to d
         let refSpot = null;
         let refVol = null;
-        if (cachedBootstrap && cachedBootstrap.intraday_correlation) {
-          const dailyDs = cachedBootstrap.intraday_correlation['1Y'] || cachedBootstrap.intraday_correlation['YTD'];
-          if (dailyDs && dailyDs.dates && dailyDs.dates.length > 0) {
-            const dDates = dailyDs.dates;
-            const dSpot = isNdx ? (dailyDs.ndx_raw || dailyDs.spot_raw) : (dailyDs.spx_raw || dailyDs.spot_raw);
-            const dVol = isNdx ? (dailyDs.vxn_raw || dailyDs.vol_raw) : (dailyDs.vix_raw || dailyDs.vol_raw);
-            for (let j = dDates.length - 1; j >= 0; j--) {
-              if (dDates[j] < d) {
-                refSpot = dSpot[j];
-                refVol = dVol[j];
-                break;
-              }
+        for (let j = dailyDatesList.length - 1; j >= 0; j--) {
+          if (dailyDatesList[j] < d) {
+            const entry = officialCloses[dailyDatesList[j]];
+            if (entry) {
+              refSpot = entry.spot;
+              refVol = entry.vol;
+              break;
             }
           }
         }
         if (!refSpot || !refVol) {
-          const firstIdx = dayMap[d][0];
+          const firstIdx = rawDayMap[d][0];
           refSpot = spotRaw[firstIdx];
           refVol = volRaw[firstIdx];
         }
@@ -2683,17 +2706,24 @@ function computeAnchoredSeries(c, isNdx) {
       }
     }
 
-    const outSpotPct = new Array(times.length);
-    const outVolPt = new Array(times.length);
+    // Build the per-day time series, seamlessly appending the 16:00 official settlement point
+    const outTimes = [];
+    const outSpotPct = [];
+    const outVolPt = [];
+    const outSpotRaw = [];
+    const outVolRaw = [];
+    const dayMap = {};
     const sessionStartTimes = [];
+    const settlementMap = {};
 
     for (let k = 0; k < days.length; k++) {
       const d = days[k];
-      const indices = dayMap[d];
+      const indices = rawDayMap[d];
       const ref = dayPriorCloses[d];
       const s0 = ref.spot;
       const v0 = ref.vol;
 
+      const dayIndices = [];
       sessionStartTimes.push(times[indices[0]]);
 
       for (let j = 0; j < indices.length; j++) {
@@ -2703,9 +2733,36 @@ function computeAnchoredSeries(c, isNdx) {
         const sPct = (s0 > 0 && typeof s === 'number') ? Math.round(((s - s0) / s0 * 100.0) * 10000) / 10000 : 0;
         const vPt = (typeof v === 'number') ? Math.round((v - v0) * 10000) / 10000 : 0;
 
-        outSpotPct[idx] = sPct;
-        outVolPt[idx] = vPt;
+        dayIndices.push(outTimes.length);
+        outTimes.push(times[idx]);
+        outSpotPct.push(sPct);
+        outVolPt.push(vPt);
+        outSpotRaw.push(s);
+        outVolRaw.push(v);
       }
+
+      // Check if official settlement exists for day d and can be appended at 16:00
+      const lastRawTime = times[indices[indices.length - 1]];
+      const has1600 = (lastRawTime.slice(11, 16) >= '16:00');
+      const offSettle = officialCloses[d];
+
+      if (!has1600 && offSettle && offSettle.spot && offSettle.vol) {
+        const settleTime = `${d} 16:00`;
+        const s = offSettle.spot;
+        const v = offSettle.vol;
+        const sPct = (s0 > 0 && typeof s === 'number') ? Math.round(((s - s0) / s0 * 100.0) * 10000) / 10000 : 0;
+        const vPt = (typeof v === 'number') ? Math.round((v - v0) * 10000) / 10000 : 0;
+
+        dayIndices.push(outTimes.length);
+        outTimes.push(settleTime);
+        outSpotPct.push(sPct);
+        outVolPt.push(vPt);
+        outSpotRaw.push(s);
+        outVolRaw.push(v);
+        settlementMap[settleTime] = true;
+      }
+
+      dayMap[d] = dayIndices;
     }
 
     const latestDay = days[days.length - 1];
@@ -2713,17 +2770,18 @@ function computeAnchoredSeries(c, isNdx) {
     const latestAnchorIdx = latestIndices[0];
 
     return {
-      times: times,
+      times: outTimes,
       spotPct: outSpotPct,
       volPt: outVolPt,
-      spotRaw: spotRaw,
-      volRaw: volRaw,
+      spotRaw: outSpotRaw,
+      volRaw: outVolRaw,
       isAnchored: true,
       isDailyReset: true,
       dayMap: dayMap,
       days: days,
+      settlementMap: settlementMap,
       anchorIdx: latestAnchorIdx >= 0 ? latestAnchorIdx : 0,
-      anchorTime: times[latestIndices[0]],
+      anchorTime: outTimes[latestAnchorIdx],
       sessionStartTimes: sessionStartTimes,
       dayPriorCloses: dayPriorCloses,
       s0: dayPriorCloses[latestDay].spot,
@@ -3749,7 +3807,9 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     const residStr = (typeof resid === 'number' && !isNaN(resid)) ? (resid >= 0 ? `+${resid.toFixed(2)} pts` : `${resid.toFixed(2)} pts`) : '-';
     const vPtStr = (typeof vPt === 'number' && !isNaN(vPt)) ? (vPt >= 0 ? `+${vPt.toFixed(2)}` : vPt.toFixed(2)) : '-';
     const gthTag = (gthChartOn && c.is_gth && c.is_gth[i] === 1) ? ' [ES-Adj]' : '';
-    const highTag = highEventMap[i] || '';
+    const isSettle = Boolean(anchoredSeries.settlementMap && anchoredSeries.settlementMap[t]);
+    const settleTag = isSettle ? "  <span style='color:#38BDF8;font-weight:bold'>🏛️ Official Close</span>" : "";
+    const highTag = settleTag || highEventMap[i] || '';
 
     return [rawSpot, sPctStr, raw, vPtStr, residStr, gthTag, highTag, assetLabel, volLabel];
   });
@@ -3804,7 +3864,9 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       const vRaw = (anchoredSeries.volRaw && anchoredSeries.volRaw[i] !== undefined && anchoredSeries.volRaw[i] !== null)
         ? (typeof anchoredSeries.volRaw[i] === 'number' ? anchoredSeries.volRaw[i].toFixed(2) : anchoredSeries.volRaw[i])
         : '-';
-      return [rStr, sRaw, vRaw];
+      const isSettle = Boolean(anchoredSeries.settlementMap && anchoredSeries.settlementMap[t]);
+      const settleTag = isSettle ? "  <span style='color:#38BDF8;font-weight:bold'>🏛️ Official Close</span>" : "";
+      return [rStr, sRaw, vRaw, settleTag];
     });
 
     // Emerald Green shading to zero when Residual > 0
@@ -3844,7 +3906,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       line: { color: isNdx ? '#C084FC' : '#00E5FF', width: 1.8 },
       xaxis: 'x',
       yaxis: 'y3',
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${isNdx ? 'Over-VXN' : 'Overvix'} Residual: %{customdata[0]} pts<br>${assetLabel}: %{customdata[1]} | ${volLabel}: %{customdata[2]}<extra></extra>`
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[3]}<br>${isNdx ? 'Over-VXN' : 'Overvix'} Residual: %{customdata[0]} pts<br>${assetLabel}: %{customdata[1]} | ${volLabel}: %{customdata[2]}<extra></extra>`
     };
 
     const traceZeroLine = {
@@ -4156,7 +4218,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
           line: { color: isNdx ? '#C084FC' : '#00E5FF', width: 1.8 },
           xaxis: 'x',
           yaxis: 'y3',
-          hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${isNdx ? 'Over-VXN' : 'Overvix'} Residual: %{customdata[0]} pts<br>${assetLabel}: %{customdata[1]} | ${volLabel}: %{customdata[2]}<extra></extra>`
+          hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[3]}<br>${isNdx ? 'Over-VXN' : 'Overvix'} Residual: %{customdata[0]} pts<br>${assetLabel}: %{customdata[1]} | ${volLabel}: %{customdata[2]}<extra></extra>`
         });
       });
 
