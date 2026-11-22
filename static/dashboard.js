@@ -52,7 +52,7 @@ const TF_CONFIG = {
     xTitle: 'Today Intraday Time (US/Eastern)',
     tickformat: '%H:%M',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ pattern: 'hour', bounds: [16.25, 9.5] }]
+    rangebreaks: [{ pattern: 'hour', bounds: [16.0, 9.5] }]
   },
   '5D': {
     step: 1,
@@ -69,7 +69,7 @@ const TF_CONFIG = {
     xTitle: '5-Day Timeline (US/Eastern)',
     tickformat: '%b %d %H:%M',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.0, 9.5] }]
   },
   '10D': {
     step: 2,
@@ -86,24 +86,24 @@ const TF_CONFIG = {
     xTitle: '10-Day Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.0, 9.5] }]
   },
   '1M': {
     step: 3,
     label: '1M',
-    badgeText: '1M &bull; 1-Month (30m)',
-    pillText: '1-Month 30m',
+    badgeText: '1M &bull; 1-Month (5m)',
+    pillText: '1-Month 5m',
     pillClass: 'bg-indigo-950/80 text-indigo-300 border-indigo-800/60',
-    granularity: '30m',
-    tsSub: 'Monthly OPEX Cycle & Term Structure Inversions (30-min bars)',
-    corrSub: '30-Minute Normalized Overlay (Upper) & Instantaneous Overvix Residual (Lower)',
+    granularity: '5m',
+    tsSub: 'Monthly OPEX Cycle & Term Structure Inversions (5-min bars)',
+    corrSub: '5-Minute Normalized Overlay (Upper) & Instantaneous Overvix Residual (Lower)',
     corrTraceName: 'Overvix Residual',
     corrHoverLabel: 'Overvix Residual',
     liveLabel: 'Latest Residual:',
     xTitle: '1-Month Timeline (US/Eastern)',
-    tickformat: '%b %d %H:%M',
+    tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.0, 9.5] }]
   },
   '3M': {
     step: 4,
@@ -120,7 +120,7 @@ const TF_CONFIG = {
     xTitle: '3-Month Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.0, 9.5] }]
   },
   '6M': {
     step: 5,
@@ -137,7 +137,7 @@ const TF_CONFIG = {
     xTitle: '6-Month Timeline (US/Eastern)',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %H:%M',
-    rangebreaks: [{ bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 9.5] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.0, 9.5] }]
   },
   'YTD': {
     step: 6,
@@ -154,7 +154,7 @@ const TF_CONFIG = {
     xTitle: 'Year-to-Date Timeline',
     tickformat: '%b %d',
     timeHoverFmt: '%b %d, %Y',
-    rangebreaks: [{ bounds: ['sat', 'mon'] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }]
   },
   '1Y': {
     step: 7,
@@ -171,7 +171,7 @@ const TF_CONFIG = {
     xTitle: '1-Year Macro Date',
     tickformat: '%b %Y',
     timeHoverFmt: '%b %d, %Y',
-    rangebreaks: [{ bounds: ['sat', 'mon'] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }]
   },
   'MAX': {
     step: 8,
@@ -188,7 +188,7 @@ const TF_CONFIG = {
     xTitle: 'Multi-Year Timeline (2Y)',
     tickformat: '%b %Y',
     timeHoverFmt: '%b %d, %Y',
-    rangebreaks: [{ bounds: ['sat', 'mon'] }]
+    rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }]
   }
 };
 
@@ -943,7 +943,9 @@ function switchTimeframe(tf, triggeredBySlider = false) {
     }
     updateCorrSliderUI(tf);
     if (tf === '1D') {
-      resetCorrAnchor(false);
+      if (corrAnchor.mode !== 'daily_reset') {
+        resetCorrAnchor(false);
+      }
     } else {
       syncCorrAnchorForTimeframe(tf);
     }
@@ -1051,6 +1053,7 @@ function setupCorrButtons() {
 function setupAnchorButtons() {
   const btnOpen = document.getElementById('btn-anchor-open');
   const btnPriorClose = document.getElementById('btn-anchor-prior-close');
+  const btnDailyReset = document.getElementById('btn-anchor-daily-reset');
   const btnSpotLow = document.getElementById('btn-anchor-spot-low');
   const btnVolHigh = document.getElementById('btn-anchor-vol-high');
   const btnCustomToggle = document.getElementById('btn-anchor-custom-toggle');
@@ -1063,6 +1066,14 @@ function setupAnchorButtons() {
   }
   if (btnPriorClose) {
     btnPriorClose.addEventListener('click', () => setCorrAnchor('prior_close'));
+  }
+  if (btnDailyReset) {
+    btnDailyReset.addEventListener('click', () => {
+      const isEligible = ['1D', '5D', '10D', '1M'].includes(currentCorrTf);
+      if (isEligible) {
+        setCorrAnchor('daily_reset');
+      }
+    });
   }
   if (btnSpotLow) {
     btnSpotLow.addEventListener('click', () => setCorrAnchor('spot_low'));
@@ -1208,7 +1219,9 @@ function switchCorrTf(tf, triggeredBySlider = false) {
   }
 
   if (tf === '1D') {
-    resetCorrAnchor(false);
+    if (corrAnchor.mode !== 'daily_reset') {
+      resetCorrAnchor(false);
+    }
   } else {
     syncCorrAnchorForTimeframe(tf);
   }
@@ -1259,7 +1272,8 @@ function updateCorrMetricDisplay() {
     const sPct = anchoredSeries.spotPct[lastIdx] || 0;
     const vPt = anchoredSeries.volPt[lastIdx] || 0;
     const { beta, rawIntercept } = getActiveBetaAndIntercept(isNdx);
-    const alpha = (!anchoredSeries.isAnchored && targetTf === '1D') ? rawIntercept : 0;
+    const isSessionBaseline = (corrAnchor.mode === 'prior_close' || corrAnchor.mode === 'daily_reset' || (!anchoredSeries.isAnchored && targetTf === '1D'));
+    const alpha = isSessionBaseline ? rawIntercept : 0;
     const resid = vPt - alpha + beta * sPct;
     const residSign = resid >= 0 ? '+' : '';
     const residStr = `${residSign}${resid.toFixed(2)} pts`;
@@ -2298,6 +2312,23 @@ function setCorrAnchor(mode, targetTime = null) {
     return;
   }
 
+  if (mode === 'daily_reset') {
+    const isEligible = ['1D', '5D', '10D', '1M'].includes(currentCorrTf);
+    if (!isEligible) return;
+    corrAnchor.active = true;
+    corrAnchor.mode = 'daily_reset';
+    corrAnchor.label = 'Daily Reset (Prior Close)';
+    corrAnchor.time = null;
+    corrAnchor.index = -1;
+    corrAnchor.isOfficialPriorClose = true;
+    corrAnchor.targetDate = null;
+    corrAnchor.spotBase = null;
+    corrAnchor.volBase = null;
+    updateAnchorUI();
+    renderCorrelationChart(currentCorrMode, currentCorrTf);
+    return;
+  }
+
   if ((mode === 'date_close' || mode === 'custom') && targetTime) {
     ensureCorrRangeCoversTarget(targetTime, isNdx);
   }
@@ -2483,6 +2514,14 @@ function computeAnchoredCorrelation(spotRaw, volRaw, anchorIdx) {
 
 function syncCorrAnchorForTimeframe(tf) {
   if (!corrAnchor.active) return;
+  if (corrAnchor.mode === 'daily_reset') {
+    const isEligible = ['1D', '5D', '10D', '1M'].includes(tf);
+    if (!isEligible) {
+      resetCorrAnchor(false);
+    }
+    updateAnchorUI();
+    return;
+  }
   const isNdx = (currentAssetPair === 'NDX');
   const c = getCorrDataset(isNdx, tf);
   const times = c.times || [];
@@ -2558,6 +2597,7 @@ function syncCorrAnchorForTimeframe(tf) {
   let modePrefix = '';
   if (corrAnchor.mode === 'close') modePrefix = 'Close: ';
   else if (corrAnchor.mode === 'prior_close') modePrefix = 'Prior Close: ';
+  else if (corrAnchor.mode === 'daily_reset') modePrefix = 'Daily Reset: ';
   else if (corrAnchor.mode === 'date_close') modePrefix = 'Session Close: ';
   else if (corrAnchor.mode === 'spot_low') modePrefix = `${assetLabel} Low: `;
   else if (corrAnchor.mode === 'vol_high') modePrefix = `${volLabel} High: `;
@@ -2591,6 +2631,106 @@ function computeAnchoredSeries(c, isNdx) {
       anchoredCorr: null,
       latestAnchoredCorr: null,
       returnCount: 0
+    };
+  }
+
+  // Daily Reset Anchor Mode: each day anchored to its prior official close
+  if (corrAnchor.mode === 'daily_reset') {
+    const dayMap = {};
+    for (let i = 0; i < times.length; i++) {
+      const dStr = times[i].slice(0, 10);
+      if (!dayMap[dStr]) dayMap[dStr] = [];
+      dayMap[dStr].push(i);
+    }
+    const days = Object.keys(dayMap);
+
+    const dayPriorCloses = {};
+    for (let k = 0; k < days.length; k++) {
+      const d = days[k];
+      if (k > 0) {
+        const prevDay = days[k - 1];
+        const prevIndices = dayMap[prevDay];
+        const lastIdx = prevIndices[prevIndices.length - 1];
+        dayPriorCloses[d] = {
+          spot: spotRaw[lastIdx],
+          vol: volRaw[lastIdx]
+        };
+      } else {
+        // Day 0: look up from daily history if available
+        let refSpot = null;
+        let refVol = null;
+        if (cachedBootstrap && cachedBootstrap.intraday_correlation) {
+          const dailyDs = cachedBootstrap.intraday_correlation['1Y'] || cachedBootstrap.intraday_correlation['YTD'];
+          if (dailyDs && dailyDs.dates && dailyDs.dates.length > 0) {
+            const dDates = dailyDs.dates;
+            const dSpot = isNdx ? (dailyDs.ndx_raw || dailyDs.spot_raw) : (dailyDs.spx_raw || dailyDs.spot_raw);
+            const dVol = isNdx ? (dailyDs.vxn_raw || dailyDs.vol_raw) : (dailyDs.vix_raw || dailyDs.vol_raw);
+            for (let j = dDates.length - 1; j >= 0; j--) {
+              if (dDates[j] < d) {
+                refSpot = dSpot[j];
+                refVol = dVol[j];
+                break;
+              }
+            }
+          }
+        }
+        if (!refSpot || !refVol) {
+          const firstIdx = dayMap[d][0];
+          refSpot = spotRaw[firstIdx];
+          refVol = volRaw[firstIdx];
+        }
+        dayPriorCloses[d] = { spot: refSpot, vol: refVol };
+      }
+    }
+
+    const outSpotPct = new Array(times.length);
+    const outVolPt = new Array(times.length);
+    const sessionStartTimes = [];
+
+    for (let k = 0; k < days.length; k++) {
+      const d = days[k];
+      const indices = dayMap[d];
+      const ref = dayPriorCloses[d];
+      const s0 = ref.spot;
+      const v0 = ref.vol;
+
+      sessionStartTimes.push(times[indices[0]]);
+
+      for (let j = 0; j < indices.length; j++) {
+        const idx = indices[j];
+        const s = spotRaw[idx];
+        const v = volRaw[idx];
+        const sPct = (s0 > 0 && typeof s === 'number') ? Math.round(((s - s0) / s0 * 100.0) * 10000) / 10000 : 0;
+        const vPt = (typeof v === 'number') ? Math.round((v - v0) * 10000) / 10000 : 0;
+
+        outSpotPct[idx] = sPct;
+        outVolPt[idx] = vPt;
+      }
+    }
+
+    const latestDay = days[days.length - 1];
+    const latestIndices = dayMap[latestDay];
+    const latestAnchorIdx = latestIndices[0];
+
+    return {
+      times: times,
+      spotPct: outSpotPct,
+      volPt: outVolPt,
+      spotRaw: spotRaw,
+      volRaw: volRaw,
+      isAnchored: true,
+      isDailyReset: true,
+      dayMap: dayMap,
+      days: days,
+      anchorIdx: latestAnchorIdx >= 0 ? latestAnchorIdx : 0,
+      anchorTime: times[latestIndices[0]],
+      sessionStartTimes: sessionStartTimes,
+      dayPriorCloses: dayPriorCloses,
+      s0: dayPriorCloses[latestDay].spot,
+      v0: dayPriorCloses[latestDay].vol,
+      anchoredCorr: null,
+      latestAnchoredCorr: null,
+      returnCount: latestIndices.length
     };
   }
 
@@ -2704,12 +2844,14 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
   const volLabel = isNdx ? 'VXN' : 'VIX';
 
   const lastIdx = len - 1;
-  const elapsedMinutes = lastIdx - anchorIdx;
+  const elapsedBars = lastIdx - anchorIdx;
+  const barMinutes = (['5D', '10D', '1M'].includes(currentCorrTf) ? 5 : 1);
+  const elapsedMinutes = elapsedBars * barMinutes;
   const hours = Math.floor(elapsedMinutes / 60);
   const mins = elapsedMinutes % 60;
-  const elapsedStr = (currentCorrTf === '1D') 
+  const elapsedStr = (currentCorrTf === '1D' || anchoredSeries.isDailyReset) 
     ? (hours > 0 ? `${hours}h ${mins}m` : `${mins}m`) 
-    : `${elapsedMinutes} bars`;
+    : `${elapsedBars} bars`;
 
   const spotNetPct = spotPct[lastIdx];
   const volNetPt = volPt[lastIdx];
@@ -2771,14 +2913,19 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
 
   // Evaluate Post-Anchor Instantaneous Overvix Residual strictly from anchor point to latest bar
   const { beta, rawIntercept } = getActiveBetaAndIntercept(isNdx);
-  // When anchored to Prior Close, include the model intercept (alpha) to match the official session Overvix residual
-  const alpha = (corrAnchor.mode === 'prior_close') ? rawIntercept : 0;
+  // When anchored to Prior Close or Daily Reset, include the model intercept (alpha) to match the official session Overvix residual
+  const alpha = (corrAnchor.mode === 'prior_close' || corrAnchor.mode === 'daily_reset') ? rawIntercept : 0;
   const netResid = volNetPt - alpha + beta * spotNetPct;
   const thresh = isNdx ? currentNdxThreshold : currentThreshold;
   let residStatus = "NORMAL";
   let residBadgeClass = "bg-emerald-950 text-emerald-300 border border-emerald-800";
   let residColor = "text-emerald-400";
   let residSummaryPart = "";
+
+  if (anchoredSeries.isDailyReset) {
+    tag = "ACTIVE SESSION";
+    badgeClass = "bg-cyan-950/80 text-cyan-300 border border-cyan-800";
+  }
 
   if (netResid >= thresh) {
     residStatus = "OVERVIX ALERT";
@@ -2831,13 +2978,24 @@ function updateAnchorUI() {
   const banner = document.getElementById('corr-recovery-banner');
   const btnOpen = document.getElementById('btn-anchor-open');
   const btnPriorClose = document.getElementById('btn-anchor-prior-close');
+  const btnDailyReset = document.getElementById('btn-anchor-daily-reset');
   const btnSpotLow = document.getElementById('btn-anchor-spot-low');
   const btnVolHigh = document.getElementById('btn-anchor-vol-high');
   const btnCustom = document.getElementById('btn-anchor-custom-toggle');
+  const isEligibleDailyReset = ['1D', '5D', '10D', '1M'].includes(currentCorrTf);
 
-  [btnOpen, btnPriorClose, btnSpotLow, btnVolHigh, btnCustom].forEach(btn => {
+  [btnOpen, btnPriorClose, btnDailyReset, btnSpotLow, btnVolHigh, btnCustom].forEach(btn => {
     if (btn) btn.className = "px-2.5 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1 font-semibold";
   });
+
+  if (btnDailyReset) {
+    if (!isEligibleDailyReset) {
+      btnDailyReset.className = "px-2.5 py-1 rounded text-slate-500 bg-slate-900/60 border border-slate-800 cursor-not-allowed opacity-50 flex items-center space-x-1 font-semibold";
+      btnDailyReset.title = "Daily Reset is only available on intraday horizons up to 1M (1D, 5D, 10D, 1M)";
+    } else {
+      btnDailyReset.title = "Anchor each day to its prior official close (16:00 ET) so each day renders like a 1-day chart (1D, 5D, 10D, 1M)";
+    }
+  }
 
   if (!corrAnchor.active) {
     if (pill) {
@@ -2850,7 +3008,7 @@ function updateAnchorUI() {
     }
     const commentEl = document.getElementById('anchor-summary-comment');
     if (commentEl) {
-      commentEl.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from session open. Select <strong>[Prior Close]</strong>, <strong>[${assetLabel} Low]</strong>, or <strong>[${volLabel} High]</strong>, or click chart to set anchor point.</span>`;
+      commentEl.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from session open. Select <strong>[Daily Reset]</strong>, <strong>[Prior Close]</strong>, <strong>[${assetLabel} Low]</strong>, or <strong>[${volLabel} High]</strong>, or click chart to set anchor point.</span>`;
     }
     return;
   }
@@ -2860,7 +3018,15 @@ function updateAnchorUI() {
     pill.className = "text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold";
   }
 
-  if (corrAnchor.mode === 'prior_close' && btnPriorClose) {
+  if (corrAnchor.mode === 'daily_reset') {
+    if (btnDailyReset && isEligibleDailyReset) {
+      btnDailyReset.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
+    }
+    const commentEl = document.getElementById('anchor-summary-comment');
+    if (commentEl) {
+      commentEl.innerHTML = `<span class="text-cyan-400/90 text-[11px] font-sans">Each day anchored to its prior official close (16:00 ET). Traces display daily trajectories with overnight reset.</span>`;
+    }
+  } else if (corrAnchor.mode === 'prior_close' && btnPriorClose) {
     btnPriorClose.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
   } else if (corrAnchor.mode === 'spot_low' && btnSpotLow) {
     btnSpotLow.className = "px-2 py-1 rounded text-emerald-400 font-semibold bg-emerald-950/80 border border-emerald-800 shadow-sm transition flex items-center space-x-1";
@@ -3152,14 +3318,14 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   const isNdx = (currentAssetPair === 'NDX');
   const gthChartOn = (!isNdx && isGthChartActive(targetTf));
   const c = getCorrDataset(isNdx, targetTf);
-  const times = c.times || [];
+  // Compute Anchored Series (or baseline if anchor not active)
+  const anchoredSeries = computeAnchoredSeries(c, isNdx);
+  const times = (anchoredSeries && anchoredSeries.times) ? anchoredSeries.times : (c.times || []);
   const rollingCorr = c.rolling_corr || [];
 
   const assetLabel = isNdx ? 'NDX' : 'SPX';
   const volLabel = isNdx ? 'VXN' : 'VIX';
 
-  // Compute Anchored Series (or baseline if anchor not active)
-  const anchoredSeries = computeAnchoredSeries(c, isNdx);
   const assetPct = anchoredSeries.spotPct;
   const volPt = anchoredSeries.volPt;
   const isAnchored = anchoredSeries.isAnchored;
@@ -3174,10 +3340,11 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       const volSign = diag.volNetPt >= 0 ? '+' : '';
       const spotColor = diag.spotNetPct >= 0 ? 'text-emerald-400' : 'text-rose-400';
       const volColor = diag.volNetPt <= 0 ? 'text-emerald-400' : 'text-amber-400';
+      const sessionLabel = (corrAnchor.mode === 'daily_reset') ? 'Today / Active Session' : '⏱️ Elapsed';
 
       banner.innerHTML = `
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-slate-400">⏱️ Elapsed: <strong class="text-white">${diag.elapsedStr}</strong></span>
+          <span class="text-slate-400">${sessionLabel}: <strong class="text-white">${diag.elapsedStr}</strong></span>
           <span class="text-slate-700">|</span>
           <span>${assetLabel}: <strong class="${spotColor}">${spotSign}${diag.spotNetPct.toFixed(2)}%</strong> <span class="text-slate-400 text-[10px]">(${spotSign}${diag.spotNetPts.toFixed(1)} pts)</span></span>
           <span class="text-slate-700">|</span>
@@ -3309,7 +3476,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     });
   }
 
-  if (isAnchored && anchoredSeries.anchorTime) {
+  if (isAnchored && anchoredSeries.anchorTime && corrAnchor.mode !== 'daily_reset') {
     anchorShapes.push({
       type: 'line',
       xref: 'x',
@@ -3323,6 +3490,27 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         width: 2,
         dash: 'dashdot'
       }
+    });
+  }
+
+  // Vertical session divider lines at each day's 09:30 open in Daily Reset mode
+  if (corrAnchor.mode === 'daily_reset' && anchoredSeries.sessionStartTimes && anchoredSeries.sessionStartTimes.length > 1) {
+    anchoredSeries.sessionStartTimes.slice(1).forEach(st => {
+      anchorShapes.push({
+        type: 'line',
+        xref: 'x',
+        yref: 'paper',
+        x0: st,
+        x1: st,
+        y0: 0,
+        y1: 1,
+        line: {
+          color: 'rgba(148, 163, 184, 0.25)',
+          width: 1,
+          dash: 'dash'
+        },
+        layer: 'below'
+      });
     });
   }
 
@@ -3428,7 +3616,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         : (anchoredSeries.anchorTime.length > 10 ? anchoredSeries.anchorTime.slice(5) : anchoredSeries.anchorTime))
     : '';
 
-  if (isAnchored && anchoredSeries.anchorTime) {
+  if (isAnchored && anchoredSeries.anchorTime && corrAnchor.mode !== 'daily_reset') {
     anchorAnnotations.push({
       xref: 'x',
       yref: 'paper',
@@ -3456,10 +3644,10 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
 
   // Subplot 1: Asset % Move (left axis) vs Vol pt move (right axis)
   const assetCustomdata = times.map((t, i) => {
-    const raw = (anchoredSeries.spotRaw && anchoredSeries.spotRaw[i] !== undefined)
+    const raw = (anchoredSeries.spotRaw && anchoredSeries.spotRaw[i] !== undefined && anchoredSeries.spotRaw[i] !== null)
       ? (typeof anchoredSeries.spotRaw[i] === 'number' ? anchoredSeries.spotRaw[i].toFixed(2) : anchoredSeries.spotRaw[i])
       : '-';
-    const rawVol = (anchoredSeries.volRaw && anchoredSeries.volRaw[i] !== undefined)
+    const rawVol = (anchoredSeries.volRaw && anchoredSeries.volRaw[i] !== undefined && anchoredSeries.volRaw[i] !== null)
       ? (typeof anchoredSeries.volRaw[i] === 'number' ? anchoredSeries.volRaw[i].toFixed(2) : anchoredSeries.volRaw[i])
       : '-';
     const s = assetPct[i];
@@ -3472,7 +3660,9 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     x: times,
     y: assetPct,
     customdata: assetCustomdata,
-    name: isAnchored ? `${assetLabel} % (Anchored)` : `${assetLabel} % Move${gthChartOn ? ' (ES-Adj+RTH)' : ''}`,
+    name: isAnchored 
+      ? (corrAnchor.mode === 'daily_reset' ? `${assetLabel} % (Daily Reset)` : `${assetLabel} % (Anchored)`) 
+      : `${assetLabel} % Move${gthChartOn ? ' (ES-Adj+RTH)' : ''}`,
     mode: 'lines',
     line: { color: assetColor, width: 1.8 },
     xaxis: 'x',
@@ -3485,7 +3675,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   // Red when Spot < Vol (Negative Overvix Residual: Vol spiked / panic)
   let dualRibbonTraces = null;
   if (isBetaScaled && isVolInverted && times.length > 0) {
-    const isSessionBaseline = (corrAnchor.mode === 'prior_close' || (!isAnchored && targetTf === '1D'));
+    const isSessionBaseline = (corrAnchor.mode === 'prior_close' || corrAnchor.mode === 'daily_reset' || (!isAnchored && targetTf === '1D'));
     const alpha = isSessionBaseline ? rawIntercept : 0;
     const ribbonData = computeDualRibbonSeries(times, assetPct, volPt, beta, alpha);
     if (ribbonData && ribbonData.xArr.length > 0) {
@@ -3540,23 +3730,23 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   // Vol Customdata for Unified Single Tooltip:
   // [0: rawSpot, 1: sPctStr, 2: rawVol, 3: vPtStr, 4: residStr, 5: gthTag, 6: highTag, 7: assetLabel, 8: volLabel]
   const volCustomdata = times.map((t, i) => {
-    const rawSpot = (anchoredSeries.spotRaw && anchoredSeries.spotRaw[i] !== undefined)
+    const rawSpot = (anchoredSeries.spotRaw && anchoredSeries.spotRaw[i] !== undefined && anchoredSeries.spotRaw[i] !== null)
       ? (typeof anchoredSeries.spotRaw[i] === 'number' ? anchoredSeries.spotRaw[i].toFixed(2) : anchoredSeries.spotRaw[i])
       : '-';
-    const sPct = assetPct[i] || 0;
+    const sPct = assetPct[i];
     const sPctStr = (typeof sPct === 'number' && !isNaN(sPct)) ? (sPct >= 0 ? `+${sPct.toFixed(2)}%` : `${sPct.toFixed(2)}%`) : '-';
 
-    const raw = (anchoredSeries.volRaw && anchoredSeries.volRaw[i] !== undefined) 
+    const raw = (anchoredSeries.volRaw && anchoredSeries.volRaw[i] !== undefined && anchoredSeries.volRaw[i] !== null) 
       ? (typeof anchoredSeries.volRaw[i] === 'number' ? anchoredSeries.volRaw[i].toFixed(2) : anchoredSeries.volRaw[i]) 
       : '-';
-    const vPt = volPt[i] || 0;
+    const vPt = volPt[i];
     // Expected VIX move = alpha + slope * sPct = alpha - beta * sPct
-    // For Prior Close anchor or 1D unanchored session baseline, alpha is the daily intercept from the baseline regression
-    const isSessionBaseline = (corrAnchor.mode === 'prior_close' || (!isAnchored && targetTf === '1D'));
+    // For Prior Close / Daily Reset anchor or 1D unanchored session baseline, alpha is the daily intercept from the baseline regression
+    const isSessionBaseline = (corrAnchor.mode === 'prior_close' || corrAnchor.mode === 'daily_reset' || (!isAnchored && targetTf === '1D'));
     const alpha = isSessionBaseline ? rawIntercept : 0;
-    // Overvix residual = vPt - (alpha - beta * sPct) = vPt - alpha + beta * sPct
-    const resid = vPt - alpha + beta * sPct;
-    const residStr = (resid >= 0 ? `+${resid.toFixed(2)} pts` : `${resid.toFixed(2)} pts`);
+    const isNullBar = (sPct === null || vPt === null || sPct === undefined || vPt === undefined);
+    const resid = isNullBar ? null : (vPt - alpha + beta * sPct);
+    const residStr = (typeof resid === 'number' && !isNaN(resid)) ? (resid >= 0 ? `+${resid.toFixed(2)} pts` : `${resid.toFixed(2)} pts`) : '-';
     const vPtStr = (typeof vPt === 'number' && !isNaN(vPt)) ? (vPt >= 0 ? `+${vPt.toFixed(2)}` : vPt.toFixed(2)) : '-';
     const gthTag = (gthChartOn && c.is_gth && c.is_gth[i] === 1) ? ' [ES-Adj]' : '';
     const highTag = highEventMap[i] || '';
@@ -3569,8 +3759,12 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     y: volPt,
     customdata: volCustomdata,
     name: isVolInverted 
-      ? (isAnchored ? `${volLabel} Pt (Anchored Inv)` : `${volLabel} Point Move (Inv)`) 
-      : (isAnchored ? `${volLabel} Pt (Anchored)` : `${volLabel} Point Move`),
+      ? (isAnchored 
+          ? (corrAnchor.mode === 'daily_reset' ? `${volLabel} Pt (Daily Reset Inv ▼)` : `${volLabel} Pt (Anchored Inv)`) 
+          : `${volLabel} Point Move (Inv)`) 
+      : (isAnchored 
+          ? (corrAnchor.mode === 'daily_reset' ? `${volLabel} Pt (Daily Reset)` : `${volLabel} Pt (Anchored)`) 
+          : `${volLabel} Point Move`),
     mode: 'lines',
     line: { color: volColor, width: 1.8 },
     xaxis: 'x',
@@ -3584,27 +3778,30 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
 
     // Subplot 2: Instantaneous Overvix Residual Monitor
     const thresh = isNdx ? currentNdxThreshold : currentThreshold;
-    const isSessionBaseline = (corrAnchor.mode === 'prior_close' || (!isAnchored && targetTf === '1D'));
+    const isSessionBaseline = (corrAnchor.mode === 'prior_close' || corrAnchor.mode === 'daily_reset' || (!isAnchored && targetTf === '1D'));
     const alpha = isSessionBaseline ? rawIntercept : 0;
 
     // Calculate instantaneous Overvix residual series:
     // r(t) = volPt(t) - alpha + beta * assetPct(t)
     const residSeries = times.map((t, i) => {
-      const sPct = assetPct[i] || 0;
-      const vPt = volPt[i] || 0;
+      const sPct = assetPct[i];
+      const vPt = volPt[i];
+      if (sPct === null || vPt === null || sPct === undefined || vPt === undefined) {
+        return null;
+      }
       const r = vPt - alpha + beta * sPct;
       return Math.round(r * 10000) / 10000;
     });
 
-    const posResid = residSeries.map(v => Math.max(0, v));
-    const negResid = residSeries.map(v => Math.min(0, v));
+    const posResid = residSeries.map(v => (v !== null ? Math.max(0, v) : null));
+    const negResid = residSeries.map(v => (v !== null ? Math.min(0, v) : null));
     const residCustomdata = times.map((t, i) => {
       const r = residSeries[i];
       const rStr = (typeof r === 'number' && !isNaN(r)) ? (r >= 0 ? `+${r.toFixed(2)}` : r.toFixed(2)) : '-';
-      const sRaw = (anchoredSeries.spotRaw && anchoredSeries.spotRaw[i] !== undefined)
+      const sRaw = (anchoredSeries.spotRaw && anchoredSeries.spotRaw[i] !== undefined && anchoredSeries.spotRaw[i] !== null)
         ? (typeof anchoredSeries.spotRaw[i] === 'number' ? anchoredSeries.spotRaw[i].toFixed(2) : anchoredSeries.spotRaw[i])
         : '-';
-      const vRaw = (anchoredSeries.volRaw && anchoredSeries.volRaw[i] !== undefined)
+      const vRaw = (anchoredSeries.volRaw && anchoredSeries.volRaw[i] !== undefined && anchoredSeries.volRaw[i] !== null)
         ? (typeof anchoredSeries.volRaw[i] === 'number' ? anchoredSeries.volRaw[i].toFixed(2) : anchoredSeries.volRaw[i])
         : '-';
       return [rStr, sRaw, vRaw];
@@ -3690,7 +3887,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     const anchorVolRawStr = (typeof corrAnchor.volBase === 'number' && !isNaN(corrAnchor.volBase)) ? corrAnchor.volBase.toFixed(2) : '-';
 
     // Anchor Origin Marker: glowing cyan dot at (anchorTime, 0.0) where both curves start
-    const traceAnchorOrigin = (isAnchored && anchoredSeries.anchorTime) ? {
+    const traceAnchorOrigin = (isAnchored && anchoredSeries.anchorTime && corrAnchor.mode !== 'daily_reset') ? {
       x: [anchoredSeries.anchorTime],
       y: [0.0],
       mode: 'markers',
@@ -3709,7 +3906,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     } : null;
 
     // Anchor Origin Marker on lower subplot: cyan glowing dot at (anchorTime, 0.0)
-    const traceAnchorOriginY3 = (isAnchored && anchoredSeries.anchorTime) ? {
+    const traceAnchorOriginY3 = (isAnchored && anchoredSeries.anchorTime && corrAnchor.mode !== 'daily_reset') ? {
       x: [anchoredSeries.anchorTime],
       y: [0.0],
       mode: 'markers',
@@ -3729,21 +3926,17 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
 
     let maxAbsResid = thresh;
     for (let i = 0; i < residSeries.length; i++) {
-      const absVal = Math.abs(residSeries[i]);
-      if (!isNaN(absVal) && absVal > maxAbsResid) {
-        maxAbsResid = absVal;
+      if (typeof residSeries[i] === 'number' && !isNaN(residSeries[i])) {
+        const absVal = Math.abs(residSeries[i]);
+        if (absVal > maxAbsResid) {
+          maxAbsResid = absVal;
+        }
       }
     }
     const y3Limit = Math.ceil((maxAbsResid * 1.18) * 10) / 10;
     const y3Range = [-y3Limit, y3Limit];
 
-    const plotTraces = [];
-    if (dualRibbonTraces && dualRibbonTraces.length > 0) {
-      plotTraces.push(...dualRibbonTraces);
-    }
-    plotTraces.push(traceAsset, traceVol);
-
-    // VIX / VXN Highs Marker Trace on Volatility Axis (yaxis2) - up to 1M only
+    let traceVixHighMarks = null;
     if (isVixHighsMarked && isEligibleTf && highEvents.length > 0) {
       const highX = highEvents.map(e => e.time);
       const highY = highEvents.map(e => volPt[e.idx]);
@@ -3770,7 +3963,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         ];
       });
 
-      const traceVixHighMarks = {
+      traceVixHighMarks = {
         x: highX,
         y: highY,
         customdata: highCustom,
@@ -3787,15 +3980,204 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         hoverinfo: 'skip',
         showlegend: true
       };
-      plotTraces.push(traceVixHighMarks);
     }
 
-    plotTraces.push(tracePosFill, traceNegFill, traceResidual, traceZeroLine, traceOvervixAlert, traceVolCrush);
-    if (traceAnchorOrigin) {
-      plotTraces.push(traceAnchorOrigin);
-    }
-    if (traceAnchorOriginY3) {
-      plotTraces.push(traceAnchorOriginY3);
+    const isDailyResetMultiDay = (corrAnchor.mode === 'daily_reset' && anchoredSeries.days && anchoredSeries.days.length > 1);
+    const plotTraces = [];
+
+    if (isDailyResetMultiDay) {
+      const days = anchoredSeries.days;
+      const dayMap = anchoredSeries.dayMap;
+
+      // 1. Dual Ribbon Traces for each day (strictly within each day's bounds)
+      if (isBetaScaled && isVolInverted) {
+        days.forEach(d => {
+          const idxs = dayMap[d];
+          const start = idxs[0];
+          const end = idxs[idxs.length - 1] + 1;
+          const times_d = times.slice(start, end);
+          const assetPct_d = assetPct.slice(start, end);
+          const volPt_d = volPt.slice(start, end);
+
+          const ribbonData = computeDualRibbonSeries(times_d, assetPct_d, volPt_d, beta, alpha);
+          if (ribbonData && ribbonData.xArr.length > 0) {
+            plotTraces.push(
+              {
+                x: ribbonData.xArr,
+                y: ribbonData.vArr,
+                mode: 'lines',
+                line: { color: 'transparent', width: 0 },
+                xaxis: 'x',
+                yaxis: 'y',
+                hoverinfo: 'skip',
+                showlegend: false
+              },
+              {
+                x: ribbonData.xArr,
+                y: ribbonData.minArr,
+                mode: 'lines',
+                line: { color: 'transparent', width: 0 },
+                fill: 'tonexty',
+                fillcolor: 'rgba(244, 63, 94, 0.22)',
+                xaxis: 'x',
+                yaxis: 'y',
+                hoverinfo: 'skip',
+                showlegend: false
+              },
+              {
+                x: ribbonData.xArr,
+                y: ribbonData.vArr,
+                mode: 'lines',
+                line: { color: 'transparent', width: 0 },
+                xaxis: 'x',
+                yaxis: 'y',
+                hoverinfo: 'skip',
+                showlegend: false
+              },
+              {
+                x: ribbonData.xArr,
+                y: ribbonData.maxArr,
+                mode: 'lines',
+                line: { color: 'transparent', width: 0 },
+                fill: 'tonexty',
+                fillcolor: 'rgba(16, 185, 129, 0.22)',
+                xaxis: 'x',
+                yaxis: 'y',
+                hoverinfo: 'skip',
+                showlegend: false
+              }
+            );
+          }
+        });
+      }
+
+      // 2. Asset Lines for each day
+      days.forEach((d, dIdx) => {
+        const idxs = dayMap[d];
+        const start = idxs[0];
+        const end = idxs[idxs.length - 1] + 1;
+        plotTraces.push({
+          x: times.slice(start, end),
+          y: assetPct.slice(start, end),
+          customdata: assetCustomdata.slice(start, end),
+          name: `${assetLabel} % (Daily Reset)`,
+          legendgroup: 'asset',
+          showlegend: (dIdx === 0),
+          mode: 'lines',
+          line: { color: assetColor, width: 1.8 },
+          xaxis: 'x',
+          yaxis: 'y',
+          hoverinfo: 'skip'
+        });
+      });
+
+      // 3. Vol Lines for each day
+      days.forEach((d, dIdx) => {
+        const idxs = dayMap[d];
+        const start = idxs[0];
+        const end = idxs[idxs.length - 1] + 1;
+        plotTraces.push({
+          x: times.slice(start, end),
+          y: volPt.slice(start, end),
+          customdata: volCustomdata.slice(start, end),
+          name: isVolInverted 
+            ? `${volLabel} Pt (Daily Reset Inv ▼)` 
+            : `${volLabel} Pt (Daily Reset)`,
+          legendgroup: 'vol',
+          showlegend: (dIdx === 0),
+          mode: 'lines',
+          line: { color: volColor, width: 1.8 },
+          xaxis: 'x',
+          yaxis: 'y2',
+          hovertemplate: 
+            `<b>%{x|${timeHoverFmt}}%{customdata[5]}</b>%{customdata[6]}<br>` +
+            `%{customdata[7]}: <b>%{customdata[0]}</b> (%{customdata[1]})<br>` +
+            `%{customdata[8]}: <b>%{customdata[2]}</b> (%{customdata[3]} pts) · Resid: <b>%{customdata[4]}</b><br>` +
+            `<span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`
+        });
+      });
+
+      // 4. VIX Highs Markers (if any)
+      if (traceVixHighMarks) {
+        plotTraces.push(traceVixHighMarks);
+      }
+
+      // 5. Positive Residual Fill for each day
+      days.forEach(d => {
+        const idxs = dayMap[d];
+        const start = idxs[0];
+        const end = idxs[idxs.length - 1] + 1;
+        plotTraces.push({
+          x: times.slice(start, end),
+          y: posResid.slice(start, end),
+          mode: 'lines',
+          line: { color: 'transparent', width: 0 },
+          fill: 'tozeroy',
+          fillcolor: 'rgba(16, 185, 129, 0.22)',
+          xaxis: 'x',
+          yaxis: 'y3',
+          showlegend: false,
+          hoverinfo: 'skip'
+        });
+      });
+
+      // 6. Negative Residual Fill for each day
+      days.forEach(d => {
+        const idxs = dayMap[d];
+        const start = idxs[0];
+        const end = idxs[idxs.length - 1] + 1;
+        plotTraces.push({
+          x: times.slice(start, end),
+          y: negResid.slice(start, end),
+          mode: 'lines',
+          line: { color: 'transparent', width: 0 },
+          fill: 'tozeroy',
+          fillcolor: 'rgba(244, 63, 94, 0.22)',
+          xaxis: 'x',
+          yaxis: 'y3',
+          showlegend: false,
+          hoverinfo: 'skip'
+        });
+      });
+
+      // 7. Residual Lines for each day
+      days.forEach((d, dIdx) => {
+        const idxs = dayMap[d];
+        const start = idxs[0];
+        const end = idxs[idxs.length - 1] + 1;
+        plotTraces.push({
+          x: times.slice(start, end),
+          y: residSeries.slice(start, end),
+          customdata: residCustomdata.slice(start, end),
+          name: isNdx ? 'Over-VXN Residual' : 'Overvix Residual',
+          legendgroup: 'resid',
+          showlegend: (dIdx === 0),
+          mode: 'lines',
+          line: { color: isNdx ? '#C084FC' : '#00E5FF', width: 1.8 },
+          xaxis: 'x',
+          yaxis: 'y3',
+          hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${isNdx ? 'Over-VXN' : 'Overvix'} Residual: %{customdata[0]} pts<br>${assetLabel}: %{customdata[1]} | ${volLabel}: %{customdata[2]}<extra></extra>`
+        });
+      });
+
+      // 8. Horizontal Reference Lines
+      plotTraces.push(traceZeroLine, traceOvervixAlert, traceVolCrush);
+
+    } else {
+      if (dualRibbonTraces && dualRibbonTraces.length > 0) {
+        plotTraces.push(...dualRibbonTraces);
+      }
+      plotTraces.push(traceAsset, traceVol);
+      if (traceVixHighMarks) {
+        plotTraces.push(traceVixHighMarks);
+      }
+      plotTraces.push(tracePosFill, traceNegFill, traceResidual, traceZeroLine, traceOvervixAlert, traceVolCrush);
+      if (traceAnchorOrigin) {
+        plotTraces.push(traceAnchorOrigin);
+      }
+      if (traceAnchorOriginY3) {
+        plotTraces.push(traceAnchorOriginY3);
+      }
     }
 
     const hasSpan = Boolean(dStart && dEnd && dStart !== dEnd);
@@ -3917,7 +4299,7 @@ function attachCorrelationChartClickListener() {
     // Filter points to prefer full time-series data traces, avoiding 2-point boundary lines (zero line, alert, vol crush)
     const validNames = ['SPX % Move', 'SPX % Since Anchor', 'NDX % Move', 'NDX % Since Anchor',
                         'VIX Point Move', 'VIX Pt Since Anchor', 'VXN Point Move', 'VXN Pt Since Anchor',
-                        'Overvix Residual', 'Over-VXN Residual', 'VIX Highs', 'VXN Highs'];
+                        'Daily Reset', 'Overvix Residual', 'Over-VXN Residual', 'VIX Highs', 'VXN Highs'];
     let chosenPt = eventData.points.find(p => p.data && validNames.some(name => p.data.name && p.data.name.includes(name)));
     if (!chosenPt) {
       // Pick any trace that is not a 2-point helper/boundary line

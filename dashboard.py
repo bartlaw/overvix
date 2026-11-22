@@ -866,6 +866,20 @@ def bars_to_df(bars, col_name: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def series_from_df(df: pd.DataFrame, col_name: str, filter_rth: bool = True) -> pd.Series:
+    """
+    Extract a timezone-normalized pd.Series indexed by 'YYYY-MM-DD HH:MM' from bars DataFrame.
+    """
+    if df is None or df.empty or col_name not in df.columns:
+        return pd.Series(dtype=float, name=col_name)
+    df_copy = df.copy()
+    if filter_rth:
+        df_copy = df_copy[(df_copy['time'] >= pd.to_datetime('09:30').time()) & 
+                          (df_copy['time'] <= pd.to_datetime('16:00').time())].copy()
+    df_copy['date_str'] = df_copy['date_et'].dt.strftime('%Y-%m-%d %H:%M')
+    return df_copy.drop_duplicates(subset=['date_str']).set_index('date_str')[col_name]
+
+
 def resample_30m_to_session(df: pd.DataFrame, target_size: str, col_name: str) -> pd.Series:
     """
     Resample 30-min bars to session-anchored 2-hour or 4-hour bars starting at 09:30 ET.
@@ -978,13 +992,14 @@ def load_history_cache() -> Optional[Dict[str, Any]]:
     return None
 
 
-def save_history_cache(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.DataFrame, cache_date: str):
+def save_history_cache(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.DataFrame, cache_date: str, dfs_1m: Optional[Dict[str, pd.DataFrame]] = None):
     try:
         os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
         payload = {
             'cache_date': cache_date,
             'dfs_pool': dfs_pool,
-            'df_daily': df_daily
+            'df_daily': df_daily,
+            'dfs_1m': dfs_1m
         }
         with open(CACHE_PATH, 'wb') as f:
             pickle.dump(payload, f)
@@ -1436,7 +1451,7 @@ def compute_spotvol_baselines(df_daily: pd.DataFrame, active_sess_date: Optional
     print(f" NDX Spot-Vol Baseline ({len(state.df_spotvol_ndx)} bars): R²={state.ndx_r_squared:.4f}, Slope={state.ndx_slope:.4f}")
 
 
-def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.DataFrame, active_sess_date: Optional[str], today_et: str):
+def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.DataFrame, active_sess_date: Optional[str], today_et: str, dfs_1m: Optional[Dict[str, pd.DataFrame]] = None):
     if not dfs_pool or 'spx' not in dfs_pool or dfs_pool['spx'].empty:
         return
 
@@ -1444,16 +1459,27 @@ def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.D
     days_3m = set(trading_days[-64:]) if len(trading_days) >= 64 else set(trading_days)
     days_1m = set(trading_days[-22:]) if len(trading_days) >= 22 else set(trading_days)
 
-    # 1M Bars (RTH 30-min bars for last 22 trading days)
-    s_1m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_1m)], '30m', 'spx')
-    v_1m = resample_30m_to_session(dfs_pool['vix'][dfs_pool['vix']['day'].isin(days_1m)], '30m', 'vix')
-    v3_1m = resample_30m_to_session(dfs_pool['vix3m'][dfs_pool['vix3m']['day'].isin(days_1m)], '30m', 'vix3m')
-    n_1m = resample_30m_to_session(dfs_pool['ndx'][dfs_pool['ndx']['day'].isin(days_1m)], '30m', 'ndx')
-    vx_1m = resample_30m_to_session(dfs_pool['vxn'][dfs_pool['vxn']['day'].isin(days_1m)], '30m', 'vxn')
-    (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
-     state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_horizon_pack(
-        s_1m, v_1m, v3_1m, n_1m, vx_1m, roll_win=39, min_p=10
-    )
+    # 1M Bars (5-minute bars if dfs_1m available, fallback to 30-min bars)
+    if dfs_1m and 'spx' in dfs_1m and not dfs_1m['spx'].empty:
+        s_1m = series_from_df(dfs_1m['spx'], 'spx', filter_rth=True)
+        v_1m = series_from_df(dfs_1m['vix'], 'vix', filter_rth=True)
+        v3_1m = series_from_df(dfs_1m['vix3m'], 'vix3m', filter_rth=True)
+        n_1m = series_from_df(dfs_1m['ndx'], 'ndx', filter_rth=True)
+        vx_1m = series_from_df(dfs_1m['vxn'], 'vxn', filter_rth=True)
+        (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
+         state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_horizon_pack(
+            s_1m, v_1m, v3_1m, n_1m, vx_1m, roll_win=78, min_p=20
+        )
+    else:
+        s_1m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_1m)], '30m', 'spx')
+        v_1m = resample_30m_to_session(dfs_pool['vix'][dfs_pool['vix']['day'].isin(days_1m)], '30m', 'vix')
+        v3_1m = resample_30m_to_session(dfs_pool['vix3m'][dfs_pool['vix3m']['day'].isin(days_1m)], '30m', 'vix3m')
+        n_1m = resample_30m_to_session(dfs_pool['ndx'][dfs_pool['ndx']['day'].isin(days_1m)], '30m', 'ndx')
+        vx_1m = resample_30m_to_session(dfs_pool['vxn'][dfs_pool['vxn']['day'].isin(days_1m)], '30m', 'vxn')
+        (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
+         state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_horizon_pack(
+            s_1m, v_1m, v3_1m, n_1m, vx_1m, roll_win=39, min_p=10
+        )
 
     # 3M Bars (RTH 30-min bars for last 64 trading days)
     s_3m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_3m)], '30m', 'spx')
@@ -1520,14 +1546,21 @@ def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.D
 
 async def hydrate_deep_history_background(active_sess_date: Optional[str], today_et: str):
     """
-    Background worker that fetches 6M (30-min) and 2Y (1-day) bars from IBKR,
+    Background worker that fetches 1M (5-min), 6M (30-min) and 2Y (1-day) bars from IBKR,
     persists them to disk cache (history_cache.pkl), updates state multi-timeframe horizons,
     and bumps state.hist_version so connected browser clients receive updated datasets without UI blocking.
     """
     try:
-        print("[Background Cache] Hydrating deep history (6M 30-min & 2Y daily) from IBKR in background...")
-        (b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn,
+        print("[Background Cache] Hydrating deep history (1M 5-min, 6M 30-min & 2Y daily) from IBKR in background...")
+        (b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn,
+         b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn,
          spx_bars_2y, vix_bars_2y, vix3m_bars_2y, ndx_bars_2y, vxn_bars_2y) = await asyncio.gather(
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '1 M', '5 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '1 M', '5 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '1 M', '5 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '1 M', '5 mins', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '1 M', '5 mins', 'TRADES', True, 1),
+
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
@@ -1540,6 +1573,11 @@ async def hydrate_deep_history_background(active_sess_date: Optional[str], today
             state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
         )
+        dfs_1m = {
+            name: bars_to_df(bars, name)
+            for name, bars in zip(['spx', 'vix', 'vix3m', 'ndx', 'vxn'],
+                                  [b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn])
+        }
         dfs_pool = {
             name: bars_to_df(bars, name)
             for name, bars in zip(['spx', 'vix', 'vix3m', 'ndx', 'vxn'],
@@ -1553,14 +1591,14 @@ async def hydrate_deep_history_background(active_sess_date: Optional[str], today
         df_daily = pd.concat([df_s2y, df_v2y, df_v32y, df_n2y, df_vx2y], axis=1).dropna()
 
         # Save to disk cache
-        save_history_cache(dfs_pool, df_daily, today_et)
+        save_history_cache(dfs_pool, df_daily, today_et, dfs_1m=dfs_1m)
 
         # Apply to state and bump hist_version
-        apply_multi_timeframe_pool(dfs_pool, df_daily, active_sess_date, today_et)
+        apply_multi_timeframe_pool(dfs_pool, df_daily, active_sess_date, today_et, dfs_1m=dfs_1m)
         compute_spotvol_baselines(df_daily, active_sess_date, today_et)
 
         state.hist_version += 1
-        print(f"[Background Cache] Deep history successfully hydrated and saved to disk. (Version {state.hist_version})")
+        print(f"[Background Cache] Deep history (with 1M 5m) successfully hydrated and saved to disk. (Version {state.hist_version})")
     except Exception as e:
         print(f"[Background Cache Error] Failed hydrating deep history: {e}")
 
@@ -1664,10 +1702,11 @@ async def refresh_historical_data():
             print("[IBKR] Loading deep multi-timeframe history from local disk cache (<0.01s)...")
             cached_dfs = cache_data['dfs_pool']
             cached_df_daily = cache_data['df_daily']
+            cached_dfs_1m = cache_data.get('dfs_1m')
             daily_ref_df = cached_df_daily
             compute_spotvol_baselines(cached_df_daily, active_sess_date, today_et)
-            apply_multi_timeframe_pool(cached_dfs, cached_df_daily, active_sess_date, today_et)
-            if cache_data.get('cache_date') < today_et:
+            apply_multi_timeframe_pool(cached_dfs, cached_df_daily, active_sess_date, today_et, dfs_1m=cached_dfs_1m)
+            if cache_data.get('cache_date') < today_et or not cached_dfs_1m:
                 need_background_hydration = True
         else:
             # Cold first launch with no disk cache: fetch 4M (1-day) bars in parallel (~0.25s) for immediate Spot-Vol baselines
@@ -1837,7 +1876,7 @@ async def refresh_historical_data():
 
         state.hist_version += 1
         print(f"[IBKR] Baseline & multi-timeframe datasets successfully loaded (Version {state.hist_version}):")
-        print(f"       1D={len(state.df_ts_1d)} bars, 5D={len(state.df_ts_5d)} bars, 10D={len(state.df_ts_10d)} bars, 1M={len(state.df_ts_1m)} bars (30m), "
+        print(f"       1D={len(state.df_ts_1d)} bars, 5D={len(state.df_ts_5d)} bars, 10D={len(state.df_ts_10d)} bars, 1M={len(state.df_ts_1m)} bars (5m), "
               f"3M={len(state.df_ts_3m)} bars (30m), 6M={len(state.df_ts_6m)} bars (30m), YTD={len(state.df_ts_ytd)} bars, "
               f"1Y={len(state.df_ts_1y)} bars, MAX={len(state.df_ts_max)} bars.")
         if state.es_contract:
@@ -1876,6 +1915,8 @@ def _calc_4m_rr(c_contract, p_contract, c_ticker, p_ticker, cached_data, spot=No
                 c_mid = (c_ticker.bid + c_ticker.ask) / 2.0
             elif c_ticker.close and not math.isnan(c_ticker.close) and c_ticker.close > 0:
                 c_mid = c_ticker.close
+            else:
+                c_mid = None
         if c_ticker.modelGreeks:
             mg = c_ticker.modelGreeks
             if mg.impliedVol and not math.isnan(mg.impliedVol) and mg.impliedVol > 0:
@@ -1890,6 +1931,8 @@ def _calc_4m_rr(c_contract, p_contract, c_ticker, p_ticker, cached_data, spot=No
                 p_mid = (p_ticker.bid + p_ticker.ask) / 2.0
             elif p_ticker.close and not math.isnan(p_ticker.close) and p_ticker.close > 0:
                 p_mid = p_ticker.close
+            else:
+                p_mid = None
         if p_ticker.modelGreeks:
             mg = p_ticker.modelGreeks
             if mg.impliedVol and not math.isnan(mg.impliedVol) and mg.impliedVol > 0:
@@ -1906,7 +1949,7 @@ def _calc_4m_rr(c_contract, p_contract, c_ticker, p_ticker, cached_data, spot=No
         c_delta = c_delta or cached_data.get('call_delta')
         p_delta = p_delta or cached_data.get('put_delta')
 
-    if c_mid is not None and p_mid is not None:
+    if c_mid is not None and p_mid is not None and not math.isnan(c_mid) and not math.isnan(p_mid):
         combo_mid = c_mid - p_mid
         net_credit = p_mid - c_mid  # positive when Put > Call (Credit collected)
         iv_skew = (p_iv - c_iv) if (p_iv is not None and c_iv is not None) else None
@@ -2275,6 +2318,18 @@ async def recalibrate_25d_risk_reversal(asset: str = "SPX", mode: str = "spot") 
             "put_strike": put_strike,
             "call_strike": call_strike
         }
+
+
+def _sanitize_json_floats(obj):
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_json_floats(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_json_floats(v) for v in obj]
+    return obj
 
 
 def compute_live_payload() -> Dict[str, Any]:
@@ -2726,6 +2781,11 @@ def compute_live_payload() -> Dict[str, Any]:
         # Macro curve slope: M1 vs back month (M7 or last available)
         is_macro_inverted = bool(m1_price and m7_price and (m7_price - m1_price) < -0.01)
 
+        # Safe formatted strings for descriptions when market is closed or contracts pending ticks
+        m1_m2_pct_str = f"{m1_m2_pct:+.2f}%" if m1_m2_pct is not None else "N/A"
+        m1_m2_diff_str = f"{m1_m2_diff:+.2f} pts" if m1_m2_diff is not None else "N/A"
+        m4_m7_pct_str = f"{m4_m7_pct:+.2f}%" if m4_m7_pct is not None else "N/A"
+
         # Standard Classification:
         # 1. FULL BACKWARDATION:
         #    Front is inverted (M1/M2 < 0) AND:
@@ -2737,7 +2797,7 @@ def compute_live_payload() -> Dict[str, Any]:
             badge = "FULL BACKWARDATION"
             badge_class = "bg-red-950/90 text-red-300 border border-red-700 animate-pulse font-bold"
             tag = "🚨 FULL BACKWARDATION"
-            desc = f"Full Curve Backwardation: {inv_count} of {total_pairs} monthly spreads inverted. Front M1/M2 contango is {m1_m2_pct:+.2f}% ({m1_m2_diff:+.2f} pts). Severe persistent stress across term structure."
+            desc = f"Full Curve Backwardation: {inv_count} of {total_pairs} monthly spreads inverted. Front M1/M2 contango is {m1_m2_pct_str} ({m1_m2_diff_str}). Severe persistent stress across term structure."
         # 2. FRONT BACKWARDATION:
         #    Front is inverted (M1/M2 < 0), but mid/back curve remains in contango.
         elif is_front_inverted and not is_mid_inverted and not is_macro_inverted:
@@ -2745,7 +2805,7 @@ def compute_live_payload() -> Dict[str, Any]:
             badge = "FRONT BACKWARDATION"
             badge_class = "bg-amber-950/80 text-amber-300 border border-amber-800 font-bold"
             tag = "⚠️ FRONT BACKWARDATION"
-            desc = f"Front-Month Backwardation: Near-term panic (M1/M2: {m1_m2_pct:+.2f}%), but back curve remains in contango (M4/M7: {m4_m7_pct:+.2f}%). Localized event risk."
+            desc = f"Front-Month Backwardation: Near-term panic (M1/M2: {m1_m2_pct_str}), but back curve remains in contango (M4/M7: {m4_m7_pct_str}). Localized event risk."
         # 3. BELLY INVERSION:
         #    Front is in contango (M1/M2 >= 0), but mid/back curve inverts (M4/M7 < 0).
         elif not is_front_inverted and is_mid_inverted:
@@ -2753,14 +2813,14 @@ def compute_live_payload() -> Dict[str, Any]:
             badge = "BELLY INVERSION"
             badge_class = "bg-rose-950/80 text-rose-300 border border-rose-800 font-bold"
             tag = "⚠️ BELLY INVERSION"
-            desc = f"Mid-Curve Inversion: Front roll is in contango, but back curve inverts (M4/M7: {m4_m7_pct:+.2f}%). Intermediate term stress."
+            desc = f"Mid-Curve Inversion: Front roll is in contango, but back curve inverts (M4/M7: {m4_m7_pct_str}). Intermediate term stress."
         # Fallback for any front inversion not caught by strict rules
         elif is_front_inverted:
             regime = "FRONT BACKWARDATION"
             badge = "FRONT BACKWARDATION"
             badge_class = "bg-amber-950/80 text-amber-300 border border-amber-800 font-bold"
             tag = "⚠️ FRONT BACKWARDATION"
-            desc = f"Front-Month Backwardation: Near-term inversion (M1/M2: {m1_m2_pct:+.2f}%). Event risk."
+            desc = f"Front-Month Backwardation: Near-term inversion (M1/M2: {m1_m2_pct_str}). Event risk."
         # 4. FLATTENING:
         #    Front roll contango is very narrow (0.0% <= M1/M2 < 1.0%), and curve is not inverted.
         elif m1_m2_pct is not None and 0.0 <= m1_m2_pct < 1.0 and not is_macro_inverted:
@@ -2768,7 +2828,7 @@ def compute_live_payload() -> Dict[str, Any]:
             badge = "FLATTENING"
             badge_class = "bg-slate-800 text-amber-200 border border-slate-700 font-semibold"
             tag = "FLATTENING"
-            desc = f"Curve Flattening: Front contango compressed near zero (M1/M2: {m1_m2_pct:+.2f}%). Pre-inversion transition."
+            desc = f"Curve Flattening: Front contango compressed near zero (M1/M2: {m1_m2_pct_str}). Pre-inversion transition."
         # 5. CONTANGO:
         #    Normal upward-sloping curve (M1/M2 >= 1.0% and M7 >= M1).
         else:
@@ -2776,7 +2836,7 @@ def compute_live_payload() -> Dict[str, Any]:
             badge = "CONTANGO"
             badge_class = "bg-emerald-950 text-emerald-300 border border-emerald-800 font-semibold"
             tag = "CONTANGO"
-            desc = f"Normal Contango: Standard upward-sloping curve (M1/M2: {m1_m2_pct:+.2f}%). Volatility risk premium healthy."
+            desc = f"Normal Contango: Standard upward-sloping curve (M1/M2: {m1_m2_pct_str}). Volatility risk premium healthy."
 
         res_payload = {
             "regime": regime,
@@ -3055,7 +3115,7 @@ def compute_live_payload() -> Dict[str, Any]:
 
     src_suffix = "" if is_live_rth else (" (PRE-MARKET)" if is_premarket_hour else " (CLOSED)")
 
-    return {
+    payload = {
         "timestamp": curr_time_str,
         "datetime": curr_dt_str,
         "session_date": state.active_session_date,
@@ -3288,6 +3348,7 @@ def compute_live_payload() -> Dict[str, Any]:
             }
         }
     }
+    return _sanitize_json_floats(payload)
 
 
 # ==============================================================================
@@ -3690,7 +3751,7 @@ async def get_bootstrap():
     y_gth_hist = [round(float(v), 2) for v in state.df_spotvol_gth['vix_pt'].tolist()] if not state.df_spotvol_gth.empty else y_hist
     dates_gth_sv = [str(d)[:10] for d in state.df_spotvol_gth.index] if not state.df_spotvol_gth.empty else dates_sv
 
-    return {
+    bootstrap_data = {
         **live,
         "overvix": {
             **live["overvix"],
@@ -3773,6 +3834,7 @@ async def get_bootstrap():
         "tech_vol": tech_vol_bootstrap,
         "vix_futures": live.get("vix_futures")
     }
+    return _sanitize_json_floats(bootstrap_data)
 
 
 @app.get("/api/status")

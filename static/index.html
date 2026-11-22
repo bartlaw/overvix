@@ -864,6 +864,10 @@
                 <span>⏮️</span>
                 <span>Prior Close</span>
               </button>
+              <button id="btn-anchor-daily-reset" class="px-2.5 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1" title="Anchor each day to its prior official close (16:00 ET) so each day renders like a 1-day chart (1D, 5D, 10D, 1M)">
+                <span>📅</span>
+                <span>Daily Reset</span>
+              </button>
               <button id="btn-anchor-spot-low" class="px-2.5 py-1 rounded text-slate-400 hover:text-emerald-400 transition flex items-center space-x-1" title="Anchor to intraday equity index low (trough)">
                 <span>⚡</span>
                 <span id="anchor-spot-low-label">SPX Low</span>
@@ -1242,8 +1246,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v9.7 - Unified Single Tooltip on Term Structure & Voice Features) -->
-  <script src="/static/dashboard.js?v=9.7"></script>
+  <!-- DASHBOARD SCRIPT (v10.0 - Clean Daily Reset Per-Day Trace Segmentation) -->
+  <script src="/static/dashboard.js?v=10.0"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>
