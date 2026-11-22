@@ -4425,10 +4425,10 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       paper_bgcolor: 'transparent',
       plot_bgcolor: 'transparent',
       autosize: true,
-      hovermode: 'x',
+      hovermode: 'closest',
       dragmode: false,
       clickmode: 'event',
-      hoverdistance: 50,
+      hoverdistance: 25,
       hoverlabel: {
         bgcolor: 'rgba(15, 23, 42, 0.95)',
         bordercolor: '#00E5FF',
