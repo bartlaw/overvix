@@ -979,8 +979,8 @@ function getHistoricalDotHoverTemplate(assetLabel, volLabel) {
   const isNdx = (currentAssetPair === 'NDX');
   const residLabel = isNdx ? 'Over-VXN Residual' : 'Overvix Residual';
   return `<b>%{text}</b><br>` +
-         `${assetLabel} Move: %{x:+.2f}%<br>` +
-         `${volLabel} Move: %{y:+.2f} pts<br>` +
+         `${assetLabel} Move: <b>%{x:+.2f}%</b><br>` +
+         `${volLabel} Move: <b>%{y:+.2f} pts</b><br>` +
          `${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br>` +
          `<span style="color:${color};font-size:10px">${hint}</span><extra></extra>`;
 }
@@ -1484,16 +1484,24 @@ function renderOvervixChart(bootstrap) {
     : (beaconResid !== null && beaconResid <= -threshold ? "  <span style='color:#06B6D4;font-weight:bold'>📉 CRUSH</span>" : "");
 
   const beaconHover = isGthLiveActive
-    ? `<b>Live GTH Point (${gthObj.es_symbol || 'ES'} Adj + VIX)</b><br>SPX (ES Adj): %{x:+.2f}%<br>VIX Move: %{y:+.2f} pts<br>${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`
+    ? `<b>Live GTH Point (${gthObj.es_symbol || 'ES'} Adj + VIX)</b><br>SPX (ES Adj): <b>%{x:+.2f}%</b><br>VIX Move: <b>%{y:+.2f} pts</b><br>${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`
     : ((bootstrap.is_historical || !showLiveBeacon)
-      ? `<b>Session Close (${trailSessionDate || 'Prior'})</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<br>${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Official Close</span><extra></extra>`
-      : `<b>Live Current Point</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<br>${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`);
+      ? `<b>Session Close (${trailSessionDate || 'Prior'})</b><br>${assetLabel} Move: <b>%{x:+.2f}%</b><br>${volLabel} Move: <b>%{y:+.2f} pts</b><br>${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Official Close</span><extra></extra>`
+      : `<b>Live Current Point</b><br>${assetLabel} Move: <b>%{x:+.2f}%</b><br>${volLabel} Move: <b>%{y:+.2f} pts</b><br>${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`);
 
   // Size gradient for historical points: oldest session = 3.5px, most recent session = 9.0px (current max)
   const nHist = xHist.length;
   const histSizes = nHist <= 1
     ? (nHist === 1 ? [9] : 9)
     : xHist.map((_, i) => Number((3.5 + (9.0 - 3.5) * (i / (nHist - 1))).toFixed(2)));
+
+  // Dark theme hoverlabel matching other charts
+  const darkHoverlabel = {
+    bgcolor: 'rgba(15, 23, 42, 0.95)',
+    bordercolor: isNdx ? '#C084FC' : '#00E5FF',
+    font: { family: 'monospace', size: 11, color: '#F8FAFC' },
+    align: 'left'
+  };
 
   const traces = [
     // 0: Historical 60D Spot-Vol Points
@@ -1510,6 +1518,7 @@ function renderOvervixChart(bootstrap) {
         opacity: 0.85,
         line: { color: isNdx ? '#9333EA' : '#B39F50', width: 0.75 }
       },
+      hoverlabel: darkHoverlabel,
       hovertemplate: getHistoricalDotHoverTemplate(assetLabel, volLabel),
       visible: currentTrailMode === 'today' ? false : true
     },
@@ -1551,7 +1560,8 @@ function renderOvervixChart(bootstrap) {
       name: bootstrap.is_historical ? `${bootstrap.session_date} Path` : (trailSessionDate ? `Session ${trailSessionDate} Path${gthMode ? ' (GTH+RTH)' : ''}` : "Intraday Path"),
       line: { color: isGthLiveActive ? '#818CF8' : '#00E5FF', width: 1.8, shape: 'spline' },
       marker: { color: isGthLiveActive ? '#818CF8' : '#00E5FF', size: 4, opacity: 0.8 },
-      hovertemplate: `<b>%{text}</b><br>${assetLabel}: %{x:+.2f}%<br>${volLabel}: %{y:+.2f} pts<br>${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`,
+      hoverlabel: darkHoverlabel,
+      hovertemplate: `<b>%{text}</b><br>${assetLabel} Move: <b>%{x:+.2f}%</b><br>${volLabel} Move: <b>%{y:+.2f} pts</b><br>${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`,
       visible: currentTrailMode === '60d' ? false : true
     },
     // 5: Session End / Live Current Point
@@ -1566,6 +1576,7 @@ function renderOvervixChart(bootstrap) {
         size: 14,
         line: { color: '#FFFFFF', width: 2 }
       },
+      hoverlabel: darkHoverlabel,
       hovertemplate: beaconHover
     }
   ];
@@ -1584,6 +1595,7 @@ function renderOvervixChart(bootstrap) {
     autosize: true,
     hovermode: 'closest',
     hoverdistance: 35,
+    hoverlabel: darkHoverlabel,
     margin: { l: 50, r: 20, t: 25, b: 45 },
     xaxis: {
       title: { text: `${assetLabel}${gthMode ? ' (ES Adj)' : ''} % Change (${sessionPeriodLabel})`, font: { color: '#94A3B8', size: 11 } },
