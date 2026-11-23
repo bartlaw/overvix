@@ -2327,10 +2327,15 @@ function findClosestTimeIndex(times, target) {
 }
 
 function getOfficialPriorClose(isNdx) {
-  if (!isNdx && isGthChartActive(currentCorrTf) && cachedBootstrap && cachedBootstrap.overvix && cachedBootstrap.overvix.gth_model) {
-    const gm = cachedBootstrap.overvix.gth_model;
-    if (gm.ref_spx && gm.ref_vix) {
-      return { spot: gm.ref_spx, vol: gm.ref_vix };
+  if (!isNdx && isGthChartActive(currentCorrTf) && cachedBootstrap) {
+    if (cachedBootstrap.gth && cachedBootstrap.gth.ref_spx && cachedBootstrap.gth.ref_vix) {
+      return { spot: cachedBootstrap.gth.ref_spx, vol: cachedBootstrap.gth.ref_vix };
+    }
+    if (cachedBootstrap.overvix && cachedBootstrap.overvix.gth_model) {
+      const gm = cachedBootstrap.overvix.gth_model;
+      if (gm.ref_spx && gm.ref_vix) {
+        return { spot: gm.ref_spx, vol: gm.ref_vix };
+      }
     }
   }
   if (cachedBootstrap && cachedBootstrap.reference_closes) {
@@ -2703,6 +2708,7 @@ function computeAnchoredSeries(c, isNdx) {
 
   // Daily Reset Anchor Mode: each day anchored to its prior official close
   if (corrAnchor.mode === 'daily_reset') {
+    const isGthActive = (!isNdx && (Boolean(c && Array.isArray(c.is_gth) && c.is_gth.length > 0) || isGthChartActive(currentCorrTf)));
     const rawDayMap = {};
     for (let i = 0; i < times.length; i++) {
       const dStr = times[i].slice(0, 10);
@@ -2772,9 +2778,14 @@ function computeAnchoredSeries(c, isNdx) {
     const dayPriorCloses = {};
     for (let k = 0; k < days.length; k++) {
       const d = days[k];
-      if (k > 0) {
+      if (d === latestDay && isGthActive && cachedBootstrap && cachedBootstrap.gth && cachedBootstrap.gth.ref_spx && cachedBootstrap.gth.ref_vix) {
+        dayPriorCloses[d] = {
+          spot: cachedBootstrap.gth.ref_spx,
+          vol: cachedBootstrap.gth.ref_vix
+        };
+      } else if (k > 0) {
         const prevDay = days[k - 1];
-        if (officialCloses[prevDay] && officialCloses[prevDay].spot && officialCloses[prevDay].vol) {
+        if (!isGthActive && officialCloses[prevDay] && officialCloses[prevDay].spot && officialCloses[prevDay].vol) {
           dayPriorCloses[d] = {
             spot: officialCloses[prevDay].spot,
             vol: officialCloses[prevDay].vol
@@ -2791,13 +2802,18 @@ function computeAnchoredSeries(c, isNdx) {
         // Day 0: look up latest official close prior to d
         let refSpot = null;
         let refVol = null;
-        for (let j = dailyDatesList.length - 1; j >= 0; j--) {
-          if (dailyDatesList[j] < d) {
-            const entry = officialCloses[dailyDatesList[j]];
-            if (entry) {
-              refSpot = entry.spot;
-              refVol = entry.vol;
-              break;
+        if (isGthActive && cachedBootstrap && cachedBootstrap.gth && cachedBootstrap.gth.ref_spx && cachedBootstrap.gth.ref_vix) {
+          refSpot = cachedBootstrap.gth.ref_spx;
+          refVol = cachedBootstrap.gth.ref_vix;
+        } else {
+          for (let j = dailyDatesList.length - 1; j >= 0; j--) {
+            if (dailyDatesList[j] < d) {
+              const entry = officialCloses[dailyDatesList[j]];
+              if (entry) {
+                refSpot = entry.spot;
+                refVol = entry.vol;
+                break;
+              }
             }
           }
         }
@@ -2845,13 +2861,13 @@ function computeAnchoredSeries(c, isNdx) {
         outVolRaw.push(v);
       }
 
-      // Check if official settlement exists for day d and can be appended at 16:00
+      // Check if official settlement exists for day d and can be appended at 16:00 (Cash RTH only, not GTH)
       const lastRawTime = times[indices[indices.length - 1]];
       const has1600 = (lastRawTime.slice(11, 16) >= '16:00');
       const offSettle = officialCloses[d];
       const isPastDay = (k < days.length - 1);
 
-      if (!has1600 && (isPastDay || isLatestDayCompleted) && offSettle && offSettle.spot && offSettle.vol) {
+      if (!isGthActive && !has1600 && (isPastDay || isLatestDayCompleted) && offSettle && offSettle.spot && offSettle.vol) {
         const settleTime = `${d} 16:00`;
         const s = offSettle.spot;
         const v = offSettle.vol;

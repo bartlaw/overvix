@@ -846,12 +846,13 @@ def bars_to_df(bars, col_name: str) -> pd.DataFrame:
     """
     Convert raw IBKR historical bars into a timezone-aware Eastern DataFrame with date, time, and day columns.
     """
+    empty_df = pd.DataFrame(columns=['date_et', 'time', 'day', col_name])
     if not bars:
-        return pd.DataFrame()
+        return empty_df
     try:
         df = util.df(bars)
         if df is None or df.empty or 'date' not in df.columns or 'close' not in df.columns:
-            return pd.DataFrame()
+            return empty_df
         df['date'] = pd.to_datetime(df['date'])
         if df['date'].dt.tz is not None:
             df['date_et'] = df['date'].dt.tz_convert('US/Eastern')
@@ -863,7 +864,7 @@ def bars_to_df(bars, col_name: str) -> pd.DataFrame:
         return df[['date_et', 'time', 'day', col_name]]
     except Exception as e:
         print(f"[bars_to_df] Error parsing {col_name}: {e}")
-        return pd.DataFrame()
+        return empty_df
 
 
 def series_from_df(df: pd.DataFrame, col_name: str, filter_rth: bool = True) -> pd.Series:
@@ -986,6 +987,11 @@ def load_history_cache() -> Optional[Dict[str, Any]]:
             with open(CACHE_PATH, 'rb') as f:
                 data = pickle.load(f)
                 if isinstance(data, dict) and 'dfs_pool' in data and 'df_daily' in data:
+                    pool = data.get('dfs_pool', {})
+                    for k in ['spx', 'vix', 'vix3m', 'ndx', 'vxn']:
+                        df_k = pool.get(k)
+                        if df_k is None or not isinstance(df_k, pd.DataFrame) or df_k.empty or 'day' not in df_k.columns:
+                            pool[k] = pd.DataFrame(columns=['date_et', 'time', 'day', k])
                     return data
         except Exception as e:
             print(f"[Cache Error] Failed reading history cache: {e}")
@@ -1380,13 +1386,17 @@ def compute_spotvol_baselines(df_daily: pd.DataFrame, active_sess_date: Optional
     col_vix = 'vix_close' if 'vix_close' in df_daily.columns else 'vix'
     df_sv = df_daily[[col_spx, col_vix]].dropna().rename(columns={col_spx: 'spx_close', col_vix: 'vix_close'})
 
-    if active_sess_date:
-        df_prior_sv = df_sv.loc[[str(d)[:10] < active_sess_date for d in df_sv.index]]
-        if df_prior_sv.empty:
-            df_prior_sv = df_sv.iloc[:-1] if len(df_sv) > 1 else df_sv
+    now_et = datetime.now(ET_TZ)
+    rth_finished_today = (now_et.time() >= dtime(16, 0))
+    # Exclude today's partial intraday bar if RTH has not finished yet (< 16:00 ET).
+    # All completed sessions prior to today (e.g. Friday Nov 20 on Monday Nov 23) must be retained!
+    if rth_finished_today:
+        df_prior_sv = df_sv.loc[[str(d)[:10] <= today_et for d in df_sv.index]]
     else:
-        is_today_in_sv = (str(df_sv.index[-1])[:10] == today_et) if not df_sv.empty else False
-        df_prior_sv = df_sv.iloc[:-1] if is_today_in_sv and len(df_sv) > 1 else df_sv
+        df_prior_sv = df_sv.loc[[str(d)[:10] < today_et for d in df_sv.index]]
+
+    if df_prior_sv.empty:
+        df_prior_sv = df_sv.iloc[:-1] if len(df_sv) > 1 else df_sv
 
     df_prior_sv = df_prior_sv.copy()
     df_prior_sv['spx_pct'] = df_prior_sv['spx_close'].pct_change() * 100.0
@@ -1415,13 +1425,13 @@ def compute_spotvol_baselines(df_daily: pd.DataFrame, active_sess_date: Optional
     col_vxn = 'vxn_close' if 'vxn_close' in df_daily.columns else 'vxn'
     df_sv_ndx = df_daily[[col_ndx, col_vxn]].dropna().rename(columns={col_ndx: 'ndx_close', col_vxn: 'vxn_close'})
 
-    if active_sess_date:
-        df_prior_ndx = df_sv_ndx.loc[[str(d)[:10] < active_sess_date for d in df_sv_ndx.index]]
-        if df_prior_ndx.empty:
-            df_prior_ndx = df_sv_ndx.iloc[:-1] if len(df_sv_ndx) > 1 else df_sv_ndx
+    if rth_finished_today:
+        df_prior_ndx = df_sv_ndx.loc[[str(d)[:10] <= today_et for d in df_sv_ndx.index]]
     else:
-        is_today_in_ndx = (str(df_sv_ndx.index[-1])[:10] == today_et) if not df_sv_ndx.empty else False
-        df_prior_ndx = df_sv_ndx.iloc[:-1] if is_today_in_ndx and len(df_sv_ndx) > 1 else df_sv_ndx
+        df_prior_ndx = df_sv_ndx.loc[[str(d)[:10] < today_et for d in df_sv_ndx.index]]
+
+    if df_prior_ndx.empty:
+        df_prior_ndx = df_sv_ndx.iloc[:-1] if len(df_sv_ndx) > 1 else df_sv_ndx
 
     df_prior_ndx = df_prior_ndx.copy()
     df_prior_ndx['ndx_pct'] = df_prior_ndx['ndx_close'].pct_change() * 100.0
@@ -1484,49 +1494,58 @@ def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.D
     if not dfs_pool or 'spx' not in dfs_pool or dfs_pool['spx'].empty:
         return
 
-    trading_days = sorted(dfs_pool['spx']['day'].unique()) if not dfs_pool['spx'].empty else []
+    spx_pool = dfs_pool.get('spx')
+    trading_days = sorted(spx_pool['day'].unique()) if (spx_pool is not None and not spx_pool.empty and 'day' in spx_pool.columns) else []
     days_3m = set(trading_days[-64:]) if len(trading_days) >= 64 else set(trading_days)
     days_1m = set(trading_days[-22:]) if len(trading_days) >= 22 else set(trading_days)
 
+    def _slice_pool(key: str, days_filter: Optional[set] = None) -> pd.Series:
+        df_sym = dfs_pool.get(key)
+        if df_sym is None or df_sym.empty or key not in df_sym.columns:
+            return pd.Series(dtype=float, name=key)
+        if days_filter and 'day' in df_sym.columns:
+            df_sym = df_sym[df_sym['day'].isin(days_filter)]
+        return resample_30m_to_session(df_sym, '30m', key)
+
     # 1M Bars (5-minute bars if dfs_1m available, fallback to 30-min bars)
     if dfs_1m and 'spx' in dfs_1m and not dfs_1m['spx'].empty:
-        s_1m = series_from_df(dfs_1m['spx'], 'spx', filter_rth=True)
-        v_1m = series_from_df(dfs_1m['vix'], 'vix', filter_rth=True)
-        v3_1m = series_from_df(dfs_1m['vix3m'], 'vix3m', filter_rth=True)
-        n_1m = series_from_df(dfs_1m['ndx'], 'ndx', filter_rth=True)
-        vx_1m = series_from_df(dfs_1m['vxn'], 'vxn', filter_rth=True)
+        s_1m = series_from_df(dfs_1m.get('spx'), 'spx', filter_rth=True)
+        v_1m = series_from_df(dfs_1m.get('vix'), 'vix', filter_rth=True)
+        v3_1m = series_from_df(dfs_1m.get('vix3m'), 'vix3m', filter_rth=True)
+        n_1m = series_from_df(dfs_1m.get('ndx'), 'ndx', filter_rth=True)
+        vx_1m = series_from_df(dfs_1m.get('vxn'), 'vxn', filter_rth=True)
         (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
          state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_horizon_pack(
             s_1m, v_1m, v3_1m, n_1m, vx_1m, roll_win=78, min_p=20
         )
     else:
-        s_1m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_1m)], '30m', 'spx')
-        v_1m = resample_30m_to_session(dfs_pool['vix'][dfs_pool['vix']['day'].isin(days_1m)], '30m', 'vix')
-        v3_1m = resample_30m_to_session(dfs_pool['vix3m'][dfs_pool['vix3m']['day'].isin(days_1m)], '30m', 'vix3m')
-        n_1m = resample_30m_to_session(dfs_pool['ndx'][dfs_pool['ndx']['day'].isin(days_1m)], '30m', 'ndx')
-        vx_1m = resample_30m_to_session(dfs_pool['vxn'][dfs_pool['vxn']['day'].isin(days_1m)], '30m', 'vxn')
+        s_1m = _slice_pool('spx', days_1m)
+        v_1m = _slice_pool('vix', days_1m)
+        v3_1m = _slice_pool('vix3m', days_1m)
+        n_1m = _slice_pool('ndx', days_1m)
+        vx_1m = _slice_pool('vxn', days_1m)
         (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
          state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_horizon_pack(
             s_1m, v_1m, v3_1m, n_1m, vx_1m, roll_win=39, min_p=10
         )
 
     # 3M Bars (RTH 30-min bars for last 64 trading days)
-    s_3m = resample_30m_to_session(dfs_pool['spx'][dfs_pool['spx']['day'].isin(days_3m)], '30m', 'spx')
-    v_3m = resample_30m_to_session(dfs_pool['vix'][dfs_pool['vix']['day'].isin(days_3m)], '30m', 'vix')
-    v3_3m = resample_30m_to_session(dfs_pool['vix3m'][dfs_pool['vix3m']['day'].isin(days_3m)], '30m', 'vix3m')
-    n_3m = resample_30m_to_session(dfs_pool['ndx'][dfs_pool['ndx']['day'].isin(days_3m)], '30m', 'ndx')
-    vx_3m = resample_30m_to_session(dfs_pool['vxn'][dfs_pool['vxn']['day'].isin(days_3m)], '30m', 'vxn')
+    s_3m = _slice_pool('spx', days_3m)
+    v_3m = _slice_pool('vix', days_3m)
+    v3_3m = _slice_pool('vix3m', days_3m)
+    n_3m = _slice_pool('ndx', days_3m)
+    vx_3m = _slice_pool('vxn', days_3m)
     (state.df_ts_3m, state.df_spx_vix_3m, state.df_ndx_vxn_3m,
      state.df_tech_vol_3m, state.corr_3m, state.corr_3m_ndx) = build_horizon_pack(
         s_3m, v_3m, v3_3m, n_3m, vx_3m, roll_win=130, min_p=20
     )
 
     # 6M Bars (RTH 30-min bars for all available trading days)
-    s_6m = resample_30m_to_session(dfs_pool['spx'], '30m', 'spx')
-    v_6m = resample_30m_to_session(dfs_pool['vix'], '30m', 'vix')
-    v3_6m = resample_30m_to_session(dfs_pool['vix3m'], '30m', 'vix3m')
-    n_6m = resample_30m_to_session(dfs_pool['ndx'], '30m', 'ndx')
-    vx_6m = resample_30m_to_session(dfs_pool['vxn'], '30m', 'vxn')
+    s_6m = _slice_pool('spx')
+    v_6m = _slice_pool('vix')
+    v3_6m = _slice_pool('vix3m')
+    n_6m = _slice_pool('ndx')
+    vx_6m = _slice_pool('vxn')
     (state.df_ts_6m, state.df_spx_vix_6m, state.df_ndx_vxn_6m,
      state.df_tech_vol_6m, state.corr_6m, state.corr_6m_ndx) = build_horizon_pack(
         s_6m, v_6m, v3_6m, n_6m, vx_6m, roll_win=195, min_p=30
@@ -1699,8 +1718,10 @@ async def refresh_historical_data():
         elif df_n1_raw is not None and not df_n1_raw.empty and 'date' in df_n1_raw.columns:
             active_sess_date = str(df_n1_raw['date'].iloc[-1])[:10]
 
-        if is_rth_now and (not active_sess_date or active_sess_date < today_et):
-            active_sess_date = today_et
+        is_weekday = (now_et.weekday() < 5)
+        if is_weekday and (is_rth_now or win_info["is_vix_gth_window"] or now_et.time() >= dtime(3, 15)):
+            if not active_sess_date or active_sess_date < today_et:
+                active_sess_date = today_et
 
         state.active_session_date = active_sess_date
 
