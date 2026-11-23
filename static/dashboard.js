@@ -2737,38 +2737,56 @@ function computeAnchoredSeries(c, isNdx) {
       }
     }
 
-    // For the active/latest session day:
-    // Only inject an official 16:00 terminal close IF:
-    // 1. The session is actually closed/completed (not currently active in RTH or GTH), AND
-    // 2. The session date in bootstrap matches latestDay (not stale prior session data!), AND
-    // 3. The session reached the market close (last raw bar >= 15:55 ET).
+    // Determine which days in the series are completed and have an official close
+    const curSessDate = cachedBootstrap ? (cachedBootstrap.session_date || '') : '';
+    const isLiveRth = Boolean(cachedBootstrap && cachedBootstrap.is_rth_active === true);
+    const isLiveGth = Boolean(cachedBootstrap && (cachedBootstrap.session_status === 'GTH_ACTIVE' || (cachedBootstrap.gth && cachedBootstrap.gth.is_gth_active === true)));
+
+    function isDaySessionCompleted(d, dIndices) {
+      if (!d || !dIndices || dIndices.length === 0) return false;
+      const lastBar = times[dIndices[dIndices.length - 1]];
+      const hhmm = lastBar ? lastBar.slice(11, 16) : '';
+
+      // 1. Prior trading days strictly before active session date:
+      if (curSessDate && d < curSessDate) {
+        return hhmm >= '15:50';
+      }
+
+      // 2. Any day that is not the last day in the displayed horizon:
+      const dayK = days.indexOf(d);
+      if (dayK >= 0 && dayK < days.length - 1) {
+        return hhmm >= '15:50';
+      }
+
+      // 3. The latest displayed day:
+      // If RTH cash is currently active, it is NOT completed:
+      if (isLiveRth) return false;
+      // If GTH chart and GTH is active, NOT completed:
+      if (isGthActive && isLiveGth) return false;
+
+      // Closed if reached near-close (>= 15:55 ET):
+      return hhmm >= '15:55';
+    }
+
     const latestDay = days[days.length - 1];
     const latestDayIndices = rawDayMap[latestDay];
-    const lastRawBarTime = latestDayIndices ? times[latestDayIndices[latestDayIndices.length - 1]] : '';
-    const lastRawHhmm = lastRawBarTime.slice(11, 16);
+    const latestDayCompleted = isDaySessionCompleted(latestDay, latestDayIndices);
 
-    const isLatestDayCompleted = Boolean(
-      cachedBootstrap &&
-      cachedBootstrap.is_rth_active !== true &&
-      (!cachedBootstrap.gth || cachedBootstrap.gth.is_gth_active !== true) &&
-      cachedBootstrap.session_status !== 'GTH_ACTIVE' &&
-      cachedBootstrap.session_date === latestDay &&
-      lastRawHhmm >= '15:55'
-    );
+    if (latestDayCompleted) {
+      if (!officialCloses[latestDay] && cachedBootstrap && cachedBootstrap.reference_closes) {
+        const refSpot = isNdx
+          ? (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.ndx : (cachedBootstrap.ndx && cachedBootstrap.ndx.market ? cachedBootstrap.ndx.market.current : null))
+          : (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.spx : (cachedBootstrap.market && cachedBootstrap.market.spx ? cachedBootstrap.market.spx.current : null));
+        const refVol = isNdx
+          ? (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.vxn : (cachedBootstrap.ndx && cachedBootstrap.ndx.market && cachedBootstrap.ndx.market.vxn ? cachedBootstrap.ndx.market.vxn.current : null))
+          : (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.vix : (cachedBootstrap.market && cachedBootstrap.market.vix ? cachedBootstrap.market.vix.current : null));
 
-    if (isLatestDayCompleted) {
-      const refSpot = isNdx
-        ? (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.ndx : (cachedBootstrap.ndx && cachedBootstrap.ndx.market ? cachedBootstrap.ndx.market.current : null))
-        : (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.spx : (cachedBootstrap.market && cachedBootstrap.market.spx ? cachedBootstrap.market.spx.current : null));
-      const refVol = isNdx
-        ? (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.vxn : (cachedBootstrap.ndx && cachedBootstrap.ndx.market && cachedBootstrap.ndx.market.vxn ? cachedBootstrap.ndx.market.vxn.current : null))
-        : (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.vix : (cachedBootstrap.market && cachedBootstrap.market.vix ? cachedBootstrap.market.vix.current : null));
-
-      if (refSpot && refVol) {
-        officialCloses[latestDay] = {
-          spot: refSpot,
-          vol: refVol
-        };
+        if (refSpot && refVol) {
+          officialCloses[latestDay] = {
+            spot: refSpot,
+            vol: refVol
+          };
+        }
       }
     } else {
       delete officialCloses[latestDay];
@@ -2861,26 +2879,36 @@ function computeAnchoredSeries(c, isNdx) {
         outVolRaw.push(v);
       }
 
-      // Check if official settlement exists for day d and can be appended at 16:00 (Cash RTH only, not GTH)
+      // Check if official settlement exists for day d and can be appended/harmonized at 16:00 (Cash RTH only, not GTH)
       const lastRawTime = times[indices[indices.length - 1]];
       const has1600 = (lastRawTime.slice(11, 16) >= '16:00');
       const offSettle = officialCloses[d];
-      const isPastDay = (k < days.length - 1);
+      const isCompleted = isDaySessionCompleted(d, indices);
 
-      if (!isGthActive && !has1600 && (isPastDay || isLatestDayCompleted) && offSettle && offSettle.spot && offSettle.vol) {
-        const settleTime = `${d} 16:00`;
+      if (!isGthActive && isCompleted && offSettle && offSettle.spot && offSettle.vol) {
         const s = offSettle.spot;
         const v = offSettle.vol;
         const sPct = (s0 > 0 && typeof s === 'number') ? Math.round(((s - s0) / s0 * 100.0) * 10000) / 10000 : 0;
         const vPt = (typeof v === 'number') ? Math.round((v - v0) * 10000) / 10000 : 0;
 
-        dayIndices.push(outTimes.length);
-        outTimes.push(settleTime);
-        outSpotPct.push(sPct);
-        outVolPt.push(vPt);
-        outSpotRaw.push(s);
-        outVolRaw.push(v);
-        settlementMap[settleTime] = true;
+        if (!has1600) {
+          const settleTime = `${d} 16:00`;
+          dayIndices.push(outTimes.length);
+          outTimes.push(settleTime);
+          outSpotPct.push(sPct);
+          outVolPt.push(vPt);
+          outSpotRaw.push(s);
+          outVolRaw.push(v);
+          settlementMap[settleTime] = true;
+        } else {
+          // Harmonize existing 16:00 cash bell bar with the official exchange settlement close
+          const lastOutIdx = dayIndices[dayIndices.length - 1];
+          outSpotRaw[lastOutIdx] = s;
+          outVolRaw[lastOutIdx] = v;
+          outSpotPct[lastOutIdx] = sPct;
+          outVolPt[lastOutIdx] = vPt;
+          settlementMap[outTimes[lastOutIdx]] = true;
+        }
       }
 
       dayMap[d] = dayIndices;
