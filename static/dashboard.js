@@ -2732,27 +2732,40 @@ function computeAnchoredSeries(c, isNdx) {
     }
 
     // For the active/latest session day:
-    // 1. If market is currently open (is_rth_active === true), never inject an official 16:00 terminal close.
-    // 2. If session is completed/closed, ensure official close is anchored strictly to the official Cash Market Bell close from bootstrap.market (never post-market curb prints)!
+    // Only inject an official 16:00 terminal close IF:
+    // 1. The session is actually closed/completed (not currently active in RTH or GTH), AND
+    // 2. The session date in bootstrap matches latestDay (not stale prior session data!), AND
+    // 3. The session reached the market close (last raw bar >= 15:55 ET).
     const latestDay = days[days.length - 1];
-    if (cachedBootstrap) {
-      if (cachedBootstrap.is_rth_active === true) {
-        delete officialCloses[latestDay];
-      } else {
-        const liveSpot = isNdx
-          ? (cachedBootstrap.ndx && cachedBootstrap.ndx.market ? cachedBootstrap.ndx.market.current : null)
-          : (cachedBootstrap.market && cachedBootstrap.market.spx ? cachedBootstrap.market.spx.current : null);
-        const liveVol = isNdx
-          ? (cachedBootstrap.ndx && cachedBootstrap.ndx.market && cachedBootstrap.ndx.market.vxn ? cachedBootstrap.ndx.market.vxn.current : null)
-          : (cachedBootstrap.market && cachedBootstrap.market.vix ? cachedBootstrap.market.vix.current : null);
+    const latestDayIndices = rawDayMap[latestDay];
+    const lastRawBarTime = latestDayIndices ? times[latestDayIndices[latestDayIndices.length - 1]] : '';
+    const lastRawHhmm = lastRawBarTime.slice(11, 16);
 
-        if (liveSpot && liveVol) {
-          officialCloses[latestDay] = {
-            spot: liveSpot,
-            vol: liveVol
-          };
-        }
+    const isLatestDayCompleted = Boolean(
+      cachedBootstrap &&
+      cachedBootstrap.is_rth_active !== true &&
+      (!cachedBootstrap.gth || cachedBootstrap.gth.is_gth_active !== true) &&
+      cachedBootstrap.session_status !== 'GTH_ACTIVE' &&
+      cachedBootstrap.session_date === latestDay &&
+      lastRawHhmm >= '15:55'
+    );
+
+    if (isLatestDayCompleted) {
+      const liveSpot = isNdx
+        ? (cachedBootstrap.ndx && cachedBootstrap.ndx.market ? cachedBootstrap.ndx.market.current : null)
+        : (cachedBootstrap.market && cachedBootstrap.market.spx ? cachedBootstrap.market.spx.current : null);
+      const liveVol = isNdx
+        ? (cachedBootstrap.ndx && cachedBootstrap.ndx.market && cachedBootstrap.ndx.market.vxn ? cachedBootstrap.ndx.market.vxn.current : null)
+        : (cachedBootstrap.market && cachedBootstrap.market.vix ? cachedBootstrap.market.vix.current : null);
+
+      if (liveSpot && liveVol) {
+        officialCloses[latestDay] = {
+          spot: liveSpot,
+          vol: liveVol
+        };
       }
+    } else {
+      delete officialCloses[latestDay];
     }
 
     // Determine prior close anchor for each day
@@ -2836,8 +2849,9 @@ function computeAnchoredSeries(c, isNdx) {
       const lastRawTime = times[indices[indices.length - 1]];
       const has1600 = (lastRawTime.slice(11, 16) >= '16:00');
       const offSettle = officialCloses[d];
+      const isPastDay = (k < days.length - 1);
 
-      if (!has1600 && offSettle && offSettle.spot && offSettle.vol) {
+      if (!has1600 && (isPastDay || isLatestDayCompleted) && offSettle && offSettle.spot && offSettle.vol) {
         const settleTime = `${d} 16:00`;
         const s = offSettle.spot;
         const v = offSettle.vol;
