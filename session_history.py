@@ -150,6 +150,205 @@ def save_cached_session(date_str: str, payload: Dict[str, Any]):
         print(f"[Cache Error] Failed saving cache for {date_str}: {e}")
 
 
+def harmonize_session_payload(payload: Dict[str, Any], df_daily: pd.DataFrame, target_date: str) -> Dict[str, Any]:
+    """
+    Harmonize historical session payload with official CBOE / exchange daily settlement closes
+    from df_daily (e.g. VIX official settlement 35.89 instead of 15:59 intraday bar 39.53).
+    Updates market metrics, current_point, overvix residual, term structure ratio, and confluence status.
+    """
+    if not payload or not isinstance(df_daily, pd.DataFrame) or df_daily.empty:
+        return payload
+
+    df_d = df_daily.copy()
+    df_d.index = [str(d)[:10] for d in df_d.index]
+    if target_date not in df_d.index:
+        return payload
+
+    prior_daily = df_d.loc[df_d.index < target_date]
+    if prior_daily.empty:
+        return payload
+
+    prior_spx = float(prior_daily['spx'].iloc[-1])
+    prior_vix = float(prior_daily['vix'].iloc[-1])
+    prior_vix3m = float(prior_daily['vix3m'].iloc[-1]) if 'vix3m' in prior_daily.columns else prior_vix
+
+    row_settle = df_d.loc[target_date]
+    off_spx = float(row_settle['spx']) if 'spx' in df_d.columns and pd.notna(row_settle['spx']) else None
+    off_vix = float(row_settle['vix']) if 'vix' in df_d.columns and pd.notna(row_settle['vix']) else None
+    off_vix3m = float(row_settle['vix3m']) if 'vix3m' in df_d.columns and pd.notna(row_settle['vix3m']) else None
+
+    if off_spx is not None and off_vix is not None and prior_spx > 0:
+        final_spx = off_spx
+        final_vix = off_vix
+        final_x = round((off_spx - prior_spx) / prior_spx * 100.0, 2)
+        final_y = round(off_vix - prior_vix, 2)
+
+        model = payload.get('model', {})
+        intercept = float(model.get('intercept', 0.0))
+        slope = float(model.get('slope', -2.0))
+        thresh = float(model.get('threshold_pts', 2.0))
+
+        expected_vix_pt = round(intercept + slope * final_x, 2)
+        residual_pts = round(final_y - expected_vix_pt, 2)
+        is_overvixed = bool(residual_pts >= thresh)
+
+        # Update market
+        if 'market' in payload:
+            if 'spx' in payload['market']:
+                payload['market']['spx']['current'] = round(final_spx, 2)
+                payload['market']['spx']['pct_change'] = final_x
+            if 'vix' in payload['market']:
+                payload['market']['vix']['current'] = round(final_vix, 2)
+                payload['market']['vix']['pt_change'] = final_y
+            if 'vix3m' in payload['market'] and off_vix3m is not None:
+                payload['market']['vix3m']['current'] = round(off_vix3m, 2)
+                payload['market']['vix3m']['pt_change'] = round(off_vix3m - prior_vix3m, 2)
+
+        # Update overvix & current_point
+        if 'overvix' in payload:
+            payload['overvix']['expected_vix_pt'] = expected_vix_pt
+            payload['overvix']['residual_pts'] = residual_pts
+            payload['overvix']['is_overvixed'] = is_overvixed
+            payload['overvix']['status'] = "OVERVIXED" if is_overvixed else "NORMAL"
+
+        payload['current_point'] = {'x': final_x, 'y': final_y}
+
+        # Update term structure ratio
+        if off_vix3m is not None and off_vix3m > 0 and 'term_structure' in payload:
+            final_ratio = round(off_vix / off_vix3m, 4)
+            is_inverted = bool(final_ratio >= 1.0)
+            is_flattening = bool(0.90 <= final_ratio < 1.0)
+            payload['term_structure']['ratio'] = final_ratio
+            payload['term_structure']['is_inverted'] = is_inverted
+            payload['term_structure']['is_flattening'] = is_flattening
+            payload['term_structure']['regime'] = "BACKWARDATION" if is_inverted else ("FLATTENING" if is_flattening else "CONTANGO")
+        else:
+            is_inverted = payload.get('term_structure', {}).get('is_inverted', False)
+
+        # Update confluence
+        is_dual_alert = is_overvixed and is_inverted
+        is_overvix_alert = is_overvixed and not is_inverted
+        is_inversion_alert = is_inverted and not is_overvixed
+        is_normal = not is_overvixed and not is_inverted
+
+        if is_dual_alert:
+            confluence_tag = "HIGH CONVICTION PANIC"
+            confluence_desc = "Simultaneous Overvix Panic and Term Structure Inversion."
+        elif is_overvix_alert:
+            confluence_tag = "OVERVIX PANIC"
+            confluence_desc = "Overvix triggered while Term Structure remained in contango."
+        elif is_inversion_alert:
+            confluence_tag = "TERM STRUCTURE INVERSION"
+            confluence_desc = "VIX > VIX3M inversion without exceeding Spot-Vol threshold."
+        else:
+            confluence_tag = "EQUILIBRIUM"
+            confluence_desc = "Normal Spot-Vol regression pricing and contango term structure."
+
+        payload['confluence'] = {
+            "tag": confluence_tag,
+            "description": confluence_desc,
+            "is_dual_alert": is_dual_alert,
+            "is_overvix_alert": is_overvix_alert,
+            "is_inversion_alert": is_inversion_alert,
+            "is_normal": is_normal
+        }
+
+        # Intraday trail harmonization (append or replace 16:00 close bar)
+        settle_time = f"{target_date} 16:00"
+        if 'overvix' in payload and 'intraday_trail' in payload['overvix']:
+            trail = payload['overvix']['intraday_trail']
+            times = trail.get('times', [])
+            x_vals = trail.get('x', [])
+            y_vals = trail.get('y', [])
+            if times and len(times) == len(x_vals) == len(y_vals):
+                if times[-1] >= settle_time:
+                    x_vals[-1] = final_x
+                    y_vals[-1] = final_y
+                else:
+                    times.append(settle_time)
+                    x_vals.append(final_x)
+                    y_vals.append(final_y)
+
+        # Intraday correlation harmonization
+        if 'intraday_correlation' in payload:
+            for ds_key in ['intraday_correlation', '1D']:
+                target_ds = payload['intraday_correlation'].get(ds_key) if ds_key == '1D' else payload.get('intraday_correlation')
+                if target_ds and isinstance(target_ds, dict):
+                    t_times = target_ds.get('times', [])
+                    s_pct = target_ds.get('spx_pct', [])
+                    v_pt = target_ds.get('vix_pt', [])
+                    s_raw = target_ds.get('spx_raw', target_ds.get('spot_raw', []))
+                    v_raw = target_ds.get('vix_raw', target_ds.get('vol_raw', []))
+                    r_corr = target_ds.get('rolling_corr', [])
+                    if t_times and len(t_times) == len(s_pct):
+                        if t_times[-1] >= settle_time:
+                            s_pct[-1] = final_x
+                            v_pt[-1] = final_y
+                            if s_raw and len(s_raw) == len(t_times): s_raw[-1] = round(final_spx, 2)
+                            if v_raw and len(v_raw) == len(t_times): v_raw[-1] = round(final_vix, 2)
+                        else:
+                            t_times.append(settle_time)
+                            s_pct.append(final_x)
+                            v_pt.append(final_y)
+                            if s_raw and len(s_raw) >= len(t_times) - 1: s_raw.append(round(final_spx, 2))
+                            if v_raw and len(v_raw) >= len(t_times) - 1: v_raw.append(round(final_vix, 2))
+                            if r_corr and len(r_corr) >= len(t_times) - 1: r_corr.append(r_corr[-1] if r_corr else -0.75)
+
+        # Term structure intraday_1d harmonization
+        if 'term_structure' in payload and 'intraday_1d' in payload['term_structure']:
+            ts_1d = payload['term_structure']['intraday_1d']
+            ts_times = ts_1d.get('times', [])
+            ts_vix = ts_1d.get('vix', [])
+            ts_vix3m = ts_1d.get('vix3m', [])
+            ts_ratio = ts_1d.get('ratio', [])
+            if ts_times and len(ts_times) == len(ts_vix):
+                if ts_times[-1] >= settle_time:
+                    ts_vix[-1] = round(final_vix, 2)
+                    if off_vix3m is not None and len(ts_vix3m) == len(ts_times): ts_vix3m[-1] = round(off_vix3m, 2)
+                    if off_vix3m is not None and len(ts_ratio) == len(ts_times): ts_ratio[-1] = round(off_vix / off_vix3m, 4)
+                else:
+                    ts_times.append(settle_time)
+                    ts_vix.append(round(final_vix, 2))
+                    if off_vix3m is not None:
+                        ts_vix3m.append(round(off_vix3m, 2))
+                        ts_ratio.append(round(off_vix / off_vix3m, 4))
+
+    # Also harmonize NDX/VXN if available in df_daily
+    off_ndx = float(row_settle['ndx']) if 'ndx' in df_d.columns and pd.notna(row_settle['ndx']) else None
+    off_vxn = float(row_settle['vxn']) if 'vxn' in df_d.columns and pd.notna(row_settle['vxn']) else None
+    has_ndx_history = ('ndx' in prior_daily.columns and 'vxn' in prior_daily.columns)
+
+    if off_ndx is not None and off_vxn is not None and has_ndx_history and payload.get('ndx'):
+        prior_ndx = float(prior_daily['ndx'].iloc[-1])
+        prior_vxn = float(prior_daily['vxn'].iloc[-1])
+        if prior_ndx > 0:
+            final_ndx_x = round((off_ndx - prior_ndx) / prior_ndx * 100.0, 2)
+            final_ndx_y = round(off_vxn - prior_vxn, 2)
+            ndx_pkg = payload['ndx']
+            ndx_m = ndx_pkg.get('model', {})
+            ndx_int = float(ndx_m.get('intercept', 0.0))
+            ndx_slp = float(ndx_m.get('slope', -2.0))
+            ndx_thr = float(ndx_m.get('threshold_pts', 2.5))
+            exp_vxn = round(ndx_int + ndx_slp * final_ndx_x, 2)
+            res_ndx = round(final_ndx_y - exp_vxn, 2)
+            is_overvxned = bool(res_ndx >= ndx_thr)
+
+            if 'market' in ndx_pkg:
+                ndx_pkg['market']['current'] = round(off_ndx, 2)
+                ndx_pkg['market']['pct_change'] = final_ndx_x
+                if 'vxn' in ndx_pkg['market']:
+                    ndx_pkg['market']['vxn']['current'] = round(off_vxn, 2)
+                    ndx_pkg['market']['vxn']['pt_change'] = final_ndx_y
+            if 'overvix' in ndx_pkg:
+                ndx_pkg['overvix']['expected_vol_pt'] = exp_vxn
+                ndx_pkg['overvix']['residual_pts'] = res_ndx
+                ndx_pkg['overvix']['is_overvixed'] = is_overvxned
+                ndx_pkg['overvix']['status'] = "OVER-VXN" if is_overvxned else "NORMAL"
+            ndx_pkg['current_point'] = {'x': final_ndx_x, 'y': final_ndx_y}
+
+    return payload
+
+
 def to_eastern_dt_list(idx) -> List[str]:
     """Convert pandas DatetimeIndex cleanly to US/Eastern formatted strings (YYYY-MM-DD HH:MM)."""
     if idx is None or len(idx) == 0:
@@ -190,6 +389,8 @@ async def fetch_and_build_historical_session(
     if cached is not None:
         if ndx_contract is None or ("ndx" in cached and "tech_vol" in cached):
             print(f"[Session History] Returning cached data for {target_date} (0ms)")
+            cached = harmonize_session_payload(cached, df_daily, target_date)
+            save_cached_session(target_date, cached)
             return cached
 
     async with session_fetch_lock:
@@ -197,6 +398,8 @@ async def fetch_and_build_historical_session(
         cached = load_cached_session(target_date)
         if cached is not None:
             if ndx_contract is None or ("ndx" in cached and "tech_vol" in cached):
+                cached = harmonize_session_payload(cached, df_daily, target_date)
+                save_cached_session(target_date, cached)
                 return cached
 
         print(f"[Session History] Building session data for {target_date} from IBKR (SPX, VIX, VIX3M, NDX, VXN)...")
@@ -609,6 +812,9 @@ async def fetch_and_build_historical_session(
             "ndx": ndx_package,
             "tech_vol": tech_vol_package
         }
+
+        # Harmonize with official daily settlement close if present in df_daily
+        payload = harmonize_session_payload(payload, df_daily, target_date)
 
         # Save to disk cache
         save_cached_session(target_date, payload)
