@@ -2757,17 +2757,17 @@ function computeAnchoredSeries(c, isNdx) {
     );
 
     if (isLatestDayCompleted) {
-      const liveSpot = isNdx
-        ? (cachedBootstrap.ndx && cachedBootstrap.ndx.market ? cachedBootstrap.ndx.market.current : null)
-        : (cachedBootstrap.market && cachedBootstrap.market.spx ? cachedBootstrap.market.spx.current : null);
-      const liveVol = isNdx
-        ? (cachedBootstrap.ndx && cachedBootstrap.ndx.market && cachedBootstrap.ndx.market.vxn ? cachedBootstrap.ndx.market.vxn.current : null)
-        : (cachedBootstrap.market && cachedBootstrap.market.vix ? cachedBootstrap.market.vix.current : null);
+      const refSpot = isNdx
+        ? (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.ndx : (cachedBootstrap.ndx && cachedBootstrap.ndx.market ? cachedBootstrap.ndx.market.current : null))
+        : (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.spx : (cachedBootstrap.market && cachedBootstrap.market.spx ? cachedBootstrap.market.spx.current : null));
+      const refVol = isNdx
+        ? (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.vxn : (cachedBootstrap.ndx && cachedBootstrap.ndx.market && cachedBootstrap.ndx.market.vxn ? cachedBootstrap.ndx.market.vxn.current : null))
+        : (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.vix : (cachedBootstrap.market && cachedBootstrap.market.vix ? cachedBootstrap.market.vix.current : null));
 
-      if (liveSpot && liveVol) {
+      if (refSpot && refVol) {
         officialCloses[latestDay] = {
-          spot: liveSpot,
-          vol: liveVol
+          spot: refSpot,
+          vol: refVol
         };
       }
     } else {

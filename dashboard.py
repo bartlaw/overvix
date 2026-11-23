@@ -1352,8 +1352,7 @@ def compute_gth_spotvol_baseline(
         if now_et.time() < dtime(16, 0):
             fresh_df = fresh_df.loc[[d < today_et for d in fresh_df.index]]
         for d_idx, row in fresh_df.iterrows():
-            if d_idx not in base_df.index:
-                base_df.loc[d_idx, ['spx', 'vix']] = [float(row['spx']), float(row['vix'])]
+            base_df.loc[d_idx, ['spx', 'vix']] = [float(row['spx']), float(row['vix'])]
 
     base_df = base_df.sort_index()
     if gth_target_date:
@@ -1463,31 +1462,7 @@ def compute_spotvol_baselines(df_daily: pd.DataFrame, active_sess_date: Optional
 
 
 def harmonize_daily_close_with_rth(df_daily: pd.DataFrame, active_sess_date: Optional[str]) -> pd.DataFrame:
-    """Ensure completed active session row in df_daily reflects Cash Market Bell closing prices, not post-curb VIX."""
-    if df_daily is None or df_daily.empty or not active_sess_date:
-        return df_daily
-    d_str = str(active_sess_date)[:10]
-    if d_str in df_daily.index:
-        spx_c = None
-        vix_c = None
-        vix3m_c = None
-        ndx_c = None
-        vxn_c = None
-
-        if hasattr(state, 'df_spx_vix_1d') and not state.df_spx_vix_1d.empty:
-            spx_c = float(state.df_spx_vix_1d['spx'].iloc[-1])
-            vix_c = float(state.df_spx_vix_1d['vix'].iloc[-1])
-        if hasattr(state, 'df_ts_1d') and not state.df_ts_1d.empty:
-            vix3m_c = float(state.df_ts_1d['vix3m'].iloc[-1])
-        if hasattr(state, 'df_ndx_vxn_1d') and not state.df_ndx_vxn_1d.empty:
-            ndx_c = float(state.df_ndx_vxn_1d['ndx'].iloc[-1])
-            vxn_c = float(state.df_ndx_vxn_1d['vxn'].iloc[-1])
-
-        if spx_c is not None and spx_c > 0: df_daily.loc[d_str, 'spx'] = spx_c
-        if vix_c is not None and vix_c > 0: df_daily.loc[d_str, 'vix'] = vix_c
-        if vix3m_c is not None and vix3m_c > 0: df_daily.loc[d_str, 'vix3m'] = vix3m_c
-        if ndx_c is not None and ndx_c > 0: df_daily.loc[d_str, 'ndx'] = ndx_c
-        if vxn_c is not None and vxn_c > 0: df_daily.loc[d_str, 'vxn'] = vxn_c
+    """Preserve official exchange settlement closing prices for daily baseline and macro horizons."""
     return df_daily
 
 
@@ -1811,6 +1786,20 @@ async def refresh_historical_data():
         state.daily_es_close_map = es_map
         state.daily_vix_close_map = vix_map
         state.es_daily_df = pd.DataFrame({'es': s_es_d}) if not s_es_d.empty else pd.DataFrame()
+
+        # Synchronize daily baseline DataFrame with official CBOE / exchange settlement daily closes
+        if spx_map and vix_map and not daily_ref_df.empty:
+            changed_any = False
+            for d_str, spx_val in spx_map.items():
+                if d_str in daily_ref_df.index and d_str in vix_map:
+                    vix_val = vix_map[d_str]
+                    if daily_ref_df.loc[d_str, 'spx'] != spx_val or daily_ref_df.loc[d_str, 'vix'] != vix_val:
+                        daily_ref_df.loc[d_str, 'spx'] = spx_val
+                        daily_ref_df.loc[d_str, 'vix'] = vix_val
+                        changed_any = True
+            if changed_any:
+                compute_spotvol_baselines(daily_ref_df, active_sess_date, today_et)
+                apply_multi_timeframe_pool(cached_dfs if 'cached_dfs' in locals() else {}, daily_ref_df, active_sess_date, today_et, dfs_1m=cached_dfs_1m if 'cached_dfs_1m' in locals() else None)
 
         if latest_comp_date:
             state.eod_spx_close = spx_map.get(latest_comp_date)
@@ -2448,7 +2437,12 @@ def compute_live_payload() -> Dict[str, Any]:
         ndx_base = state.latest_ndx_close if state.latest_ndx_close > 0 else (float(state.df_ndx_vxn_1d['ndx'].iloc[0]) if not state.df_ndx_vxn_1d.empty else ndx_curr)
         vxn_base = state.latest_vxn_close if state.latest_vxn_close > 0 else (float(state.df_ndx_vxn_1d['vxn'].iloc[0]) if not state.df_ndx_vxn_1d.empty else vxn_curr)
 
-        if not state.df_spx_vix_1d.empty:
+        if state.latest_spx_close > 0 and state.latest_vix_close > 0:
+            spx_curr = state.latest_spx_close
+            curr_x = state.last_sess_x
+            vix_curr = state.latest_vix_close
+            curr_y = state.last_sess_y
+        elif not state.df_spx_vix_1d.empty:
             curr_x = float(state.df_spx_vix_1d['spx_pct'].iloc[-1])
             curr_y = float(state.df_spx_vix_1d['vix_pt'].iloc[-1])
             spx_curr = float(state.df_spx_vix_1d['spx'].iloc[-1])
@@ -2463,7 +2457,12 @@ def compute_live_payload() -> Dict[str, Any]:
         else:
             vix3m_pt = vix3m_curr - vix3m_base if vix3m_base > 0 else 0.0
 
-        if not state.df_ndx_vxn_1d.empty:
+        if state.latest_ndx_close > 0 and state.latest_vxn_close > 0:
+            ndx_curr = state.latest_ndx_close
+            curr_ndx_x = state.last_sess_ndx_x
+            vxn_curr = state.latest_vxn_close
+            curr_ndx_y = state.last_sess_ndx_y
+        elif not state.df_ndx_vxn_1d.empty:
             curr_ndx_x = float(state.df_ndx_vxn_1d['ndx_pct'].iloc[-1])
             curr_ndx_y = float(state.df_ndx_vxn_1d['vxn_pt'].iloc[-1])
             ndx_curr = float(state.df_ndx_vxn_1d['ndx'].iloc[-1])
