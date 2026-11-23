@@ -3304,6 +3304,21 @@ def compute_live_payload() -> Dict[str, Any]:
 
     src_suffix = "" if is_live_rth else (" (PRE-MARKET)" if is_premarket_hour else " (CLOSED)")
 
+    # Determine whether session has started (different for RTH and GTH):
+    is_active_today = bool(state.active_session_date and state.active_session_date == today_et and is_weekday)
+    if is_active_today:
+        # Today's session: RTH starts at 09:30 ET; GTH starts at 03:15 ET
+        rth_session_started = bool(is_live_rth or now_et.time() >= dtime(9, 30))
+        gth_session_started = bool(
+            (gth_status == "GTH_ACTIVE") or
+            is_live_rth or
+            now_et.time() >= dtime(3, 15)
+        )
+    else:
+        # Completed past session (e.g. weekend viewing Friday or historical replay)
+        rth_session_started = True
+        gth_session_started = True
+
     payload = {
         "timestamp": curr_time_str,
         "datetime": curr_dt_str,
@@ -3312,6 +3327,8 @@ def compute_live_payload() -> Dict[str, Any]:
         "mode": mode_tag,
         "is_rth_active": is_live_rth,
         "session_status": session_status,
+        "rth_session_started": rth_session_started,
+        "gth_session_started": gth_session_started,
         "premarket": {
             "is_premarket": is_premarket_hour,
             "gth_vix": round(live_vix_val, 2) if "LIVE" in live_vix_src else round(state.eod_vix_close or state.latest_vix_close, 2),
@@ -3323,6 +3340,7 @@ def compute_live_payload() -> Dict[str, Any]:
         "gth": {
             "available": bool(gth_has_es or has_gth_hist),
             "session_status": gth_status,
+            "session_started": gth_session_started,
             "is_gth_active": gth_is_active,
             "is_es_live": gth_is_es_live,
             "is_vix_live": gth_is_vix_live,

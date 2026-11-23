@@ -1014,6 +1014,25 @@ function switchSpotVolClickAction(action) {
   }
 }
 
+function isSessionStarted(data, isGth) {
+  if (!data) return false;
+  if (data.is_historical) return true;
+  if (isGth) {
+    if (typeof data.gth_session_started === 'boolean') return data.gth_session_started;
+    if (data.gth && typeof data.gth.session_started === 'boolean') return data.gth.session_started;
+    if (data.session_status === 'GTH_ACTIVE') return true;
+    if (data.is_rth_active === true || data.session_status === 'REGULAR_RTH') return true;
+    if (data.gth && data.gth.is_gth_active === true) return true;
+    const ts = data.timestamp || '';
+    return (ts >= '03:15' && data.session_status !== 'OVERNIGHT_ES_ONLY');
+  } else {
+    if (typeof data.rth_session_started === 'boolean') return data.rth_session_started;
+    if (data.is_rth_active === true || data.session_status === 'REGULAR_RTH') return true;
+    const ts = data.timestamp || '';
+    return (ts >= '09:30');
+  }
+}
+
 function switchTrailMode(mode) {
   currentTrailMode = mode;
   const idleCls = "px-2 py-1 rounded-md text-[11px] font-semibold text-slate-400 hover:text-white transition";
@@ -1022,18 +1041,34 @@ function switchTrailMode(mode) {
     btn.className = idleCls;
   });
 
+  const activeData = (currentViewMode === 'historical' && cachedHistoricalData)
+    ? cachedHistoricalData
+    : (lastLiveUpdatePayload || cachedBootstrap);
+  const isGth = (currentAssetPair === 'SPX' && Boolean(isGthEnabled));
+  const hasStarted = isSessionStarted(activeData, isGth);
+  const showBeacon = hasStarted && (mode !== '60d');
+
   if (mode === 'both') {
     btnTrailBoth.className = activeCls;
     trailLivePill.textContent = "+ Intraday Trail";
-    Plotly.restyle('overvix-chart', { visible: [true, true, true, true, true, true] });
+    Plotly.restyle('overvix-chart', {
+      visible: [true, true, true, true, true, showBeacon],
+      showlegend: [true, true, true, false, true, showBeacon]
+    });
   } else if (mode === 'today') {
     btnTrailToday.className = activeCls;
     trailLivePill.textContent = "Today Trail Only";
-    Plotly.restyle('overvix-chart', { visible: [false, true, true, true, true, true] });
+    Plotly.restyle('overvix-chart', {
+      visible: [false, true, true, true, true, showBeacon],
+      showlegend: [false, true, true, false, true, showBeacon]
+    });
   } else if (mode === '60d') {
     btnTrail60D.className = activeCls;
     trailLivePill.textContent = "60D Scatter Only";
-    Plotly.restyle('overvix-chart', { visible: [true, true, true, true, false, true] });
+    Plotly.restyle('overvix-chart', {
+      visible: [true, true, true, true, false, false],
+      showlegend: [true, true, true, false, false, false]
+    });
   }
 }
 
@@ -1354,6 +1389,7 @@ function buildOvernightEsOverlay(gthObj) {
 function renderOvervixChart(bootstrap) {
   const isNdx = (currentAssetPair === 'NDX');
   const gthMode = (!isNdx && !bootstrap.is_historical && isGthEnabled);
+  const hasSessionStarted = isSessionStarted(bootstrap, gthMode);
   const gthObj = (gthMode && bootstrap.gth) ? bootstrap.gth : null;
   const gthModel = (gthMode && bootstrap.session_status === 'GTH_ACTIVE' && bootstrap.overvix && bootstrap.overvix.gth_model)
     ? bootstrap.overvix.gth_model
@@ -1566,9 +1602,9 @@ function renderOvervixChart(bootstrap) {
     },
     // 5: Session End / Live Current Point
     {
-      x: [currX],
-      y: [currY],
-      customdata: [[beaconResidStr, beaconTag]],
+      x: hasSessionStarted ? [currX] : [],
+      y: hasSessionStarted ? [currY] : [],
+      customdata: hasSessionStarted ? [[beaconResidStr, beaconTag]] : [],
       mode: 'markers',
       name: beaconName,
       marker: {
@@ -1577,7 +1613,9 @@ function renderOvervixChart(bootstrap) {
         line: { color: '#FFFFFF', width: 2 }
       },
       hoverlabel: darkHoverlabel,
-      hovertemplate: beaconHover
+      hovertemplate: beaconHover,
+      showlegend: hasSessionStarted,
+      visible: hasSessionStarted && (currentTrailMode !== '60d')
     }
   ];
 
@@ -5971,6 +6009,7 @@ function updateUI(data) {
   // 5. Update Overvix / Over-VXN Plotly Chart Real-Time
   const isSpxGthLive = (!isNdx && isGthEnabled && data.session_status === 'GTH_ACTIVE' && data.gth && data.gth.current_point && data.gth.current_point.y !== null);
   const isOvernightEsLive = (!isNdx && isGthEnabled && data.session_status === 'OVERNIGHT_ES_ONLY' && data.gth && data.gth.current_point && typeof data.gth.current_point.x === 'number');
+  const hasLiveSessionStarted = isSessionStarted(data, (!isNdx && isGthEnabled));
   const activePt = (isNdx && ndx && ndx.current_point)
     ? ndx.current_point
     : (isSpxGthLive ? data.gth.current_point : data.current_point);
@@ -5980,7 +6019,17 @@ function updateUI(data) {
 
   const ovChartEl = document.getElementById('overvix-chart');
 
-  if (isOvernightEsLive) {
+  if (!hasLiveSessionStarted) {
+    if (ovChartEl && ovChartEl.data && ovChartEl.data[5] && ovChartEl.data[5].x && ovChartEl.data[5].x.length > 0) {
+      Plotly.restyle('overvix-chart', {
+        x: [[]],
+        y: [[]],
+        customdata: [[]],
+        visible: [false],
+        showlegend: [false]
+      }, [5]);
+    }
+  } else if (isOvernightEsLive) {
     // Check OVERNIGHT_ES_ONLY before falling back to RTH data.current_point, which still holds non-null y
     const overlay = buildOvernightEsOverlay(data.gth);
     const nextAnn = overlay.annotations[0];
@@ -6012,7 +6061,9 @@ function updateUI(data) {
       y: [[activePt.y]],
       name: [pointLabel],
       customdata: [[[liveResStr, liveTag]]],
-      'marker.color': [isTargetOvervixed ? '#FF1744' : (isSpxGthLive ? '#818CF8' : '#00E5FF')]
+      'marker.color': [isTargetOvervixed ? '#FF1744' : (isSpxGthLive ? '#818CF8' : '#00E5FF')],
+      visible: [currentTrailMode !== '60d'],
+      showlegend: [true]
     }, [5]);
 
     // Dynamically append live point to intraday trail during RTH or GTH_ACTIVE
