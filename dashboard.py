@@ -1352,7 +1352,8 @@ def compute_gth_spotvol_baseline(
         if now_et.time() < dtime(16, 0):
             fresh_df = fresh_df.loc[[d < today_et for d in fresh_df.index]]
         for d_idx, row in fresh_df.iterrows():
-            base_df.loc[d_idx, ['spx', 'vix']] = [float(row['spx']), float(row['vix'])]
+            if d_idx not in base_df.index:
+                base_df.loc[d_idx, ['spx', 'vix']] = [float(row['spx']), float(row['vix'])]
 
     base_df = base_df.sort_index()
     if gth_target_date:
