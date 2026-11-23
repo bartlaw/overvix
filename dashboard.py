@@ -2819,7 +2819,19 @@ def compute_live_payload() -> Dict[str, Any]:
             pass
 
     # 4M OTM Risk Reversal Evaluation (SPX & NDX / QQQ)
-    spx_spot_curr = spx_curr if (spx_curr and spx_curr > 0) else state.latest_spx_close
+    active_basis = state.eod_es_spx_basis if state.eod_es_spx_basis is not None else state.es_spx_basis
+    if state.spx_4m_ref_mode == "live_spot":
+        if is_live_rth and spx_curr and spx_curr > 0:
+            spx_spot_curr = spx_curr
+        elif es_curr and es_curr > 0 and active_basis is not None:
+            spx_spot_curr = round(es_curr - active_basis, 2)
+        elif state.spx_4m_ref_spot:
+            spx_spot_curr = state.spx_4m_ref_spot
+        else:
+            spx_spot_curr = spx_curr if (spx_curr and spx_curr > 0) else state.latest_spx_close
+    else:
+        spx_spot_curr = spx_curr if (spx_curr and spx_curr > 0) else (state.spx_4m_ref_spot or state.latest_spx_close)
+
     spx_4m_rr_payload = _calc_4m_rr(
         state.spx_4m_rr_call_contract, state.spx_4m_rr_put_contract,
         state.spx_4m_rr_call_ticker, state.spx_4m_rr_put_ticker,
@@ -2831,7 +2843,16 @@ def compute_live_payload() -> Dict[str, Any]:
     if spx_4m_rr_payload:
         state.spx_4m_rr_data = spx_4m_rr_payload
 
-    ndx_spot_curr = (ndx_curr / 41.0) if (ndx_curr and ndx_curr > 0) else (state.latest_ndx_close / 41.0 if state.latest_ndx_close else 665.0)
+    if state.ndx_4m_ref_mode == "live_spot":
+        if is_live_rth and ndx_curr and ndx_curr > 0:
+            ndx_spot_curr = round(ndx_curr / 41.0, 2)
+        elif state.ndx_4m_ref_spot:
+            ndx_spot_curr = state.ndx_4m_ref_spot
+        else:
+            ndx_spot_curr = (ndx_curr / 41.0) if (ndx_curr and ndx_curr > 0) else (state.latest_ndx_close / 41.0 if state.latest_ndx_close else 665.0)
+    else:
+        ndx_spot_curr = (ndx_curr / 41.0) if (ndx_curr and ndx_curr > 0) else (state.ndx_4m_ref_spot or (state.latest_ndx_close / 41.0 if state.latest_ndx_close else 665.0))
+
     ndx_4m_rr_payload = _calc_4m_rr(
         state.ndx_4m_rr_call_contract, state.ndx_4m_rr_put_contract,
         state.ndx_4m_rr_call_ticker, state.ndx_4m_rr_put_ticker,
