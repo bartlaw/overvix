@@ -1483,8 +1483,13 @@ def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.D
             df_sym = df_sym[df_sym['day'].isin(days_filter)]
         return resample_30m_to_session(df_sym, '30m', key)
 
-    # 1M Bars (5-minute bars if dfs_1m available, fallback to 30-min bars)
-    if dfs_1m and 'spx' in dfs_1m and not dfs_1m['spx'].empty:
+    # 1M Bars (5-minute bars if dfs_1m available, fallback to 30-min bars or daily)
+    has_1m_5min = (
+        isinstance(dfs_1m, dict) and
+        'spx' in dfs_1m and not dfs_1m['spx'].empty and
+        'vix' in dfs_1m and not dfs_1m['vix'].empty
+    )
+    if has_1m_5min:
         s_1m = series_from_df(dfs_1m.get('spx'), 'spx', filter_rth=True)
         v_1m = series_from_df(dfs_1m.get('vix'), 'vix', filter_rth=True)
         v3_1m = series_from_df(dfs_1m.get('vix3m'), 'vix3m', filter_rth=True)
@@ -1500,32 +1505,53 @@ def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.D
         v3_1m = _slice_pool('vix3m', days_1m)
         n_1m = _slice_pool('ndx', days_1m)
         vx_1m = _slice_pool('vxn', days_1m)
-        (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
-         state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_horizon_pack(
-            s_1m, v_1m, v3_1m, n_1m, vx_1m, roll_win=39, min_p=10
-        )
+        if not s_1m.empty and not v_1m.empty:
+            (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
+             state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_horizon_pack(
+                s_1m, v_1m, v3_1m, n_1m, vx_1m, roll_win=39, min_p=10
+            )
+        elif not df_daily.empty:
+            df_1m_daily = df_daily.iloc[-22:] if len(df_daily) >= 22 else df_daily
+            (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
+             state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_from_daily_df(
+                df_1m_daily, roll_win=10, min_p=3
+            )
 
-    # 3M Bars (RTH 30-min bars for last 64 trading days)
+    # 3M Bars (RTH 30-min bars for last 64 trading days, fallback to daily)
     s_3m = _slice_pool('spx', days_3m)
     v_3m = _slice_pool('vix', days_3m)
     v3_3m = _slice_pool('vix3m', days_3m)
     n_3m = _slice_pool('ndx', days_3m)
     vx_3m = _slice_pool('vxn', days_3m)
-    (state.df_ts_3m, state.df_spx_vix_3m, state.df_ndx_vxn_3m,
-     state.df_tech_vol_3m, state.corr_3m, state.corr_3m_ndx) = build_horizon_pack(
-        s_3m, v_3m, v3_3m, n_3m, vx_3m, roll_win=130, min_p=20
-    )
+    if not s_3m.empty and not v_3m.empty:
+        (state.df_ts_3m, state.df_spx_vix_3m, state.df_ndx_vxn_3m,
+         state.df_tech_vol_3m, state.corr_3m, state.corr_3m_ndx) = build_horizon_pack(
+            s_3m, v_3m, v3_3m, n_3m, vx_3m, roll_win=130, min_p=20
+        )
+    elif not df_daily.empty:
+        df_3m_daily = df_daily.iloc[-64:] if len(df_daily) >= 64 else df_daily
+        (state.df_ts_3m, state.df_spx_vix_3m, state.df_ndx_vxn_3m,
+         state.df_tech_vol_3m, state.corr_3m, state.corr_3m_ndx) = build_from_daily_df(
+            df_3m_daily, roll_win=20, min_p=5
+        )
 
-    # 6M Bars (RTH 30-min bars for all available trading days)
+    # 6M Bars (RTH 30-min bars for all available trading days, fallback to daily)
     s_6m = _slice_pool('spx')
     v_6m = _slice_pool('vix')
     v3_6m = _slice_pool('vix3m')
     n_6m = _slice_pool('ndx')
     vx_6m = _slice_pool('vxn')
-    (state.df_ts_6m, state.df_spx_vix_6m, state.df_ndx_vxn_6m,
-     state.df_tech_vol_6m, state.corr_6m, state.corr_6m_ndx) = build_horizon_pack(
-        s_6m, v_6m, v3_6m, n_6m, vx_6m, roll_win=195, min_p=30
-    )
+    if not s_6m.empty and not v_6m.empty:
+        (state.df_ts_6m, state.df_spx_vix_6m, state.df_ndx_vxn_6m,
+         state.df_tech_vol_6m, state.corr_6m, state.corr_6m_ndx) = build_horizon_pack(
+            s_6m, v_6m, v3_6m, n_6m, vx_6m, roll_win=195, min_p=30
+        )
+    elif not df_daily.empty:
+        df_6m_daily = df_daily.iloc[-128:] if len(df_daily) >= 128 else df_daily
+        (state.df_ts_6m, state.df_spx_vix_6m, state.df_ndx_vxn_6m,
+         state.df_tech_vol_6m, state.corr_6m, state.corr_6m_ndx) = build_from_daily_df(
+            df_6m_daily, roll_win=30, min_p=10
+        )
 
     # Daily Macro Horizons (MAX, 1Y, YTD)
     if not df_daily.empty:
@@ -1571,49 +1597,73 @@ def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.D
 
 async def hydrate_deep_history_background(active_sess_date: Optional[str], today_et: str):
     """
-    Background worker that fetches 1M (5-min), 6M (30-min) and 2Y (1-day) bars from IBKR,
+    Background worker that fetches 1M (5-min), 6M (30-min) and 2Y (1-day) bars from IBKR in paced batches
+    (<= 5 simultaneous requests with 1.5s pause to prevent IBKR error 162 pacing violations),
     persists them to disk cache (history_cache.pkl), updates state multi-timeframe horizons,
     and bumps state.hist_version so connected browser clients receive updated datasets without UI blocking.
     """
     try:
-        print("[Background Cache] Hydrating deep history (1M 5-min, 6M 30-min & 2Y daily) from IBKR in background...")
-        (b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn,
-         b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn,
-         spx_bars_2y, vix_bars_2y, vix3m_bars_2y, ndx_bars_2y, vxn_bars_2y) = await asyncio.gather(
+        print("[Background Cache] Hydrating deep history (1M 5-min, 6M 30-min & 2Y daily) from IBKR in paced batches...")
+        # Batch 1: 1M 5-minute bars (max 5 simultaneous requests)
+        (b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn) = await asyncio.gather(
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '1 M', '5 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix_contract, '', '1 M', '5 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '1 M', '5 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '1 M', '5 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '1 M', '5 mins', 'TRADES', True, 1),
+        )
+        await asyncio.sleep(1.5)
 
+        # Batch 2: 6M 30-minute bars (max 5 simultaneous requests)
+        (b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn) = await asyncio.gather(
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '6 M', '30 mins', 'TRADES', True, 1),
+        )
+        await asyncio.sleep(1.5)
 
+        # Batch 3: 2Y daily bars (max 5 simultaneous requests)
+        (spx_bars_2y, vix_bars_2y, vix3m_bars_2y, ndx_bars_2y, vxn_bars_2y) = await asyncio.gather(
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
         )
-        dfs_1m = {
-            name: bars_to_df(bars, name)
-            for name, bars in zip(['spx', 'vix', 'vix3m', 'ndx', 'vxn'],
-                                  [b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn])
-        }
-        dfs_pool = {
-            name: bars_to_df(bars, name)
-            for name, bars in zip(['spx', 'vix', 'vix3m', 'ndx', 'vxn'],
-                                  [b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn])
-        }
+
+        existing_cache = load_history_cache() or {}
+        existing_dfs_1m = existing_cache.get('dfs_1m', {})
+        existing_dfs_pool = existing_cache.get('dfs_pool', {})
+        existing_df_daily = existing_cache.get('df_daily', pd.DataFrame())
+
+        dfs_1m = {}
+        for name, bars in zip(['spx', 'vix', 'vix3m', 'ndx', 'vxn'],
+                              [b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn]):
+            parsed = bars_to_df(bars, name)
+            if (parsed.empty or len(parsed) < 10) and name in existing_dfs_1m and not existing_dfs_1m[name].empty:
+                dfs_1m[name] = existing_dfs_1m[name]
+            else:
+                dfs_1m[name] = parsed
+
+        dfs_pool = {}
+        for name, bars in zip(['spx', 'vix', 'vix3m', 'ndx', 'vxn'],
+                              [b6m_spx, b6m_vix, b6m_vix3m, b6m_ndx, b6m_vxn]):
+            parsed = bars_to_df(bars, name)
+            if (parsed.empty or len(parsed) < 10) and name in existing_dfs_pool and not existing_dfs_pool[name].empty:
+                dfs_pool[name] = existing_dfs_pool[name]
+            else:
+                dfs_pool[name] = parsed
+
         df_s2y = safe_to_series(spx_bars_2y, 'spx')
         df_v2y = safe_to_series(vix_bars_2y, 'vix')
         df_v32y = safe_to_series(vix3m_bars_2y, 'vix3m')
         df_n2y = safe_to_series(ndx_bars_2y, 'ndx')
         df_vx2y = safe_to_series(vxn_bars_2y, 'vxn')
         df_daily = pd.concat([df_s2y, df_v2y, df_v32y, df_n2y, df_vx2y], axis=1).dropna()
+        if df_daily.empty and not existing_df_daily.empty:
+            df_daily = existing_df_daily
         df_daily = harmonize_daily_close_with_rth(df_daily, active_sess_date)
 
         # Save to disk cache
@@ -1734,7 +1784,15 @@ async def refresh_historical_data():
             daily_ref_df = cached_df_daily
             compute_spotvol_baselines(cached_df_daily, active_sess_date, today_et)
             apply_multi_timeframe_pool(cached_dfs, cached_df_daily, active_sess_date, today_et, dfs_1m=cached_dfs_1m)
-            if cache_data.get('cache_date') < today_et or not cached_dfs_1m:
+            is_cache_healthy = (
+                isinstance(cached_dfs, dict) and
+                isinstance(cached_dfs_1m, dict) and
+                not cached_dfs.get('spx', pd.DataFrame()).empty and
+                not cached_dfs.get('vix', pd.DataFrame()).empty and
+                not cached_dfs_1m.get('spx', pd.DataFrame()).empty and
+                not cached_dfs_1m.get('vix', pd.DataFrame()).empty
+            )
+            if cache_data.get('cache_date') < today_et or not is_cache_healthy:
                 need_background_hydration = True
         else:
             # Cold first launch with no disk cache: fetch 4M (1-day) bars in parallel (~0.25s) for immediate Spot-Vol baselines
