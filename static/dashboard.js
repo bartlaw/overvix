@@ -979,8 +979,8 @@ function getHistoricalDotHoverTemplate(assetLabel, volLabel) {
   const isNdx = (currentAssetPair === 'NDX');
   const residLabel = isNdx ? 'Over-VXN Residual' : 'Overvix Residual';
   return `<b>%{text}</b><br>` +
-         `${assetLabel} Move: <b>%{x:+.2f}%</b><br>` +
-         `${volLabel} Move: <b>%{y:+.2f} pts</b><br>` +
+         `${assetLabel}: <b>%{customdata[2]}</b> (%{x:+.2f}%)<br>` +
+         `${volLabel}: <b>%{customdata[3]}</b> (%{y:+.2f} pts)<br>` +
          `${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br>` +
          `<span style="color:${color};font-size:10px">${hint}</span><extra></extra>`;
 }
@@ -1407,6 +1407,12 @@ function renderOvervixChart(bootstrap) {
   const dates = gthModel
     ? (gthModel.dates || [])
     : ((targetData.overvix && targetData.overvix.dates) ? targetData.overvix.dates : []);
+  const spotHist = gthModel
+    ? (gthModel.spot_history || [])
+    : ((targetData.overvix && targetData.overvix.spot_history) ? targetData.overvix.spot_history : []);
+  const volHist = gthModel
+    ? (gthModel.vol_history || [])
+    : ((targetData.overvix && targetData.overvix.vol_history) ? targetData.overvix.vol_history : []);
   const slope = gthModel ? (gthModel.slope || 0) : ((targetData.model && targetData.model.slope) || 0);
   const intercept = gthModel ? (gthModel.intercept || 0) : ((targetData.model && targetData.model.intercept) || 0);
   const assetDefaultThresh = isNdx ? currentNdxThreshold : currentSpxThreshold;
@@ -1429,31 +1435,60 @@ function renderOvervixChart(bootstrap) {
 
   let currX = 0;
   let currY = 0;
+  let currSpot = null;
+  let currVol = null;
   const isGthLiveActive = Boolean(gthMode && bootstrap.session_status === 'GTH_ACTIVE' && gthObj && gthObj.current_point && gthObj.current_point.y !== null);
   const isOvernightEs = Boolean(gthMode && bootstrap.session_status === 'OVERNIGHT_ES_ONLY' && gthObj && gthObj.current_point);
 
   if (bootstrap.is_historical && trail.x && trail.x.length > 0) {
     currX = trail.x[trail.x.length - 1];
     currY = trail.y[trail.y.length - 1];
+    currSpot = isNdx
+      ? (targetData.market ? targetData.market.current : (trail.spot_raw ? trail.spot_raw[trail.spot_raw.length - 1] : null))
+      : (targetData.market && targetData.market.spx ? targetData.market.spx.current : (trail.spot_raw ? trail.spot_raw[trail.spot_raw.length - 1] : null));
+    currVol = isNdx
+      ? (targetData.market && targetData.market.vxn ? targetData.market.vxn.current : (trail.vol_raw ? trail.vol_raw[trail.vol_raw.length - 1] : null))
+      : (targetData.market && targetData.market.vix ? targetData.market.vix.current : (trail.vol_raw ? trail.vol_raw[trail.vol_raw.length - 1] : null));
   } else if (isGthLiveActive) {
     currX = gthObj.current_point.x;
     currY = gthObj.current_point.y;
+    currSpot = gthObj.synthetic_spx;
+    currVol = gthObj.vix;
   } else if (isOvernightEs && trail.x && trail.x.length > 0) {
     // Overnight ES-Only: pin Overvix beacon to last complete session tip (never plot frozen VIX vs ES move)
     currX = trail.x[trail.x.length - 1];
     currY = trail.y[trail.y.length - 1];
+    currSpot = (trail.spot_raw && trail.spot_raw.length > 0) ? trail.spot_raw[trail.spot_raw.length - 1] : null;
+    currVol = (trail.vol_raw && trail.vol_raw.length > 0) ? trail.vol_raw[trail.vol_raw.length - 1] : null;
   } else if (targetData.current_point && targetData.current_point.x !== undefined && targetData.current_point.y !== undefined && targetData.current_point.y !== null) {
     currX = targetData.current_point.x;
     currY = targetData.current_point.y;
+    currSpot = isNdx
+      ? (targetData.market ? targetData.market.current : null)
+      : (targetData.market && targetData.market.spx ? targetData.market.spx.current : null);
+    currVol = isNdx
+      ? (targetData.market && targetData.market.vxn ? targetData.market.vxn.current : null)
+      : (targetData.market && targetData.market.vix ? targetData.market.vix.current : null);
   } else if (targetData.market && targetData.market.pct_change !== undefined) {
     currX = targetData.market.pct_change;
     currY = (targetData.market.vxn && targetData.market.vxn.pt_change !== undefined)
       ? targetData.market.vxn.pt_change
       : (targetData.market.vix ? targetData.market.vix.pt_change : 0);
+    currSpot = isNdx ? targetData.market.current : (targetData.market.spx ? targetData.market.spx.current : targetData.market.current);
+    currVol = isNdx ? (targetData.market.vxn ? targetData.market.vxn.current : null) : (targetData.market.vix ? targetData.market.vix.current : null);
   } else if (trail.x && trail.x.length > 0 && trail.y && trail.y.length > 0) {
     currX = trail.x[trail.x.length - 1];
     currY = trail.y[trail.y.length - 1];
+    currSpot = (trail.spot_raw && trail.spot_raw.length > 0) ? trail.spot_raw[trail.spot_raw.length - 1] : null;
+    currVol = (trail.vol_raw && trail.vol_raw.length > 0) ? trail.vol_raw[trail.vol_raw.length - 1] : null;
   }
+
+  const currSpotStr = (typeof currSpot === 'number' && !isNaN(currSpot))
+    ? currSpot.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : (currSpot || '-');
+  const currVolStr = (typeof currVol === 'number' && !isNaN(currVol))
+    ? currVol.toFixed(2)
+    : (currVol || '-');
 
   // Update subtitle & card target dynamically
   const spSub = document.getElementById('spotvol-sub');
@@ -1479,7 +1514,7 @@ function renderOvervixChart(bootstrap) {
   // Calculate Overvix residuals for historical 60D points
   const histCustomdata = xHist.map((x, i) => {
     const y = yHist[i];
-    if (x === null || y === null || x === undefined || y === undefined) return ['', ''];
+    if (x === null || y === null || x === undefined || y === undefined) return ['', '', '-', '-'];
     const exp = intercept + slope * x;
     const r = y - exp;
     const rSign = (r >= 0) ? '+' : '';
@@ -1489,13 +1524,36 @@ function renderOvervixChart(bootstrap) {
     const alertTag = isAlert
       ? "  <span style='color:#FF5370;font-weight:bold'>🚨 ALERT</span>"
       : (isCrush ? "  <span style='color:#06B6D4;font-weight:bold'>📉 CRUSH</span>" : "");
-    return [rStr, alertTag];
+
+    let spotNum = (spotHist && spotHist[i] !== undefined) ? spotHist[i] : null;
+    let volNum = (volHist && volHist[i] !== undefined) ? volHist[i] : null;
+
+    if ((spotNum === null || volNum === null) && dates && dates[i]) {
+      const dt = dates[i];
+      const c1y = getCorrDataset(isNdx, '1Y') || getCorrDataset(isNdx, 'MAX');
+      if (c1y && c1y.dates && c1y.spot_raw && c1y.vol_raw) {
+        const idx = c1y.dates.indexOf(dt);
+        if (idx !== -1) {
+          if (spotNum === null && c1y.spot_raw[idx] !== undefined) spotNum = c1y.spot_raw[idx];
+          if (volNum === null && c1y.vol_raw[idx] !== undefined) volNum = c1y.vol_raw[idx];
+        }
+      }
+    }
+
+    const spotStr = (typeof spotNum === 'number' && !isNaN(spotNum))
+      ? spotNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : (spotNum || '-');
+    const volStr = (typeof volNum === 'number' && !isNaN(volNum))
+      ? volNum.toFixed(2)
+      : (volNum || '-');
+
+    return [rStr, alertTag, spotStr, volStr];
   });
 
   // Calculate Overvix residuals for intraday trail path points
   const trailCustomdata = (trail.x || []).map((x, i) => {
     const y = (trail.y && trail.y[i] !== undefined) ? trail.y[i] : null;
-    if (x === null || y === null || x === undefined || y === undefined) return ['', ''];
+    if (x === null || y === null || x === undefined || y === undefined) return ['', '', '-', '-'];
     const exp = intercept + slope * x;
     const r = y - exp;
     const rSign = (r >= 0) ? '+' : '';
@@ -1505,7 +1563,21 @@ function renderOvervixChart(bootstrap) {
     const alertTag = isAlert
       ? "  <span style='color:#FF5370;font-weight:bold'>🚨 ALERT</span>"
       : (isCrush ? "  <span style='color:#06B6D4;font-weight:bold'>📉 CRUSH</span>" : "");
-    return [rStr, alertTag];
+
+    let rawSpot = (trail.spot_raw && trail.spot_raw[i] !== undefined) ? trail.spot_raw[i] : null;
+    let rawVol = (trail.vol_raw && trail.vol_raw[i] !== undefined) ? trail.vol_raw[i] : null;
+    if ((rawSpot === null || rawVol === null) && i === (trail.x || []).length - 1) {
+      if (rawSpot === null) rawSpot = currSpot;
+      if (rawVol === null) rawVol = currVol;
+    }
+    const spotStr = (typeof rawSpot === 'number' && !isNaN(rawSpot))
+      ? rawSpot.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : (rawSpot || '-');
+    const volStr = (typeof rawVol === 'number' && !isNaN(rawVol))
+      ? rawVol.toFixed(2)
+      : (rawVol || '-');
+
+    return [rStr, alertTag, spotStr, volStr];
   });
   if (trail) {
     trail.customdata = trailCustomdata;
@@ -1520,10 +1592,22 @@ function renderOvervixChart(bootstrap) {
     : (beaconResid !== null && beaconResid <= -threshold ? "  <span style='color:#06B6D4;font-weight:bold'>📉 CRUSH</span>" : "");
 
   const beaconHover = isGthLiveActive
-    ? `<b>Live GTH Point (${gthObj.es_symbol || 'ES'} Adj + VIX)</b><br>SPX (ES Adj): <b>%{x:+.2f}%</b><br>VIX Move: <b>%{y:+.2f} pts</b><br>${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`
+    ? `<b>Live GTH Point (${gthObj.es_symbol || 'ES'} Adj + VIX)</b><br>` +
+      `SPX (ES Adj): <b>%{customdata[2]}</b> (%{x:+.2f}%)<br>` +
+      `VIX: <b>%{customdata[3]}</b> (%{y:+.2f} pts)<br>` +
+      `${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br>` +
+      `<span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`
     : ((bootstrap.is_historical || !showLiveBeacon)
-      ? `<b>Session Close (${trailSessionDate || 'Prior'})</b><br>${assetLabel} Move: <b>%{x:+.2f}%</b><br>${volLabel} Move: <b>%{y:+.2f} pts</b><br>${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Official Close</span><extra></extra>`
-      : `<b>Live Current Point</b><br>${assetLabel} Move: <b>%{x:+.2f}%</b><br>${volLabel} Move: <b>%{y:+.2f} pts</b><br>${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`);
+      ? `<b>Session Close (${trailSessionDate || 'Prior'})</b><br>` +
+        `${assetLabel}: <b>%{customdata[2]}</b> (%{x:+.2f}%)<br>` +
+        `${volLabel}: <b>%{customdata[3]}</b> (%{y:+.2f} pts)<br>` +
+        `${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br>` +
+        `<span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Official Close</span><extra></extra>`
+      : `<b>Live Current Point</b><br>` +
+        `${assetLabel}: <b>%{customdata[2]}</b> (%{x:+.2f}%)<br>` +
+        `${volLabel}: <b>%{customdata[3]}</b> (%{y:+.2f} pts)<br>` +
+        `${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br>` +
+        `<span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`);
 
   // Size gradient for historical points: oldest session = 3.5px, most recent session = 9.0px (current max)
   const nHist = xHist.length;
@@ -1597,14 +1681,18 @@ function renderOvervixChart(bootstrap) {
       line: { color: isGthLiveActive ? '#818CF8' : '#00E5FF', width: 1.8, shape: 'spline' },
       marker: { color: isGthLiveActive ? '#818CF8' : '#00E5FF', size: 4, opacity: 0.8 },
       hoverlabel: darkHoverlabel,
-      hovertemplate: `<b>%{text}</b><br>${assetLabel} Move: <b>%{x:+.2f}%</b><br>${volLabel} Move: <b>%{y:+.2f} pts</b><br>${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`,
+      hovertemplate: `<b>%{text}</b><br>` +
+                     `${assetLabel}: <b>%{customdata[2]}</b> (%{x:+.2f}%)<br>` +
+                     `${volLabel}: <b>%{customdata[3]}</b> (%{y:+.2f} pts)<br>` +
+                     `${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br>` +
+                     `<span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`,
       visible: currentTrailMode === '60d' ? false : true
     },
     // 5: Session End / Live Current Point
     {
       x: hasSessionStarted ? [currX] : [],
       y: hasSessionStarted ? [currY] : [],
-      customdata: hasSessionStarted ? [[beaconResidStr, beaconTag]] : [],
+      customdata: hasSessionStarted ? [[beaconResidStr, beaconTag, currSpotStr, currVolStr]] : [],
       mode: 'markers',
       name: beaconName,
       marker: {
@@ -6056,11 +6144,16 @@ function updateUI(data) {
       ? "  <span style='color:#FF5370;font-weight:bold'>🚨 ALERT</span>"
       : (liveResVal <= -liveThresh ? "  <span style='color:#06B6D4;font-weight:bold'>📉 CRUSH</span>" : "");
 
+    const liveSpot = isNdx ? (data.ndx && data.ndx.market ? data.ndx.market.current : null) : (isSpxGthLive ? (data.gth ? data.gth.synthetic_spx : null) : (data.market && data.market.spx ? data.market.spx.current : null));
+    const liveVol = isNdx ? (data.ndx && data.ndx.market && data.ndx.market.vxn ? data.ndx.market.vxn.current : null) : (isSpxGthLive ? (data.gth ? data.gth.vix : null) : (data.market && data.market.vix ? data.market.vix.current : null));
+    const liveSpotStr = (typeof liveSpot === 'number' && !isNaN(liveSpot)) ? liveSpot.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (liveSpot || '-');
+    const liveVolStr = (typeof liveVol === 'number' && !isNaN(liveVol)) ? liveVol.toFixed(2) : (liveVol || '-');
+
     Plotly.restyle('overvix-chart', {
       x: [[activePt.x]],
       y: [[activePt.y]],
       name: [pointLabel],
-      customdata: [[[liveResStr, liveTag]]],
+      customdata: [[[liveResStr, liveTag, liveSpotStr, liveVolStr]]],
       'marker.color': [isTargetOvervixed ? '#FF1744' : (isSpxGthLive ? '#818CF8' : '#00E5FF')],
       visible: [currentTrailMode !== '60d'],
       showlegend: [true]
@@ -6088,12 +6181,12 @@ function updateUI(data) {
       if (n > 0 && (cachedTrail.times[n - 1] === liveDt || cachedTrail.times[n - 1].slice(11, 16) === liveDt.slice(11, 16))) {
         cachedTrail.x[n - 1] = activePt.x;
         cachedTrail.y[n - 1] = activePt.y;
-        cachedTrail.customdata[n - 1] = [ptResStr, ptTag];
+        cachedTrail.customdata[n - 1] = [ptResStr, ptTag, liveSpotStr, liveVolStr];
       } else {
         cachedTrail.x.push(activePt.x);
         cachedTrail.y.push(activePt.y);
         cachedTrail.times.push(liveDt);
-        cachedTrail.customdata.push([ptResStr, ptTag]);
+        cachedTrail.customdata.push([ptResStr, ptTag, liveSpotStr, liveVolStr]);
       }
       Plotly.restyle('overvix-chart', {
         x: [cachedTrail.x],

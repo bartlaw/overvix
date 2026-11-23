@@ -257,9 +257,18 @@ def harmonize_session_payload(payload: Dict[str, Any], df_daily: pd.DataFrame, t
         settle_time = f"{target_date} 16:00"
         if 'overvix' in payload and 'intraday_trail' in payload['overvix']:
             trail = payload['overvix']['intraday_trail']
+            if ('spot_raw' not in trail or not trail['spot_raw']) and 'intraday_correlation' in payload:
+                ic = payload['intraday_correlation']
+                if 'spot_raw' in ic and ic['spot_raw']:
+                    trail['spot_raw'] = list(ic['spot_raw'])
+                if 'vol_raw' in ic and ic['vol_raw']:
+                    trail['vol_raw'] = list(ic['vol_raw'])
+
             times = trail.get('times', [])
             x_vals = trail.get('x', [])
             y_vals = trail.get('y', [])
+            spot_raw = trail.get('spot_raw', [])
+            vol_raw = trail.get('vol_raw', [])
             if times and len(times) == len(x_vals) == len(y_vals):
                 if times[-1] >= settle_time:
                     x_vals[-1] = final_x
@@ -268,6 +277,42 @@ def harmonize_session_payload(payload: Dict[str, Any], df_daily: pd.DataFrame, t
                     times.append(settle_time)
                     x_vals.append(final_x)
                     y_vals.append(final_y)
+                if spot_raw:
+                    while len(spot_raw) < len(times):
+                        spot_raw.append(round(final_spx, 2))
+                    spot_raw[-1] = round(final_spx, 2)
+                if vol_raw:
+                    while len(vol_raw) < len(times):
+                        vol_raw.append(round(final_vix, 2))
+                    vol_raw[-1] = round(final_vix, 2)
+
+        if 'ndx' in payload and isinstance(payload['ndx'], dict) and 'overvix' in payload['ndx']:
+            ndx_trail = payload['ndx']['overvix'].get('intraday_trail', {})
+            if ('spot_raw' not in ndx_trail or not ndx_trail['spot_raw']) and 'intraday_correlation' in payload['ndx']:
+                ic_ndx = payload['ndx']['intraday_correlation']
+                if 'spot_raw' in ic_ndx and ic_ndx['spot_raw']:
+                    ndx_trail['spot_raw'] = list(ic_ndx['spot_raw'])
+                if 'vol_raw' in ic_ndx and ic_ndx['vol_raw']:
+                    ndx_trail['vol_raw'] = list(ic_ndx['vol_raw'])
+
+        # Harmonize spot_history and vol_history in overvix baseline
+        if 'overvix' in payload:
+            dates_sv = payload['overvix'].get('dates', [])
+            if dates_sv and ('spot_history' not in payload['overvix'] or not payload['overvix']['spot_history']):
+                col_s = 'spx' if 'spx' in df_d.columns else ('spx_close' if 'spx_close' in df_d.columns else None)
+                col_v = 'vix' if 'vix' in df_d.columns else ('vix_close' if 'vix_close' in df_d.columns else None)
+                if col_s and col_v:
+                    payload['overvix']['spot_history'] = [round(float(df_d.loc[d, col_s]), 2) if d in df_d.index and pd.notna(df_d.loc[d, col_s]) else None for d in dates_sv]
+                    payload['overvix']['vol_history'] = [round(float(df_d.loc[d, col_v]), 2) if d in df_d.index and pd.notna(df_d.loc[d, col_v]) else None for d in dates_sv]
+
+        if 'ndx' in payload and isinstance(payload['ndx'], dict) and 'overvix' in payload['ndx']:
+            dates_ndx = payload['ndx']['overvix'].get('dates', [])
+            if dates_ndx and ('spot_history' not in payload['ndx']['overvix'] or not payload['ndx']['overvix']['spot_history']):
+                col_ns = 'ndx' if 'ndx' in df_d.columns else ('ndx_close' if 'ndx_close' in df_d.columns else None)
+                col_nv = 'vxn' if 'vxn' in df_d.columns else ('vxn_close' if 'vxn_close' in df_d.columns else None)
+                if col_ns and col_nv:
+                    payload['ndx']['overvix']['spot_history'] = [round(float(df_d.loc[d, col_ns]), 2) if d in df_d.index and pd.notna(df_d.loc[d, col_ns]) else None for d in dates_ndx]
+                    payload['ndx']['overvix']['vol_history'] = [round(float(df_d.loc[d, col_nv]), 2) if d in df_d.index and pd.notna(df_d.loc[d, col_nv]) else None for d in dates_ndx]
 
         # Intraday correlation harmonization
         if 'intraday_correlation' in payload:
@@ -441,6 +486,8 @@ async def fetch_and_build_historical_session(
         x_hist = [round(float(v), 2) for v in baseline_clean['spx_pct'].tolist()]
         y_hist = [round(float(v), 2) for v in baseline_clean['vix_pt'].tolist()]
         dates_sv = [str(d)[:10] for d in baseline_clean.index]
+        spx_hist = [round(float(v), 2) for v in baseline_clean['spx'].tolist()]
+        vix_hist = [round(float(v), 2) for v in baseline_clean['vix'].tolist()]
 
         # OLS Regression for SPX / VIX baseline
         x_arr = np.array(x_hist)
@@ -459,6 +506,8 @@ async def fetch_and_build_historical_session(
             x_ndx_hist = [round(float(v), 2) for v in baseline_ndx_clean['ndx_pct'].tolist()]
             y_ndx_hist = [round(float(v), 2) for v in baseline_ndx_clean['vxn_pt'].tolist()]
             dates_ndx_sv = [str(d)[:10] for d in baseline_ndx_clean.index]
+            ndx_hist = [round(float(v), 2) for v in baseline_ndx_clean['ndx'].tolist()]
+            vxn_hist = [round(float(v), 2) for v in baseline_ndx_clean['vxn'].tolist()]
 
             x_ndx_arr = np.array(x_ndx_hist)
             y_ndx_arr = np.array(y_ndx_hist)
@@ -469,6 +518,7 @@ async def fetch_and_build_historical_session(
             ndx_vol_slope = float(1.0 / ndx_slope) if ndx_slope != 0 else 0.0
         else:
             x_ndx_hist, y_ndx_hist, dates_ndx_sv = [], [], []
+            ndx_hist, vxn_hist = [], []
             ndx_slope, ndx_intercept, ndx_r_squared, ndx_vol_slope = 0.0, 0.0, 0.0, 0.0
 
         # Format IBKR endDateTime (End of day UTC/ET notation)
@@ -638,10 +688,14 @@ async def fetch_and_build_historical_session(
                     "x_history": x_ndx_hist,
                     "y_history": y_ndx_hist,
                     "dates": dates_ndx_sv,
+                    "spot_history": ndx_hist,
+                    "vol_history": vxn_hist,
                     "intraday_trail": {
                         "x": [round(float(v), 2) for v in df_sess['ndx_pct'].tolist()],
                         "y": [round(float(v), 2) for v in df_sess['vxn_pt'].tolist()],
-                        "times": times_formatted
+                        "times": times_formatted,
+                        "spot_raw": [round(float(v), 2) for v in df_sess['ndx'].tolist()],
+                        "vol_raw": [round(float(v), 2) for v in df_sess['vxn'].tolist()]
                     }
                 },
                 "correlation": {
@@ -741,10 +795,14 @@ async def fetch_and_build_historical_session(
                 "x_history": x_hist,
                 "y_history": y_hist,
                 "dates": dates_sv,
+                "spot_history": spx_hist,
+                "vol_history": vix_hist,
                 "intraday_trail": {
                     "x": [round(float(v), 2) for v in df_sess['spx_pct'].tolist()],
                     "y": [round(float(v), 2) for v in df_sess['vix_pt'].tolist()],
-                    "times": times_formatted
+                    "times": times_formatted,
+                    "spot_raw": [round(float(v), 2) for v in df_sess['spx'].tolist()],
+                    "vol_raw": [round(float(v), 2) for v in df_sess['vix'].tolist()]
                 }
             },
             "term_structure": {

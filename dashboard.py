@@ -3742,11 +3742,19 @@ async def get_bootstrap():
     x_hist = [round(float(v), 2) for v in state.df_spotvol['spx_pct'].tolist()] if not state.df_spotvol.empty else []
     y_hist = [round(float(v), 2) for v in state.df_spotvol['vix_pt'].tolist()] if not state.df_spotvol.empty else []
     dates_sv = [str(d)[:10] for d in state.df_spotvol.index] if not state.df_spotvol.empty else []
+    col_s = 'spx_close' if 'spx_close' in state.df_spotvol.columns else ('spx' if 'spx' in state.df_spotvol.columns else None)
+    col_v = 'vix_close' if 'vix_close' in state.df_spotvol.columns else ('vix' if 'vix' in state.df_spotvol.columns else None)
+    spx_hist = [round(float(v), 2) for v in state.df_spotvol[col_s].tolist()] if (not state.df_spotvol.empty and col_s) else []
+    vix_hist = [round(float(v), 2) for v in state.df_spotvol[col_v].tolist()] if (not state.df_spotvol.empty and col_v) else []
 
     # Format Spot-Vol history (NDX)
     x_ndx_hist = [round(float(v), 2) for v in state.df_spotvol_ndx['ndx_pct'].tolist()] if not state.df_spotvol_ndx.empty else []
     y_ndx_hist = [round(float(v), 2) for v in state.df_spotvol_ndx['vxn_pt'].tolist()] if not state.df_spotvol_ndx.empty else []
     dates_ndx_sv = [str(d)[:10] for d in state.df_spotvol_ndx.index] if not state.df_spotvol_ndx.empty else []
+    col_ns = 'ndx_close' if 'ndx_close' in state.df_spotvol_ndx.columns else ('ndx' if 'ndx' in state.df_spotvol_ndx.columns else None)
+    col_nv = 'vxn_close' if 'vxn_close' in state.df_spotvol_ndx.columns else ('vxn' if 'vxn' in state.df_spotvol_ndx.columns else None)
+    ndx_hist = [round(float(v), 2) for v in state.df_spotvol_ndx[col_ns].tolist()] if (not state.df_spotvol_ndx.empty and col_ns) else []
+    vxn_hist = [round(float(v), 2) for v in state.df_spotvol_ndx[col_nv].tolist()] if (not state.df_spotvol_ndx.empty and col_nv) else []
 
     # Helper to convert DatetimeIndex cleanly to US/Eastern ISO strings for Plotly
     def to_eastern_dt_list(idx):
@@ -3882,10 +3890,14 @@ async def get_bootstrap():
             "x_history": x_ndx_hist,
             "y_history": y_ndx_hist,
             "dates": dates_ndx_sv,
+            "spot_history": ndx_hist,
+            "vol_history": vxn_hist,
             "intraday_trail": {
                 "x": corr_ndx_1d["spx_pct"],
                 "y": corr_ndx_1d["vix_pt"],
-                "times": corr_ndx_1d["times"]
+                "times": corr_ndx_1d["times"],
+                "spot_raw": corr_ndx_1d.get("spot_raw", []),
+                "vol_raw": corr_ndx_1d.get("vol_raw", [])
             }
         },
         "correlation": {
@@ -3961,6 +3973,10 @@ async def get_bootstrap():
     x_gth_hist = [round(float(v), 2) for v in state.df_spotvol_gth['spx_pct'].tolist()] if not state.df_spotvol_gth.empty else x_hist
     y_gth_hist = [round(float(v), 2) for v in state.df_spotvol_gth['vix_pt'].tolist()] if not state.df_spotvol_gth.empty else y_hist
     dates_gth_sv = [str(d)[:10] for d in state.df_spotvol_gth.index] if not state.df_spotvol_gth.empty else dates_sv
+    col_gs = 'spx_close' if 'spx_close' in state.df_spotvol_gth.columns else ('spx' if 'spx' in state.df_spotvol_gth.columns else None)
+    col_gv = 'vix_close' if 'vix_close' in state.df_spotvol_gth.columns else ('vix' if 'vix' in state.df_spotvol_gth.columns else None)
+    spx_gth_hist = [round(float(v), 2) for v in state.df_spotvol_gth[col_gs].tolist()] if (not state.df_spotvol_gth.empty and col_gs) else spx_hist
+    vix_gth_hist = [round(float(v), 2) for v in state.df_spotvol_gth[col_gv].tolist()] if (not state.df_spotvol_gth.empty and col_gv) else vix_hist
 
     bootstrap_data = {
         **live,
@@ -3969,23 +3985,31 @@ async def get_bootstrap():
             "x_history": x_hist,
             "y_history": y_hist,
             "dates": dates_sv,
+            "spot_history": spx_hist,
+            "vol_history": vix_hist,
             "intraday_trail": {
                 "x": corr_1d["spx_pct"],
                 "y": corr_1d["vix_pt"],
-                "times": corr_1d["times"]
+                "times": corr_1d["times"],
+                "spot_raw": corr_1d.get("spot_raw", []),
+                "vol_raw": corr_1d.get("vol_raw", [])
             },
             "intraday_trail_gth": {
                 "x": corr_1d_gth["spx_pct"],
                 "y": corr_1d_gth["vix_pt"],
                 "times": corr_1d_gth["times"],
                 "is_gth": corr_1d_gth.get("is_gth", []),
-                "session_date": state.gth_session_date
+                "session_date": state.gth_session_date,
+                "spot_raw": corr_1d_gth.get("spot_raw", []),
+                "vol_raw": corr_1d_gth.get("vol_raw", [])
             },
             "gth_model": {
                 **live["gth"]["model"],
                 "x_history": x_gth_hist,
                 "y_history": y_gth_hist,
                 "dates": dates_gth_sv,
+                "spot_history": spx_gth_hist,
+                "vol_history": vix_gth_hist,
                 "ref_spx": round(state.gth_ref_spx, 2) if state.gth_ref_spx else live["reference_closes"]["spx"],
                 "ref_vix": round(state.gth_ref_vix, 2) if state.gth_ref_vix else live["reference_closes"]["vix"],
             }
