@@ -1208,7 +1208,7 @@ def compute_basis_maps(
                         es_map[d_str] = float(es_rth.iloc[-1])
 
     sorted_basis_dates = sorted(basis_map.keys())
-    latest_completed_date = sorted_basis_dates[-1] if sorted_basis_dates else None
+    latest_completed_date = sorted_basis_dates[-1] if sorted_basis_dates else (sorted(spx_map.keys())[-1] if spx_map else None)
     return {
         "spx_map": spx_map,
         "vix_map": vix_map,
@@ -1347,6 +1347,7 @@ def compute_gth_spotvol_baseline(
 
     fresh_df = pd.concat([s_spx_d, s_vix_d], axis=1).dropna() if (s_spx_d is not None and not s_spx_d.empty and s_vix_d is not None and not s_vix_d.empty) else pd.DataFrame()
     if not fresh_df.empty:
+        fresh_df.columns = ['spx', 'vix']
         fresh_df.index = [str(d)[:10] for d in fresh_df.index]
         today_et = now_et.strftime('%Y-%m-%d')
         if now_et.time() < dtime(16, 0):
@@ -1356,7 +1357,10 @@ def compute_gth_spotvol_baseline(
 
     base_df = base_df.sort_index()
     if gth_target_date:
-        base_df = base_df.loc[[d < gth_target_date for d in base_df.index]]
+        if now_et.time() >= dtime(16, 0) and gth_target_date == today_et:
+            base_df = base_df.loc[[d <= gth_target_date for d in base_df.index]]
+        else:
+            base_df = base_df.loc[[d < gth_target_date for d in base_df.index]]
 
     if len(base_df) < 3:
         state.df_spotvol_gth = state.df_spotvol.copy()
@@ -1695,27 +1699,32 @@ async def refresh_historical_data():
     print("[IBKR] Fetching historical baseline & multi-timeframe datasets (Fast Startup + GTH)...")
     try:
         has_es = (state.es_contract is not None)
-        # 1. Fetch Intraday 1D/2D (1-min), 10D (5-min, also sliced for 5D), & 1M daily settlement bars in parallel.
-        # VIX useRTH=False & useRTH=True return identical CBOE bars, so one 10D VIX request serves both RTH & GTH.
-        (b2_spx, b2_vix_gth, b1_vix3m, b1_ndx, b1_vxn,
-         b10_spx, b10_vix_gth, b10_vix3m, b10_ndx, b10_vxn,
-         b_spx_d, b_vix_d,
-         b2_es, b10_es, b_es_d) = await asyncio.gather(
+        # 1. Fetch Intraday 1D/2D (1-min), 10D (5-min, also sliced for 5D), & 1M daily settlement bars in paced batches
+        # (<= 5 simultaneous requests with 1.0s delay to prevent IBKR error 162 pacing violations).
+        # Batch 1: Intraday 1D / 2D 1-minute bars
+        (b2_spx, b2_vix_gth, b1_vix3m, b1_ndx, b1_vxn) = await asyncio.gather(
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '2 D', '1 min', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix_contract, '', '2 D', '1 min', 'TRADES', False, 1),
             state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '1 D', '1 min', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '1 D', '1 min', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '1 D', '1 min', 'TRADES', True, 1),
+        )
+        await asyncio.sleep(1.0)
 
+        # Batch 2: 10D 5-minute bars
+        (b10_spx, b10_vix_gth, b10_vix3m, b10_ndx, b10_vxn) = await asyncio.gather(
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '10 D', '5 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix_contract, '', '12 D', '5 mins', 'TRADES', False, 1),
             state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '10 D', '5 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '10 D', '5 mins', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '10 D', '5 mins', 'TRADES', True, 1),
+        )
+        await asyncio.sleep(1.0)
 
+        # Batch 3: 1M Daily settlement bars & ES Globex bars
+        (b_spx_d, b_vix_d, b2_es, b10_es, b_es_d) = await asyncio.gather(
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '1 M', '1 day', 'TRADES', True, 1),
             state.ib.reqHistoricalDataAsync(state.vix_contract, '', '1 M', '1 day', 'TRADES', True, 1),
-
             state.ib.reqHistoricalDataAsync(state.es_contract, '', '2 D', '1 min', 'TRADES', False, 1) if has_es else _empty_bars(),
             state.ib.reqHistoricalDataAsync(state.es_contract, '', '10 D', '5 mins', 'TRADES', False, 1) if has_es else _empty_bars(),
             state.ib.reqHistoricalDataAsync(state.es_contract, '', '1 M', '1 day', 'TRADES', True, 1) if has_es else _empty_bars(),
@@ -1846,18 +1855,43 @@ async def refresh_historical_data():
         state.es_daily_df = pd.DataFrame({'es': s_es_d}) if not s_es_d.empty else pd.DataFrame()
 
         # Synchronize daily baseline DataFrame with official CBOE / exchange settlement daily closes
+        rth_finished_today = (now_et.time() >= dtime(16, 0))
         if spx_map and vix_map and not daily_ref_df.empty:
             changed_any = False
             for d_str, spx_val in spx_map.items():
-                if d_str in daily_ref_df.index and d_str in vix_map:
+                if d_str in vix_map:
                     vix_val = vix_map[d_str]
-                    if daily_ref_df.loc[d_str, 'spx'] != spx_val or daily_ref_df.loc[d_str, 'vix'] != vix_val:
-                        daily_ref_df.loc[d_str, 'spx'] = spx_val
-                        daily_ref_df.loc[d_str, 'vix'] = vix_val
+                    if d_str in daily_ref_df.index:
+                        if daily_ref_df.loc[d_str, 'spx'] != spx_val or daily_ref_df.loc[d_str, 'vix'] != vix_val:
+                            daily_ref_df.loc[d_str, 'spx'] = spx_val
+                            daily_ref_df.loc[d_str, 'vix'] = vix_val
+                            changed_any = True
+                    elif rth_finished_today and d_str == today_et:
+                        df_v3_temp = safe_to_series(b1_vix3m, 'vix3m')
+                        df_n1_temp = safe_to_series(b1_ndx, 'ndx')
+                        df_vx1_temp = safe_to_series(b1_vxn, 'vxn')
+                        vix3m_val = float(df_v3_temp.iloc[-1]) if not df_v3_temp.empty else (state.latest_vix3m_close or vix_val)
+                        ndx_val = float(df_n1_temp.iloc[-1]) if not df_n1_temp.empty else (state.latest_ndx_close or 0.0)
+                        vxn_val = float(df_vx1_temp.iloc[-1]) if not df_vx1_temp.empty else (state.latest_vxn_close or vix_val)
+                        daily_ref_df.loc[d_str] = {
+                            'spx': spx_val,
+                            'vix': vix_val,
+                            'vix3m': vix3m_val,
+                            'ndx': ndx_val,
+                            'vxn': vxn_val
+                        }
+                        daily_ref_df.sort_index(inplace=True)
                         changed_any = True
             if changed_any:
+                state.df_daily = daily_ref_df.copy()
                 compute_spotvol_baselines(daily_ref_df, active_sess_date, today_et)
                 apply_multi_timeframe_pool(cached_dfs if 'cached_dfs' in locals() else {}, daily_ref_df, active_sess_date, today_et, dfs_1m=cached_dfs_1m if 'cached_dfs_1m' in locals() else None)
+                try:
+                    c_pool = cached_dfs if 'cached_dfs' in locals() else (cache_data.get('dfs_pool') if cache_data else {})
+                    c_1m = cached_dfs_1m if 'cached_dfs_1m' in locals() else (cache_data.get('dfs_1m') if cache_data else None)
+                    save_history_cache(c_pool, daily_ref_df, today_et, dfs_1m=c_1m)
+                except Exception as save_err:
+                    print(f"[Cache Save Warning] {save_err}")
 
         if latest_comp_date:
             state.eod_spx_close = spx_map.get(latest_comp_date)
@@ -1906,6 +1940,19 @@ async def refresh_historical_data():
         df_v3 = safe_to_series(b1_vix3m, 'vix3m')
         df_1d = pd.concat([df_v1, df_v3], axis=1).dropna()
         if not df_1d.empty:
+            if active_sess_date and rth_finished_today and active_sess_date in vix_map:
+                off_vix = float(vix_map[active_sess_date])
+                last_ts = str(df_1d.index[-1])
+                if last_ts >= f"{active_sess_date} 16:00":
+                    df_1d.loc[df_1d.index[-1], 'vix'] = off_vix
+                elif last_ts >= f"{active_sess_date} 15:55":
+                    settle_dt = pd.to_datetime(f"{active_sess_date} 16:00:00")
+                    df_1d.loc[settle_dt] = {
+                        'vix': off_vix,
+                        'vix3m': float(df_1d['vix3m'].iloc[-1]),
+                        'ratio': off_vix / float(df_1d['vix3m'].iloc[-1])
+                    }
+                    df_1d.sort_index(inplace=True)
             df_1d['ratio'] = df_1d['vix'] / df_1d['vix3m']
             state.df_ts_1d = df_1d.copy()
             state.intraday_open_ratio = float(state.df_ts_1d['ratio'].iloc[0])
@@ -1916,8 +1963,35 @@ async def refresh_historical_data():
 
         df_sv_1d = pd.concat([df_s1, df_v1], axis=1).dropna()
         if not df_sv_1d.empty:
-            ref_spx = state.latest_spx_close if state.latest_spx_close > 0 else float(df_sv_1d['spx'].iloc[0])
-            ref_vix = state.latest_vix_close if state.latest_vix_close > 0 else float(df_sv_1d['vix'].iloc[0])
+            # Anchor reference close strictly to prior session close
+            if not state.df_spotvol.empty and active_sess_date and str(state.df_spotvol.index[-1])[:10] == active_sess_date:
+                ref_spx = state.prior_spx_close if state.prior_spx_close > 0 else state.latest_spx_close
+                ref_vix = state.prior_vix_close if state.prior_vix_close > 0 else state.latest_vix_close
+            else:
+                ref_spx = state.latest_spx_close if state.latest_spx_close > 0 else float(df_sv_1d['spx'].iloc[0])
+                ref_vix = state.latest_vix_close if state.latest_vix_close > 0 else float(df_sv_1d['vix'].iloc[0])
+
+            # Harmonize 16:00 bar with official settlement if session completed
+            if active_sess_date and rth_finished_today and active_sess_date in spx_map and active_sess_date in vix_map:
+                off_spx = float(spx_map[active_sess_date])
+                off_vix = float(vix_map[active_sess_date])
+                last_ts = str(df_sv_1d.index[-1])
+                if last_ts >= f"{active_sess_date} 16:00":
+                    df_sv_1d.loc[df_sv_1d.index[-1], 'spx'] = off_spx
+                    df_sv_1d.loc[df_sv_1d.index[-1], 'vix'] = off_vix
+                elif last_ts >= f"{active_sess_date} 15:55":
+                    settle_dt = pd.to_datetime(f"{active_sess_date} 16:00:00")
+                    df_sv_1d.loc[settle_dt] = {
+                        'spx': off_spx,
+                        'vix': off_vix,
+                        'spx_pct': 0.0,
+                        'vix_pt': 0.0,
+                        'spx_ret': 0.0,
+                        'vix_ret': 0.0,
+                        'rolling_corr': -0.75
+                    }
+                    df_sv_1d.sort_index(inplace=True)
+
             df_sv_1d['spx_pct'] = (df_sv_1d['spx'] - ref_spx) / ref_spx * 100.0
             df_sv_1d['vix_pt'] = df_sv_1d['vix'] - ref_vix
             # Always compute on log returns: Δ ln(S_t) vs Δ ln(VIX_t) to prevent spurious non-stationarity
@@ -1933,8 +2007,12 @@ async def refresh_historical_data():
         df_vx1 = safe_to_series(b1_vxn, 'vxn')
         df_nv_1d = pd.concat([df_n1, df_vx1], axis=1).dropna()
         if not df_nv_1d.empty:
-            ref_ndx = state.latest_ndx_close if state.latest_ndx_close > 0 else float(df_nv_1d['ndx'].iloc[0])
-            ref_vxn = state.latest_vxn_close if state.latest_vxn_close > 0 else float(df_nv_1d['vxn'].iloc[0])
+            if not state.df_spotvol_ndx.empty and active_sess_date and str(state.df_spotvol_ndx.index[-1])[:10] == active_sess_date:
+                ref_ndx = state.prior_ndx_close if state.prior_ndx_close > 0 else state.latest_ndx_close
+                ref_vxn = state.prior_vxn_close if state.prior_vxn_close > 0 else state.latest_vxn_close
+            else:
+                ref_ndx = state.latest_ndx_close if state.latest_ndx_close > 0 else float(df_nv_1d['ndx'].iloc[0])
+                ref_vxn = state.latest_vxn_close if state.latest_vxn_close > 0 else float(df_nv_1d['vxn'].iloc[0])
             df_nv_1d['ndx_pct'] = (df_nv_1d['ndx'] - ref_ndx) / ref_ndx * 100.0
             df_nv_1d['vxn_pt'] = df_nv_1d['vxn'] - ref_vxn
             # Always compute on log returns: Δ ln(NDX_t) vs Δ ln(VXN_t)
@@ -3285,17 +3363,17 @@ def compute_live_payload() -> Dict[str, Any]:
             "spx": {
                 "current": round(spx_curr, 2),
                 "pct_change": round(curr_x, 2),
-                "source": spx_src if is_live_rth else f"SESSION CLOSE{src_suffix}"
+                "source": spx_src if is_live_rth else f"OFFICIAL SETTLEMENT{src_suffix}"
             },
             "vix": {
                 "current": round(vix_curr, 2),
                 "pt_change": round(curr_y, 2),
-                "source": vix_src if is_live_rth else f"SESSION CLOSE{src_suffix}"
+                "source": vix_src if is_live_rth else f"OFFICIAL SETTLEMENT{src_suffix}"
             },
             "vix3m": {
                 "current": round(vix3m_curr, 2),
                 "pt_change": round(vix3m_pt, 2),
-                "source": vix3m_src if is_live_rth else f"SESSION CLOSE{src_suffix}"
+                "source": vix3m_src if is_live_rth else f"OFFICIAL SETTLEMENT{src_suffix}"
             }
         },
         "reference_closes": {
@@ -3385,11 +3463,11 @@ def compute_live_payload() -> Dict[str, Any]:
             "market": {
                 "current": round(ndx_curr, 2),
                 "pct_change": round(curr_ndx_x, 2),
-                "source": ndx_src if is_live_rth else f"SESSION CLOSE{src_suffix}",
+                "source": ndx_src if is_live_rth else f"OFFICIAL SETTLEMENT{src_suffix}",
                 "vxn": {
                     "current": round(vxn_curr, 2),
                     "pt_change": round(curr_ndx_y, 2),
-                    "source": vxn_src if is_live_rth else f"SESSION CLOSE{src_suffix}"
+                    "source": vxn_src if is_live_rth else f"OFFICIAL SETTLEMENT{src_suffix}"
                 }
             },
             "model": {
@@ -3505,6 +3583,10 @@ async def broadcast_loop():
                     should_refresh = True
                 # Periodic refresh every 60s during RTH (09:30-16:00) OR CBOE GTH active windows (03:15-09:15 & 16:00-16:15)
                 elif is_weekday and (win_loop["is_rth_window"] or win_loop["is_vix_gth_window"]) and (now - last_hist_refresh >= 60.0):
+                    should_refresh = True
+                # Post-close settlement window (16:00 to 17:15 ET):
+                # Poll periodically every 60s throughout 16:00-17:15 ET so official CBOE & SPX settlement closes are captured as soon as they arrive!
+                elif is_weekday and (dtime(16, 0) <= now_et.time() < dtime(17, 15)) and (now - last_hist_refresh >= 60.0):
                     should_refresh = True
                 # Post-close final sync: immediately after 16:00 ET, and once after 16:15 curb to capture daily settlement basis
                 elif is_weekday and (now_et.time() >= dtime(16, 0)) and (last_hist_refresh < datetime.combine(now_et.date(), dtime(16, 0)).replace(tzinfo=ET_TZ).timestamp()):

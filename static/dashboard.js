@@ -2803,7 +2803,7 @@ function computeAnchoredSeries(c, isNdx) {
         };
       } else if (k > 0) {
         const prevDay = days[k - 1];
-        if (!isGthActive && officialCloses[prevDay] && officialCloses[prevDay].spot && officialCloses[prevDay].vol) {
+        if (officialCloses[prevDay] && officialCloses[prevDay].spot && officialCloses[prevDay].vol) {
           dayPriorCloses[d] = {
             spot: officialCloses[prevDay].spot,
             vol: officialCloses[prevDay].vol
