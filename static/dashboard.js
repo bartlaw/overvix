@@ -617,9 +617,11 @@ function applyAutoGthDefault(data) {
   }
   const st = data.session_status;
   const gthAvail = Boolean(data.gth && data.gth.available);
-  if (gthAvail && (st === 'GTH_ACTIVE' || st === 'OVERNIGHT_ES_ONLY')) {
+  const ts = data.timestamp || '';
+  // Auto-enable GTH only during morning pre-market GTH (03:15-09:15 ET) before cash open
+  if (gthAvail && st === 'GTH_ACTIVE' && ts >= '03:15' && ts < '09:15') {
     isGthEnabled = true;
-  } else if (st === 'REGULAR_RTH') {
+  } else if (st === 'REGULAR_RTH' || st === 'OVERNIGHT_ES_ONLY' || data.is_rth_active === false) {
     isGthEnabled = false;
   }
 }
@@ -1018,14 +1020,16 @@ function isSessionStarted(data, isGth) {
   if (!data) return false;
   if (data.is_historical) return true;
   if (isGth) {
+    if (data.overvix && data.overvix.intraday_trail_gth && data.overvix.intraday_trail_gth.x && data.overvix.intraday_trail_gth.x.length > 0) return true;
     if (typeof data.gth_session_started === 'boolean') return data.gth_session_started;
     if (data.gth && typeof data.gth.session_started === 'boolean') return data.gth.session_started;
     if (data.session_status === 'GTH_ACTIVE') return true;
     if (data.is_rth_active === true || data.session_status === 'REGULAR_RTH') return true;
     if (data.gth && data.gth.is_gth_active === true) return true;
     const ts = data.timestamp || '';
-    return (ts >= '03:15' && data.session_status !== 'OVERNIGHT_ES_ONLY');
+    return (ts >= '03:15');
   } else {
+    if (data.overvix && data.overvix.intraday_trail && data.overvix.intraday_trail.x && data.overvix.intraday_trail.x.length > 0) return true;
     if (typeof data.rth_session_started === 'boolean') return data.rth_session_started;
     if (data.is_rth_active === true || data.session_status === 'REGULAR_RTH') return true;
     const ts = data.timestamp || '';
@@ -1454,12 +1458,12 @@ function renderOvervixChart(bootstrap) {
     currY = gthObj.current_point.y;
     currSpot = gthObj.synthetic_spx;
     currVol = gthObj.vix;
-  } else if (isOvernightEs && trail.x && trail.x.length > 0) {
-    // Overnight ES-Only: pin Overvix beacon to last complete session tip (never plot frozen VIX vs ES move)
+  } else if ((isOvernightEs || gthMode) && trail.x && trail.x.length > 0) {
+    // Overnight ES-Only or GTH closed: pin Overvix beacon to last complete session tip (never plot frozen VIX vs ES move)
     currX = trail.x[trail.x.length - 1];
     currY = trail.y[trail.y.length - 1];
-    currSpot = (trail.spot_raw && trail.spot_raw.length > 0) ? trail.spot_raw[trail.spot_raw.length - 1] : null;
-    currVol = (trail.vol_raw && trail.vol_raw.length > 0) ? trail.vol_raw[trail.vol_raw.length - 1] : null;
+    currSpot = (trail.spot_raw && trail.spot_raw.length > 0) ? trail.spot_raw[trail.spot_raw.length - 1] : (targetData.market && targetData.market.spx ? targetData.market.spx.current : null);
+    currVol = (trail.vol_raw && trail.vol_raw.length > 0) ? trail.vol_raw[trail.vol_raw.length - 1] : (targetData.market && targetData.market.vix ? targetData.market.vix.current : null);
   } else if (targetData.current_point && targetData.current_point.x !== undefined && targetData.current_point.y !== undefined && targetData.current_point.y !== null) {
     currX = targetData.current_point.x;
     currY = targetData.current_point.y;
@@ -6128,6 +6132,52 @@ function updateUI(data) {
         annotations: overlay.annotations
       });
     }
+
+    // Pin Trace 5 (Session Close Point) to the tip of GTH trail
+    const trailGth = (data.overvix && data.overvix.intraday_trail_gth && data.overvix.intraday_trail_gth.x && data.overvix.intraday_trail_gth.x.length > 0)
+      ? data.overvix.intraday_trail_gth
+      : ((cachedTrailGth && cachedTrailGth.x && cachedTrailGth.x.length > 0) ? cachedTrailGth : cachedTrail);
+
+    if (trailGth && trailGth.x && trailGth.x.length > 0 && ovChartEl && ovChartEl.data && ovChartEl.data[5]) {
+      const lastIdx = trailGth.x.length - 1;
+      const lastX = trailGth.x[lastIdx];
+      const lastY = trailGth.y[lastIdx];
+      const rawSpot = (trailGth.spot_raw && trailGth.spot_raw[lastIdx] !== undefined)
+        ? trailGth.spot_raw[lastIdx]
+        : (data.market && data.market.spx ? data.market.spx.current : null);
+      const rawVol = (trailGth.vol_raw && trailGth.vol_raw[lastIdx] !== undefined)
+        ? trailGth.vol_raw[lastIdx]
+        : (data.market && data.market.vix ? data.market.vix.current : null);
+      const liveSpotStr = (typeof rawSpot === 'number' && !isNaN(rawSpot))
+        ? rawSpot.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : (rawSpot || '-');
+      const liveVolStr = (typeof rawVol === 'number' && !isNaN(rawVol))
+        ? rawVol.toFixed(2)
+        : (rawVol || '-');
+
+      const gthModel = (data.overvix && data.overvix.gth_model) ? data.overvix.gth_model : (data.model || {});
+      const slope = gthModel.slope || (data.model ? data.model.slope : 0) || 0;
+      const intercept = gthModel.intercept || (data.model ? data.model.intercept : 0) || 0;
+      const thresh = (data.model && data.model.threshold_pts) || currentSpxThreshold;
+      const expVal = intercept + slope * lastX;
+      const residVal = lastY - expVal;
+      const residStr = `${residVal >= 0 ? '+' : ''}${residVal.toFixed(2)} pts`;
+      const tagStr = (residVal >= thresh)
+        ? "  <span style='color:#FF5370;font-weight:bold'>🚨 ALERT</span>"
+        : (residVal <= -thresh ? "  <span style='color:#06B6D4;font-weight:bold'>📉 CRUSH</span>" : "");
+
+      Plotly.restyle('overvix-chart', {
+        x: [[lastX]],
+        y: [[lastY]],
+        name: ['Session Close Point'],
+        customdata: [[[residStr, tagStr, liveSpotStr, liveVolStr]]],
+        'marker.color': ['#00E5FF'],
+        'marker.size': [14],
+        'marker.line': [{ color: '#FFFFFF', width: 2 }],
+        visible: [currentTrailMode !== '60d'],
+        showlegend: [true]
+      }, [5]);
+    }
   } else if (activePt && activePt.y !== null) {
     if (ovChartEl && ovChartEl.layout && ((ovChartEl.layout.shapes && ovChartEl.layout.shapes.length > 0) || (ovChartEl.layout.annotations && ovChartEl.layout.annotations.length > 0))) {
       Plotly.relayout('overvix-chart', { shapes: [], annotations: [] });
@@ -6303,17 +6353,40 @@ function updateUI(data) {
     }
   }
 
-  // 7. Update Intraday Correlation Real-Time (when 1D is active and market or GTH is live)
+  // 7. Update Intraday Correlation Real-Time (for 1D, 5D, 10D, 1M when market or GTH is live)
   const isSpxGthLiveCorr = (!isNdx && data.session_status === 'GTH_ACTIVE' && data.gth && data.gth.is_gth_active && data.gth.vix_pt_change !== undefined);
-  if (currentCorrTf === '1D' && data.datetime && (data.is_rth_active || isSpxGthLiveCorr)) {
+  if (data.datetime && (data.is_rth_active || isSpxGthLiveCorr)) {
     const liveDt = data.datetime;
     const liveDate = liveDt.slice(0, 10);
+    const activeCorrTfs = ['1D', '5D', '10D', '1M'];
 
-    const appendCorrPoint = (crObj, pctVal, ptVal, corrVal, spotRawVal, volRawVal, gthFlag) => {
+    const appendCorrPoint = (crObj, rawPctVal, rawPtVal, corrVal, spotRawVal, volRawVal, gthFlag, isSingleDay = false) => {
+      if (!crObj) return;
       if (!crObj.times) crObj.times = [];
       if (!crObj.spx_pct) crObj.spx_pct = [];
       if (!crObj.vix_pt) crObj.vix_pt = [];
       if (!crObj.rolling_corr) crObj.rolling_corr = [];
+
+      let pctVal = rawPctVal;
+      let ptVal = rawPtVal;
+
+      // For multi-day horizons (5D, 10D, 1M), percentage and point changes must be calculated
+      // relative to the start of the horizon (spot_raw[0] / vol_raw[0]), NOT today's single-day move!
+      if (!isSingleDay) {
+        if (spotRawVal !== null && spotRawVal !== undefined && Array.isArray(crObj.spot_raw) && crObj.spot_raw.length > 0) {
+          const refSpot = crObj.spot_raw[0];
+          if (refSpot && refSpot > 0) {
+            pctVal = ((spotRawVal - refSpot) / refSpot) * 100.0;
+          }
+        }
+        if (volRawVal !== null && volRawVal !== undefined && Array.isArray(crObj.vol_raw) && crObj.vol_raw.length > 0) {
+          const refVol = crObj.vol_raw[0];
+          if (refVol !== null && refVol !== undefined) {
+            ptVal = volRawVal - refVol;
+          }
+        }
+      }
+
       if (crObj.times.length > 0) {
         const lastT = crObj.times[crObj.times.length - 1];
         const lastDate = lastT.slice(0, 10);
@@ -6334,7 +6407,7 @@ function updateUI(data) {
             if (crObj.vol_raw) crObj.vol_raw.push(volRawVal);
             if (crObj.is_gth && gthFlag !== undefined) crObj.is_gth.push(gthFlag);
           }
-        } else {
+        } else if (isSingleDay) {
           crObj.times = [liveDt];
           crObj.spx_pct = [pctVal];
           crObj.vix_pt = [ptVal];
@@ -6342,6 +6415,14 @@ function updateUI(data) {
           if (crObj.spot_raw) crObj.spot_raw = [spotRawVal];
           if (crObj.vol_raw) crObj.vol_raw = [volRawVal];
           if (crObj.is_gth && gthFlag !== undefined) crObj.is_gth = [gthFlag];
+        } else {
+          crObj.times.push(liveDt);
+          crObj.spx_pct.push(pctVal);
+          crObj.vix_pt.push(ptVal);
+          crObj.rolling_corr.push(corrVal);
+          if (crObj.spot_raw) crObj.spot_raw.push(spotRawVal);
+          if (crObj.vol_raw) crObj.vol_raw.push(volRawVal);
+          if (crObj.is_gth && gthFlag !== undefined) crObj.is_gth.push(gthFlag);
         }
       } else {
         crObj.times.push(liveDt);
@@ -6355,91 +6436,138 @@ function updateUI(data) {
     };
 
     if (isNdx && ndx && data.is_rth_active) {
-      let cr = cachedCorrNdx['1D'];
-      if (!cr || !cr.times) {
-        cachedCorrNdx['1D'] = { times: [], ndx_pct: [], vxn_pt: [], rolling_corr: [], spot_raw: [], vol_raw: [], ndx_raw: [], vxn_raw: [] };
-        cr = cachedCorrNdx['1D'];
-      }
       const ndxPct = ndx.market ? ndx.market.pct_change : 0;
       const ndxCurrVal = ndx.market ? ndx.market.current : null;
       const vxnPt = (ndx.market && ndx.market.vxn) ? ndx.market.vxn.pt_change : 0;
       const vxnCurrVal = (ndx.market && ndx.market.vxn) ? ndx.market.vxn.current : null;
       const corrVal = ndx.correlation ? ndx.correlation.rolling_corr : -0.75;
 
-      const pctArr = cr.ndx_pct || cr.spx_pct;
-      const ptArr = cr.vxn_pt || cr.vix_pt;
-      const syncRawArrays = (mode) => {
-        const pairs = [
-          [ndxCurrVal, ['spot_raw', 'ndx_raw']],
-          [vxnCurrVal, ['vol_raw', 'vxn_raw']]
-        ];
-        pairs.forEach(([val, keys]) => {
-          if (val === null || val === undefined) return;
-          keys.forEach(k => {
-            if (!Array.isArray(cr[k])) return;
-            if (mode === 'reset') {
-              cr[k].length = 0;
-              cr[k].push(val);
-            } else if (mode === 'replace' && cr[k].length > 0) {
-              cr[k][cr[k].length - 1] = val;
-            } else {
-              cr[k].push(val);
-            }
-          });
-        });
-      };
+      const appendNdxPoint = (cr, isSingleDay = false) => {
+        if (!cr) return;
+        const pctArr = cr.ndx_pct || cr.spx_pct;
+        const ptArr = cr.vxn_pt || cr.vix_pt;
 
-      if (cr.times.length > 0) {
-        const lastT = cr.times[cr.times.length - 1];
-        const lastDate = lastT.slice(0, 10);
-        if (liveDate === lastDate) {
-          if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
-            pctArr[pctArr.length - 1] = ndxPct;
-            ptArr[ptArr.length - 1] = vxnPt;
-            cr.rolling_corr[cr.rolling_corr.length - 1] = corrVal;
-            syncRawArrays('replace');
+        let effectiveNdxPct = ndxPct;
+        let effectiveVxnPt = vxnPt;
+
+        if (!isSingleDay) {
+          const spotArr = cr.ndx_raw || cr.spot_raw;
+          const volArr = cr.vxn_raw || cr.vol_raw;
+          if (ndxCurrVal !== null && ndxCurrVal !== undefined && Array.isArray(spotArr) && spotArr.length > 0) {
+            const refSpot = spotArr[0];
+            if (refSpot && refSpot > 0) {
+              effectiveNdxPct = ((ndxCurrVal - refSpot) / refSpot) * 100.0;
+            }
+          }
+          if (vxnCurrVal !== null && vxnCurrVal !== undefined && Array.isArray(volArr) && volArr.length > 0) {
+            const refVol = volArr[0];
+            if (refVol !== null && refVol !== undefined) {
+              effectiveVxnPt = vxnCurrVal - refVol;
+            }
+          }
+        }
+
+        const syncRawArrays = (mode) => {
+          const pairs = [
+            [ndxCurrVal, ['spot_raw', 'ndx_raw']],
+            [vxnCurrVal, ['vol_raw', 'vxn_raw']]
+          ];
+          pairs.forEach(([val, keys]) => {
+            if (val === null || val === undefined) return;
+            keys.forEach(k => {
+              if (!Array.isArray(cr[k])) return;
+              if (mode === 'reset') {
+                cr[k].length = 0;
+                cr[k].push(val);
+              } else if (mode === 'replace' && cr[k].length > 0) {
+                cr[k][cr[k].length - 1] = val;
+              } else {
+                cr[k].push(val);
+              }
+            });
+          });
+        };
+
+        if (cr.times && cr.times.length > 0) {
+          const lastT = cr.times[cr.times.length - 1];
+          const lastDate = lastT.slice(0, 10);
+          if (liveDate === lastDate) {
+            if (lastT === liveDt || lastT.slice(11, 16) === liveDt.slice(11, 16)) {
+              pctArr[pctArr.length - 1] = effectiveNdxPct;
+              ptArr[ptArr.length - 1] = effectiveVxnPt;
+              cr.rolling_corr[cr.rolling_corr.length - 1] = corrVal;
+              syncRawArrays('replace');
+            } else {
+              cr.times.push(liveDt);
+              pctArr.push(effectiveNdxPct);
+              ptArr.push(effectiveVxnPt);
+              cr.rolling_corr.push(corrVal);
+              syncRawArrays('push');
+            }
+          } else if (isSingleDay) {
+            cr.times = [liveDt];
+            pctArr.length = 0; pctArr.push(effectiveNdxPct);
+            ptArr.length = 0; ptArr.push(effectiveVxnPt);
+            cr.rolling_corr = [corrVal];
+            syncRawArrays('reset');
           } else {
             cr.times.push(liveDt);
-            pctArr.push(ndxPct);
-            ptArr.push(vxnPt);
+            pctArr.push(effectiveNdxPct);
+            ptArr.push(effectiveVxnPt);
             cr.rolling_corr.push(corrVal);
             syncRawArrays('push');
           }
         } else {
-          cr.times = [liveDt];
-          pctArr.length = 0; pctArr.push(ndxPct);
-          ptArr.length = 0; ptArr.push(vxnPt);
-          cr.rolling_corr = [corrVal];
-          syncRawArrays('reset');
+          if (!cr.times) cr.times = [];
+          cr.times.push(liveDt);
+          pctArr.push(effectiveNdxPct);
+          ptArr.push(effectiveVxnPt);
+          cr.rolling_corr.push(corrVal);
+          syncRawArrays('push');
         }
-      } else {
-        cr.times.push(liveDt);
-        pctArr.push(ndxPct);
-        ptArr.push(vxnPt);
-        cr.rolling_corr.push(corrVal);
-        syncRawArrays('push');
-      }
+      };
 
-      if (isMouseHoveringCorrChart) {
-        pendingLiveCorrRender = true;
-      } else {
-        renderCorrelationChart('dual', currentCorrTf);
+      activeCorrTfs.forEach(tf => {
+        if (!cachedCorrNdx[tf] && tf === '1D') {
+          cachedCorrNdx['1D'] = { times: [], ndx_pct: [], vxn_pt: [], rolling_corr: [], spot_raw: [], vol_raw: [], ndx_raw: [], vxn_raw: [] };
+        }
+        if (cachedCorrNdx[tf]) {
+          appendNdxPoint(cachedCorrNdx[tf], tf === '1D');
+        }
+      });
+
+      if (activeCorrTfs.includes(currentCorrTf)) {
+        if (isMouseHoveringCorrChart) {
+          pendingLiveCorrRender = true;
+        } else {
+          renderCorrelationChart('dual', currentCorrTf);
+        }
       }
     } else if (!isNdx) {
       if (data.is_rth_active) {
         if (!cachedCorr['1D']) cachedCorr['1D'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], spot_raw: [], vol_raw: [] };
-        appendCorrPoint(cachedCorr['1D'], mkt.spx.pct_change, mkt.vix.pt_change, corr ? corr.rolling_corr : -0.75, mkt.spx.current, mkt.vix.current, undefined);
+        activeCorrTfs.forEach(tf => {
+          if (cachedCorr[tf]) {
+            appendCorrPoint(cachedCorr[tf], mkt.spx.pct_change, mkt.vix.pt_change, corr ? corr.rolling_corr : -0.75, mkt.spx.current, mkt.vix.current, undefined, tf === '1D');
+          }
+        });
       }
       if (!cachedCorrGth['1D']) cachedCorrGth['1D'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], spot_raw: [], vol_raw: [], is_gth: [] };
-      if (isSpxGthLiveCorr) {
-        appendCorrPoint(cachedCorrGth['1D'], data.gth.spx_pct_change, data.gth.vix_pt_change, data.gth.rolling_corr || -0.75, data.gth.synthetic_spx, data.gth.vix, 1);
-      } else if (data.is_rth_active) {
-        appendCorrPoint(cachedCorrGth['1D'], mkt.spx.pct_change, mkt.vix.pt_change, (data.gth && data.gth.rolling_corr) ? data.gth.rolling_corr : (corr ? corr.rolling_corr : -0.75), mkt.spx.current, mkt.vix.current, 0);
-      }
-      if (isMouseHoveringCorrChart) {
-        pendingLiveCorrRender = true;
-      } else {
-        renderCorrelationChart('dual', currentCorrTf);
+      activeCorrTfs.forEach(tf => {
+        if (cachedCorrGth[tf]) {
+          if (isSpxGthLiveCorr) {
+            appendCorrPoint(cachedCorrGth[tf], data.gth.spx_pct_change, data.gth.vix_pt_change, data.gth.rolling_corr || -0.75, data.gth.synthetic_spx, data.gth.vix, 1, tf === '1D');
+          } else if (data.is_rth_active) {
+            appendCorrPoint(cachedCorrGth[tf], mkt.spx.pct_change, mkt.vix.pt_change, (data.gth && data.gth.rolling_corr) ? data.gth.rolling_corr : (corr ? corr.rolling_corr : -0.75), mkt.spx.current, mkt.vix.current, 0, tf === '1D');
+          }
+        }
+      });
+      if (activeCorrTfs.includes(currentCorrTf)) {
+        if (isMouseHoveringCorrChart) {
+          pendingLiveCorrRender = true;
+        } else {
+          renderCorrelationChart('dual', currentCorrTf);
+        }
       }
     }
   }

@@ -1677,6 +1677,7 @@ async def hydrate_deep_history_background(active_sess_date: Optional[str], today
         apply_multi_timeframe_pool(dfs_pool, df_daily, active_sess_date, today_et, dfs_1m=dfs_1m)
         compute_spotvol_baselines(df_daily, active_sess_date, today_et)
 
+
         state.hist_version += 1
         print(f"[Background Cache] Deep history (with 1M 5m) successfully hydrated and saved to disk. (Version {state.hist_version})")
     except Exception as e:
@@ -1784,12 +1785,15 @@ async def refresh_historical_data():
         cache_data = load_history_cache()
         need_background_hydration = False
         daily_ref_df = pd.DataFrame()
+        cached_dfs = {}
+        cached_dfs_1m = {}
+        has_today_in_1m = False
 
         if cache_data and 'dfs_pool' in cache_data and 'df_daily' in cache_data and not cache_data['df_daily'].empty:
             print("[IBKR] Loading deep multi-timeframe history from local disk cache (<0.01s)...")
-            cached_dfs = cache_data['dfs_pool']
+            cached_dfs = cache_data.get('dfs_pool') or {}
             cached_df_daily = cache_data['df_daily']
-            cached_dfs_1m = cache_data.get('dfs_1m')
+            cached_dfs_1m = cache_data.get('dfs_1m') or {}
             daily_ref_df = cached_df_daily
             compute_spotvol_baselines(cached_df_daily, active_sess_date, today_et)
             apply_multi_timeframe_pool(cached_dfs, cached_df_daily, active_sess_date, today_et, dfs_1m=cached_dfs_1m)
@@ -1801,7 +1805,12 @@ async def refresh_historical_data():
                 not cached_dfs_1m.get('spx', pd.DataFrame()).empty and
                 not cached_dfs_1m.get('vix', pd.DataFrame()).empty
             )
-            if cache_data.get('cache_date') < today_et or not is_cache_healthy:
+            if is_cache_healthy and 'spx' in cached_dfs_1m:
+                spx_1m_df = cached_dfs_1m['spx']
+                if not spx_1m_df.empty and 'day' in spx_1m_df.columns:
+                    has_today_in_1m = any(str(d) == today_et for d in spx_1m_df['day'].tail(50))
+
+            if cache_data.get('cache_date') < today_et or not is_cache_healthy or not has_today_in_1m:
                 need_background_hydration = True
         else:
             # Cold first launch with no disk cache: fetch 4M (1-day) bars in parallel (~0.25s) for immediate Spot-Vol baselines
@@ -1885,11 +1894,10 @@ async def refresh_historical_data():
             if changed_any:
                 state.df_daily = daily_ref_df.copy()
                 compute_spotvol_baselines(daily_ref_df, active_sess_date, today_et)
-                apply_multi_timeframe_pool(cached_dfs if 'cached_dfs' in locals() else {}, daily_ref_df, active_sess_date, today_et, dfs_1m=cached_dfs_1m if 'cached_dfs_1m' in locals() else None)
+                apply_multi_timeframe_pool(cached_dfs, daily_ref_df, active_sess_date, today_et, dfs_1m=cached_dfs_1m)
                 try:
-                    c_pool = cached_dfs if 'cached_dfs' in locals() else (cache_data.get('dfs_pool') if cache_data else {})
-                    c_1m = cached_dfs_1m if 'cached_dfs_1m' in locals() else (cache_data.get('dfs_1m') if cache_data else None)
-                    save_history_cache(c_pool, daily_ref_df, today_et, dfs_1m=c_1m)
+                    c_date = today_et if has_today_in_1m else (cache_data.get('cache_date') if cache_data else '2000-01-01')
+                    save_history_cache(cached_dfs, daily_ref_df, c_date, dfs_1m=cached_dfs_1m)
                 except Exception as save_err:
                     print(f"[Cache Save Warning] {save_err}")
 
@@ -1946,8 +1954,8 @@ async def refresh_historical_data():
                 if last_ts >= f"{active_sess_date} 16:00":
                     df_1d.loc[df_1d.index[-1], 'vix'] = off_vix
                 elif last_ts >= f"{active_sess_date} 15:55":
-                    settle_dt = pd.to_datetime(f"{active_sess_date} 16:00:00")
-                    df_1d.loc[settle_dt] = {
+                    settle_key = f"{active_sess_date} 16:00" if (not df_1d.empty and isinstance(df_1d.index[-1], str)) else pd.to_datetime(f"{active_sess_date} 16:00:00")
+                    df_1d.loc[settle_key] = {
                         'vix': off_vix,
                         'vix3m': float(df_1d['vix3m'].iloc[-1]),
                         'ratio': off_vix / float(df_1d['vix3m'].iloc[-1])
@@ -1980,8 +1988,8 @@ async def refresh_historical_data():
                     df_sv_1d.loc[df_sv_1d.index[-1], 'spx'] = off_spx
                     df_sv_1d.loc[df_sv_1d.index[-1], 'vix'] = off_vix
                 elif last_ts >= f"{active_sess_date} 15:55":
-                    settle_dt = pd.to_datetime(f"{active_sess_date} 16:00:00")
-                    df_sv_1d.loc[settle_dt] = {
+                    settle_key = f"{active_sess_date} 16:00" if (not df_sv_1d.empty and isinstance(df_sv_1d.index[-1], str)) else pd.to_datetime(f"{active_sess_date} 16:00:00")
+                    df_sv_1d.loc[settle_key] = {
                         'spx': off_spx,
                         'vix': off_vix,
                         'spx_pct': 0.0,
@@ -2053,6 +2061,52 @@ async def refresh_historical_data():
             _slice_last_n_dates(s_vxn_10d, 5), roll_win=78, min_p=20
         )
 
+        # 5. Process & Harmonize 1M 5-min Horizon with fresh 10D bars so current session is always visible on 1M
+        def _merge_intraday_series(s_old: pd.Series, s_new: pd.Series) -> pd.Series:
+            if s_new is None or s_new.empty:
+                return s_old
+            if s_old is None or s_old.empty:
+                return s_new
+            cutoff = s_new.index[0]
+            c = pd.concat([s_old[s_old.index < cutoff], s_new])
+            return c[~c.index.duplicated(keep='last')].sort_index()
+
+        s_spx_1m_base = series_from_df(cached_dfs_1m.get('spx'), 'spx', filter_rth=True) if isinstance(cached_dfs_1m, dict) else pd.Series(dtype=float, name='spx')
+        s_vix_1m_base = series_from_df(cached_dfs_1m.get('vix'), 'vix', filter_rth=True) if isinstance(cached_dfs_1m, dict) else pd.Series(dtype=float, name='vix')
+        s_vix3m_1m_base = series_from_df(cached_dfs_1m.get('vix3m'), 'vix3m', filter_rth=True) if isinstance(cached_dfs_1m, dict) else pd.Series(dtype=float, name='vix3m')
+        s_ndx_1m_base = series_from_df(cached_dfs_1m.get('ndx'), 'ndx', filter_rth=True) if isinstance(cached_dfs_1m, dict) else pd.Series(dtype=float, name='ndx')
+        s_vxn_1m_base = series_from_df(cached_dfs_1m.get('vxn'), 'vxn', filter_rth=True) if isinstance(cached_dfs_1m, dict) else pd.Series(dtype=float, name='vxn')
+
+        s_spx_1m = _merge_intraday_series(s_spx_1m_base, s_spx_10d)
+        s_vix_1m = _merge_intraday_series(s_vix_1m_base, s_vix_10d)
+        s_vix3m_1m = _merge_intraday_series(s_vix3m_1m_base, s_vix3m_10d)
+        s_ndx_1m = _merge_intraday_series(s_ndx_1m_base, s_ndx_10d)
+        s_vxn_1m = _merge_intraday_series(s_vxn_1m_base, s_vxn_10d)
+
+        if not s_spx_1m.empty and not s_vix_1m.empty:
+            (state.df_ts_1m, state.df_spx_vix_1m, state.df_ndx_vxn_1m,
+             state.df_tech_vol_1m, state.corr_1m, state.corr_1m_ndx) = build_horizon_pack(
+                s_spx_1m, s_vix_1m, s_vix3m_1m, s_ndx_1m, s_vxn_1m, roll_win=78, min_p=20
+            )
+
+        # Merge fresh 10D 5m bars into cached_dfs_1m DataFrame cache and persist to disk
+        if isinstance(cached_dfs_1m, dict):
+            for k, b_bars, col in [('spx', b10_spx, 'spx'), ('vix', b10_vix_gth, 'vix'),
+                                   ('vix3m', b10_vix3m, 'vix3m'), ('ndx', b10_ndx, 'ndx'), ('vxn', b10_vxn, 'vxn')]:
+                df_new = bars_to_df(b_bars, col)
+                if not df_new.empty:
+                    df_old = cached_dfs_1m.get(k)
+                    if df_old is not None and not df_old.empty:
+                        cutoff_dt = df_new['date_et'].iloc[0]
+                        trimmed_old = df_old[df_old['date_et'] < cutoff_dt]
+                        cached_dfs_1m[k] = pd.concat([trimmed_old, df_new], ignore_index=True).drop_duplicates(subset=['date_et']).sort_values('date_et').reset_index(drop=True)
+                    else:
+                        cached_dfs_1m[k] = df_new
+            try:
+                save_history_cache(cached_dfs or {}, daily_ref_df, today_et, dfs_1m=cached_dfs_1m)
+            except Exception as e:
+                print(f"[Cache Update Warning] {e}")
+
         state.hist_version += 1
         print(f"[IBKR] Baseline & multi-timeframe datasets successfully loaded (Version {state.hist_version}):")
         print(f"       1D={len(state.df_ts_1d)} bars, 5D={len(state.df_ts_5d)} bars, 10D={len(state.df_ts_10d)} bars, 1M={len(state.df_ts_1m)} bars (5m), "
@@ -2065,6 +2119,8 @@ async def refresh_historical_data():
                   f"5D_GTH={len(state.df_spx_vix_5d_gth)} bars, 10D_GTH={len(state.df_spx_vix_10d_gth)} bars.")
 
     except Exception as ex:
+        import traceback
+        traceback.print_exc()
         print(f"[IBKR Error] Historical data refresh failed: {ex}")
 
 
@@ -3182,8 +3238,8 @@ def compute_live_payload() -> Dict[str, Any]:
             gth_sess_date = today_et
         else:
             # Afternoon curb GTH (16:00-16:15 ET) continuing today's session: reference prior day's closes & today's EOD basis
-            g_ref_spx = spx_base
-            g_ref_vix = vix_base
+            g_ref_spx = state.gth_ref_spx if state.gth_ref_spx > 0 else (state.prior_spx_close if state.prior_spx_close > 0 else spx_base)
+            g_ref_vix = state.gth_ref_vix if state.gth_ref_vix > 0 else (state.prior_vix_close if state.prior_vix_close > 0 else vix_base)
             g_basis = state.daily_basis_map.get(today_et, active_basis)
             g_slope = state.slope
             g_intercept = state.intercept
