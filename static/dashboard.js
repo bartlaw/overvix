@@ -4864,12 +4864,15 @@ function renderVixFuturesCurveChart(vf, spotVix) {
     curveColor = '#CBD5E1'; // Slate for Flattening
   }
 
+  const effSpot = (typeof vf.spot_vix === 'number' && vf.spot_vix > 0) ? vf.spot_vix : spotVix;
+  const spotTag = vf.is_gth_spot ? ' GTH' : '';
+
   // Update chart legend elements
   const swatchEl = document.getElementById('pop-curve-line-swatch');
   if (swatchEl) swatchEl.style.backgroundColor = curveColor;
   const spotLblEl = document.getElementById('pop-curve-spot-lbl');
-  if (spotLblEl && typeof spotVix === 'number') {
-    spotLblEl.textContent = `Spot VIX (${spotVix.toFixed(2)})`;
+  if (spotLblEl && typeof effSpot === 'number') {
+    spotLblEl.textContent = `Spot VIX (${effSpot.toFixed(2)}${spotTag})`;
   }
 
   // X labels: Tenor + Month (e.g. M1 Dec, M2 Jan...)
@@ -4883,18 +4886,18 @@ function renderVixFuturesCurveChart(vf, spotVix) {
   const traces = [];
 
   // Trace 0: Spot VIX Reference Line (horizontal dashed)
-  if (typeof spotVix === 'number' && spotVix > 0) {
+  if (typeof effSpot === 'number' && effSpot > 0) {
     traces.push({
       x: xLabels,
-      y: xLabels.map(() => spotVix),
+      y: xLabels.map(() => effSpot),
       mode: 'lines',
-      name: `Spot VIX (${spotVix.toFixed(2)})`,
+      name: vf.is_gth_spot ? 'Spot VIX (GTH)' : 'Spot VIX',
       line: {
         color: '#10B981', // Emerald green
         width: 1.5,
         dash: 'dash'
       },
-      hoverinfo: 'name+y'
+      hovertemplate: '<b>%{fullData.name}</b>: %{y:.2f}<extra></extra>'
     });
   }
 
@@ -5574,7 +5577,11 @@ function updateUI(data) {
 
   // Update VIX Futures Term Structure Badges & Popover
   if (data.vix_futures) {
-    const spotVixVal = (isNdx && ndx && ndx.market && ndx.market.vxn) ? ndx.market.vxn.current : (mkt && mkt.vix ? mkt.vix.current : null);
+    const spotVixVal = (typeof data.vix_futures.spot_vix === 'number' && data.vix_futures.spot_vix > 0)
+      ? data.vix_futures.spot_vix
+      : ((data.session_status === 'GTH_ACTIVE' && data.gth && typeof data.gth.vix === 'number' && data.gth.vix > 0)
+        ? data.gth.vix
+        : (mkt && mkt.vix ? mkt.vix.current : null));
     updateVixFuturesUI(data.vix_futures, spotVixVal);
   }
 

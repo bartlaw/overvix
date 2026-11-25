@@ -2921,7 +2921,7 @@ def compute_live_payload() -> Dict[str, Any]:
         state.ndx_4m_rr_data = ndx_4m_rr_payload
 
     # VIX Futures Term Structure & Backwardation Regime Engine (M1 .. M8)
-    def _calc_vix_futures(spot_vix=None):
+    def _calc_vix_futures(spot_vix=None, is_gth_spot: bool = False):
         contracts = getattr(state, 'vix_futures_contracts', []) or []
         tickers = getattr(state, 'vix_futures_tickers', []) or []
         cached = getattr(state, 'vix_futures_data', None)
@@ -3119,12 +3119,31 @@ def compute_live_payload() -> Dict[str, Any]:
             "inv_count": inv_count,
             "total_pairs": total_pairs,
             "spot_basis": spot_basis,
+            "spot_vix": round(float(spot_vix), 2) if (spot_vix is not None and spot_vix > 0) else None,
+            "is_gth_spot": bool(is_gth_spot),
             "contracts": items
         }
         state.vix_futures_data = res_payload
         return res_payload
 
-    vix_futures_payload = _calc_vix_futures(spot_vix=vix_curr)
+    if is_live_rth:
+        fut_spot_vix = vix_curr
+        fut_is_gth_spot = False
+    elif win["is_vix_gth_window"]:
+        if "LIVE" in live_vix_src and live_vix_val and live_vix_val > 0:
+            fut_spot_vix = live_vix_val
+            fut_is_gth_spot = True
+        elif not state.df_spx_vix_1d_gth.empty and state.gth_session_date == today_et:
+            fut_spot_vix = float(state.df_spx_vix_1d_gth['vix'].iloc[-1])
+            fut_is_gth_spot = True
+        else:
+            fut_spot_vix = vix_curr
+            fut_is_gth_spot = False
+    else:
+        fut_spot_vix = vix_curr
+        fut_is_gth_spot = False
+
+    vix_futures_payload = _calc_vix_futures(spot_vix=fut_spot_vix, is_gth_spot=fut_is_gth_spot)
     is_futures_full_inv = bool(vix_futures_payload.get("regime") == "FULL BACKWARDATION")
 
     # Master Confluence Signals (SPX)
