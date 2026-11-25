@@ -2868,24 +2868,39 @@ function computeAnchoredSeries(c, isNdx) {
     }
 
     // Determine which days in the series are completed and have an official close
-    const curSessDate = cachedBootstrap ? (cachedBootstrap.session_date || '') : '';
-    const isLiveRth = Boolean(cachedBootstrap && cachedBootstrap.is_rth_active === true);
-    const isLiveGth = Boolean(cachedBootstrap && (cachedBootstrap.session_status === 'GTH_ACTIVE' || (cachedBootstrap.gth && cachedBootstrap.gth.is_gth_active === true)));
+    const isHistoricalView = Boolean(cachedBootstrap && cachedBootstrap.is_historical);
+    const liveState = (!isHistoricalView && currentViewMode === 'live' && lastLiveUpdatePayload) ? lastLiveUpdatePayload : cachedBootstrap;
+    const curSessDate = liveState ? (liveState.session_date || '') : '';
+    const isLiveRth = Boolean(!isHistoricalView && liveState && liveState.is_rth_active === true);
+    const isLiveGth = Boolean(!isHistoricalView && liveState && (liveState.session_status === 'GTH_ACTIVE' || (liveState.gth && liveState.gth.is_gth_active === true)));
+    const isPreMarketToday = Boolean(!isHistoricalView && liveState && liveState.session_status === 'PRE_MARKET');
 
     function isDaySessionCompleted(d, dIndices) {
       if (!d || !dIndices || dIndices.length === 0) return false;
+      if (isHistoricalView) return true;
       const lastBar = times[dIndices[dIndices.length - 1]];
+      const isDailyBar = Boolean(lastBar && lastBar.length === 10);
       const hhmm = lastBar ? lastBar.slice(11, 16) : '';
+      const dayK = days.indexOf(d);
+
+      if (isDailyBar) {
+        if ((curSessDate && d < curSessDate) || (dayK >= 0 && dayK < days.length - 1)) {
+          return true;
+        }
+        if (isLiveRth || (isGthActive && isLiveGth) || (isPreMarketToday && curSessDate && d === curSessDate)) {
+          return false;
+        }
+        return true;
+      }
 
       // 1. Prior trading days strictly before active session date:
       if (curSessDate && d < curSessDate) {
-        return hhmm >= '15:50';
+        return hhmm >= '15:30' || Boolean(officialCloses[d]);
       }
 
       // 2. Any day that is not the last day in the displayed horizon:
-      const dayK = days.indexOf(d);
       if (dayK >= 0 && dayK < days.length - 1) {
-        return hhmm >= '15:50';
+        return hhmm >= '15:30' || Boolean(officialCloses[d]);
       }
 
       // 3. The latest displayed day:
@@ -2893,6 +2908,8 @@ function computeAnchoredSeries(c, isNdx) {
       if (isLiveRth) return false;
       // If GTH chart and GTH is active, NOT completed:
       if (isGthActive && isLiveGth) return false;
+      // If pre-market on today's session date, NOT completed:
+      if (isPreMarketToday && curSessDate && d === curSessDate) return false;
 
       // Closed if reached near-close (>= 15:55 ET):
       return hhmm >= '15:55';
@@ -2983,6 +3000,7 @@ function computeAnchoredSeries(c, isNdx) {
     const dayMap = {};
     const sessionStartTimes = [];
     const settlementMap = {};
+    const settledDays = {};
 
     for (let k = 0; k < days.length; k++) {
       const d = days[k];
@@ -3014,6 +3032,7 @@ function computeAnchoredSeries(c, isNdx) {
       const has1600 = (lastRawTime.slice(11, 16) >= '16:00');
       const offSettle = officialCloses[d];
       const isCompleted = isDaySessionCompleted(d, indices);
+      settledDays[d] = Boolean(isCompleted);
 
       if (!isGthActive && isCompleted && offSettle && offSettle.spot && offSettle.vol) {
         const s = offSettle.spot;
@@ -3058,6 +3077,7 @@ function computeAnchoredSeries(c, isNdx) {
       dayMap: dayMap,
       days: days,
       settlementMap: settlementMap,
+      settledDays: settledDays,
       anchorIdx: latestAnchorIdx >= 0 ? latestAnchorIdx : 0,
       anchorTime: outTimes[latestAnchorIdx],
       sessionStartTimes: sessionStartTimes,
@@ -4557,16 +4577,20 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       const alertCloseCustomdata = [];
       const days = anchoredSeries.days;
       const dayMap = anchoredSeries.dayMap;
+      const settledDays = anchoredSeries.settledDays || {};
+      const settlementMap = anchoredSeries.settlementMap || {};
 
       days.forEach(d => {
+        if (!settledDays[d]) return;
         const idxs = dayMap ? dayMap[d] : null;
         if (!idxs || idxs.length === 0) return;
         const termIdx = idxs[idxs.length - 1];
+        const tClose = times[termIdx];
+        if (tClose && tClose.length >= 16 && !settlementMap[tClose] && tClose.slice(11, 16) < '15:55') return;
         const rVal = residSeries[termIdx];
 
-        // Trigger condition: official terminal close residual >= +threshold
+        // Trigger condition: official settled close residual >= +threshold
         if (typeof rVal === 'number' && !isNaN(rVal) && rVal >= thresh) {
-          const tClose = times[termIdx];
           const rStr = (rVal >= 0 ? `+${rVal.toFixed(2)}` : rVal.toFixed(2)) + ' pts';
 
           const rawSpotNum = anchoredSeries.spotRaw ? anchoredSeries.spotRaw[termIdx] : null;
