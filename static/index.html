@@ -252,16 +252,94 @@
         </div>
       </div>
 
-      <!-- Card 2: Primary Vol (VIX or VXN) -->
-      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
+      <!-- Card 2: Primary Vol (VIX or VXN) + Fair VIX Popover -->
+      <div id="card-vix-fair" class="relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none">
         <div class="flex items-center justify-between">
           <span id="lbl-kpi-vol" class="text-[11px] font-semibold tracking-wider text-cyan-400 uppercase">VIX (30-Day)</span>
-          <span id="tag-kpi-vol" class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-800/50">Spot</span>
+          <div class="flex items-center space-x-1">
+            <span id="tag-kpi-vol" class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-800/50">Spot</span>
+            <span id="btn-fair-vix-info" class="text-[11px] text-slate-400 hover:text-amber-400 transition cursor-pointer" title="View Combined Fair VIX Model (HAR-RV &amp; 60D Quadratic)">ⓘ</span>
+          </div>
         </div>
         <div class="mt-2">
           <div id="kpi-vix-price" class="text-xl font-bold font-mono tracking-tight text-cyan-300">--.--</div>
           <div id="kpi-vix-pt" class="text-xs font-mono font-medium text-slate-400 mt-0.5">--.-- pts</div>
+          <div id="kpi-vix-fair-line" class="text-[10px] font-mono text-amber-300/90 mt-0.5 truncate">Fair: --.-- (--.-)</div>
           <div id="kpi-vix-sub" class="text-[10px] font-mono text-slate-400 mt-0.5 hidden"></div>
+        </div>
+
+        <!-- Floating Popover Card for Combined Fair VIX Valuation -->
+        <div id="popover-fair-vix" class="hidden absolute top-full left-0 mt-2 z-50 w-88 sm:w-96 md:w-[440px] bg-slate-900/95 border border-slate-700/90 rounded-xl shadow-2xl p-3 space-y-2.5 backdrop-blur-md text-left transition">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+            <div>
+              <div id="pop-fv-title" class="text-xs font-bold text-white flex items-center space-x-1">
+                <span>🎯</span>
+                <span>Composite Fair VIX Model</span>
+              </div>
+              <div class="text-[10px] text-slate-400 font-medium">HAR-RV (Mean-Rev Realized Vol) &amp; 60D Quadratic</div>
+            </div>
+            <div class="flex items-center space-x-1.5">
+              <span id="pop-fv-badge" class="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700">---</span>
+              <button id="btn-close-fair-vix-popover" class="text-slate-400 hover:text-white text-xs px-1 py-0.5 rounded hover:bg-slate-800 transition" title="Close">✕</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 bg-slate-950/70 rounded-lg p-2 border border-slate-800/80 text-center">
+            <div>
+              <div class="text-[9px] text-slate-400 uppercase font-semibold">Composite Fair</div>
+              <div id="pop-fv-combined" class="text-xs font-bold font-mono text-amber-300">--.--</div>
+              <div id="pop-fv-band" class="text-[9px] font-mono text-slate-400">Band: -- - --</div>
+            </div>
+            <div>
+              <div class="text-[9px] text-slate-400 uppercase font-semibold">Live &minus; Fair Gap</div>
+              <div id="pop-fv-gap" class="text-xs font-bold font-mono text-white">-.-- pts</div>
+              <div id="pop-fv-gap-pct" class="text-[9px] font-mono text-slate-400">(--.-%)</div>
+            </div>
+            <div>
+              <div class="text-[9px] text-slate-400 uppercase font-semibold">Rule of 16 Move</div>
+              <div id="pop-fv-imp-move" class="text-xs font-bold font-mono text-cyan-300">±-.--%</div>
+              <div id="pop-fv-real-move" class="text-[9px] font-mono text-slate-400">Real 10D: ±-.--%</div>
+            </div>
+          </div>
+
+          <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800/80">
+            <div class="text-[10px] font-semibold text-slate-400 uppercase mb-1 flex items-center justify-between">
+              <span id="pop-fv-chart-title">60D Regime Curve (Spot vs Vol)</span>
+              <span id="pop-fv-rv-tag" class="text-[9px] font-mono text-emerald-400">RV: --</span>
+            </div>
+            <div id="pop-fair-vix-chart" class="w-full h-36"></div>
+          </div>
+
+          <div class="overflow-hidden rounded-lg border border-slate-800/80 text-[10px] font-mono">
+            <table class="w-full text-left">
+              <thead class="bg-slate-950 text-slate-400 border-b border-slate-800">
+                <tr>
+                  <th class="py-1 px-2">Anchor Model</th>
+                  <th class="py-1 px-1.5">Inputs &amp; Regime</th>
+                  <th class="py-1 px-1.5 text-right">Wt</th>
+                  <th class="py-1 px-2 text-right">Fair</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800/60 bg-slate-900/80">
+                <tr>
+                  <td class="py-1.5 px-2 text-emerald-400 font-bold">HAR-RV</td>
+                  <td id="pop-fv-m2-detail" class="py-1.5 px-1.5 text-slate-300">EWMA 5/21/Dn10: -- | Impl VRP: --</td>
+                  <td id="pop-fv-m2-wt" class="py-1.5 px-1.5 text-right text-slate-400">50%</td>
+                  <td id="pop-fv-m2-val" class="py-1.5 px-2 text-right text-emerald-300 font-bold">--.--</td>
+                </tr>
+                <tr>
+                  <td class="py-1.5 px-2 text-purple-400 font-bold">60D Quad</td>
+                  <td id="pop-fv-m4-detail" class="py-1.5 px-1.5 text-slate-300">DD: --% | R²: -- | c2: --</td>
+                  <td id="pop-fv-m4-wt" class="py-1.5 px-1.5 text-right text-slate-400">50%</td>
+                  <td id="pop-fv-m4-val" class="py-1.5 px-2 text-right text-purple-300 font-bold">--.--</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div id="pop-fv-desc" class="text-[10px] text-slate-400 bg-slate-950/60 p-1.5 rounded border border-slate-800/60 leading-relaxed font-sans">
+            Evaluating combined realized-vol and quadratic drawdown equilibrium...
+          </div>
         </div>
       </div>
 
@@ -683,26 +761,24 @@
       <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col shadow-md">
         <div id="spotvol-header" class="flex flex-wrap xl:flex-nowrap items-center justify-between pb-2.5 border-b border-slate-800/80 mb-2 gap-2">
           <div class="min-w-0 flex-1">
-            <div class="flex items-center space-x-1.5 whitespace-nowrap">
-              <h2 id="spotvol-title" class="text-sm font-bold text-white uppercase tracking-tight">Spot-Vol Regression &amp; Overvix Zone</h2>
-              <span id="trail-live-pill" class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 flex-shrink-0">+ Intraday Trail</span>
+            <div class="flex items-center space-x-1.5 min-w-0">
+              <h2 id="spotvol-title" class="text-sm font-bold text-white uppercase tracking-tight truncate">Spot-Vol Regression &amp; Overvix Zone</h2>
             </div>
             <p id="spotvol-sub" class="text-[11px] text-slate-400 truncate">SPX % vs VIX Point Move with +2.0 pt Threshold &amp; Today's Intraday Path</p>
           </div>
 
-          <!-- Card 1 Header Controls: Compact Selection Action Switch & Trail View Mode -->
-          <div class="flex items-center gap-1.5 flex-shrink-0">
+          <!-- Card 1 Header Controls: Model Tab & Click Mode -->
+          <div class="flex flex-wrap items-center gap-1.5 flex-shrink-0">
+            <!-- Linear Δ vs Fair VIX Scatter Switch -->
+            <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-[10px] font-medium whitespace-nowrap" title="Switch between Daily Δ Spot-Vol Regression and Absolute Fair VIX (60D Quadratic + RV/VRP)">
+              <button id="btn-ov-mode-linear" class="px-2 py-1 rounded-md text-[10px] font-semibold bg-cyan-500 text-black shadow-sm transition whitespace-nowrap">Δ Linear</button>
+              <button id="btn-ov-mode-fair" class="px-2 py-1 rounded-md text-[10px] font-semibold text-slate-400 hover:text-amber-300 transition whitespace-nowrap">Fair VIX</button>
+            </div>
+
             <!-- Scatter Selection Action Switch -->
             <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-[10px] font-medium whitespace-nowrap" title="Choose whether clicking a day on Spot-Vol Regression sets the Residual Monitor anchor to the prior trading day's close (expanding range if needed) or loads that day's 1-min archive">
               <button id="btn-spotvol-click-anchor" class="px-1.5 py-1 rounded-md text-[10px] font-semibold bg-cyan-500 text-black shadow-sm transition whitespace-nowrap">Set Anchor</button>
               <button id="btn-spotvol-click-load" class="px-1.5 py-1 rounded-md text-[10px] font-semibold text-slate-400 hover:text-white transition whitespace-nowrap">Load Day</button>
-            </div>
-
-            <!-- Trail View Mode Selector -->
-            <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-[11px] font-medium whitespace-nowrap">
-              <button id="btn-trail-both" class="px-2 py-1 rounded-md text-[11px] font-semibold bg-cyan-500 text-black shadow-sm transition">Both</button>
-              <button id="btn-trail-today" class="px-2 py-1 rounded-md text-[11px] font-semibold text-slate-400 hover:text-white transition">Today Only</button>
-              <button id="btn-trail-60d" class="px-2 py-1 rounded-md text-[11px] font-semibold text-slate-400 hover:text-white transition">60D Only</button>
             </div>
           </div>
         </div>
@@ -909,6 +985,82 @@
       <div id="correlation-chart" class="chart-container" style="min-height: 380px;"></div>
     </div>
 
+    <!-- ROW 3: COMPOSITE FAIR VIX & STRUCTURAL RESIDUAL MONITOR -->
+    <div id="fair-vix-monitor-card" class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col shadow-md">
+      <!-- TIER 1: HEADER & VIEW CONTROLS -->
+      <div class="flex flex-wrap items-center justify-between pb-2.5 border-b border-slate-800/80 mb-2 gap-3">
+        <div class="flex flex-col flex-shrink-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 id="fv-monitor-title" class="text-sm font-bold text-white uppercase tracking-tight">Composite Fair VIX &amp; Structural Residual Monitor</h2>
+            <span id="fv-tf-pill" class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60">Intraday 1M</span>
+            <span id="fv-regime-pill" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">Fair Gap (--.-- pts)</span>
+            <span id="fv-sticky-pill" class="hidden text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-rose-950/90 text-rose-300 border border-rose-600/80">Sticky Vol Confluence</span>
+          </div>
+          <p id="fv-subtitle" class="text-xs text-slate-400">Upper: Live VIX vs Composite Fair VIX (HAR-RV &amp; 60D Quadratic) &bull; Lower: Composite Structural Residual vs Intraday Overvix Residual</p>
+        </div>
+
+        <!-- Right: Horizon Slider & Display Mode Controls -->
+        <div class="ml-auto flex flex-wrap items-center gap-2 flex-shrink-0">
+          <div class="timeframe-slider-wrapper flex flex-col bg-slate-950/80 px-3 py-1 rounded-lg border border-slate-800 w-[325px] flex-shrink-0">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center space-x-1.5">
+                <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Horizon:</span>
+                <span id="fv-slider-badge" class="text-[11px] font-mono px-2 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold">
+                  1D &bull; Intraday (1m)
+                </span>
+              </div>
+              <label class="flex items-center space-x-1 cursor-pointer text-[10px] text-slate-400 hover:text-white transition" title="Synchronize horizon with Spot-Vol Residual Monitor (Row 2)">
+                <input type="checkbox" id="chk-sync-fv" class="rounded bg-slate-900 border-slate-700 text-cyan-500 focus:ring-0 w-3 h-3 cursor-pointer" checked>
+                <span>Sync</span>
+              </label>
+            </div>
+            <div class="relative flex items-center py-0.5">
+              <input type="range" min="0" max="8" step="1" value="0" id="slider-fv-timeframe"
+                     class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400 focus:outline-none">
+            </div>
+            <div id="fv-tick-labels" class="flex justify-between text-[10px] font-mono text-slate-400 mt-0.5 px-0.5">
+              <span class="cursor-pointer hover:text-cyan-300 font-bold text-cyan-400 transition" data-step="0">1D</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="1">5D</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="2">10D</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="3">1M</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="4">3M</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="5">6M</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="6">YTD</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="7">1Y</span>
+              <span class="cursor-pointer hover:text-cyan-300 transition" data-step="8">MAX</span>
+            </div>
+          </div>
+
+          <!-- Upper Panel Mode Switch: VIX Levels vs Beta vs SPX -->
+          <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium flex-shrink-0">
+            <button id="btn-fv-mode-levels" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition whitespace-nowrap" title="Plot Live VIX alongside dashed amber Composite Fair VIX level">VIX Levels</button>
+            <button id="btn-fv-mode-beta" class="px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap" title="Invert and beta-scale Live VIX &amp; Fair VIX alongside SPX % change">Beta vs SPX</button>
+          </div>
+
+          <!-- Toggle Individual HAR-RV & 60D Quad Lines -->
+          <div class="flex items-center space-x-1 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium flex-shrink-0">
+            <button id="btn-fv-components" class="px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap" title="Show/hide individual HAR-RV and 60D Quadratic curves">HAR-RV / Quad</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TIER 2: LIVE DIAGNOSTICS HUD STRIP -->
+      <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-950/70 border border-slate-800/80 rounded-lg px-3 py-1.5 mb-2 text-[11px] font-mono">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span>Live: <strong id="fv-hud-live" class="text-cyan-300">--.--</strong></span>
+          <span>Comp Fair: <strong id="fv-hud-fair" class="text-amber-300">--.--</strong></span>
+          <span>HAR-RV: <strong id="fv-hud-m2" class="text-emerald-400">--.--</strong></span>
+          <span>60D Quad: <strong id="fv-hud-m4" class="text-purple-300">--.--</strong></span>
+          <span>Comp Res: <strong id="fv-hud-comp-res" class="text-white">--.-- pts</strong></span>
+          <span>Overvix Res: <strong id="fv-hud-ov-res" class="text-slate-200">--.-- pts</strong></span>
+        </div>
+        <span id="fv-summary-comment" class="text-[11px] text-slate-300 font-sans font-normal"></span>
+      </div>
+
+      <!-- Fair VIX Dual-Pane Plotly Chart -->
+      <div id="fair-vix-chart" class="chart-container" style="min-height: 410px;"></div>
+    </div>
+
   </main>
 
   <!-- CONFIGURATION MODAL -->
@@ -941,6 +1093,31 @@
         <div>
           <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">Refresh Rate (Seconds)</label>
           <input type="number" id="input-interval" step="0.5" min="0.5" max="10.0" value="1.0" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-cyan-500">
+        </div>
+
+        <!-- Fair VIX Valuation Settings (HAR-RV & 60D Quadratic) -->
+        <div class="pt-3 border-t border-slate-800 space-y-2.5">
+          <label class="block text-xs font-semibold text-amber-400 uppercase">Fair VIX Valuation (HAR-RV &amp; 60D Quad)</label>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label for="select-vrp-mode" class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">RV Anchor Mode</label>
+              <select id="select-vrp-mode" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer">
+                <option value="auto">Auto (HAR-RV Mean-Rev)</option>
+                <option value="fixed">Fixed (+pts over RV)</option>
+              </select>
+            </div>
+            <div>
+              <label for="input-vrp-fixed" class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Fixed VRP (pts)</label>
+              <input type="number" id="input-vrp-fixed" step="0.5" min="0.0" max="15.0" value="4.0" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-amber-500">
+            </div>
+          </div>
+          <div>
+            <label for="select-fv-blend" class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">HAR-RV / 60D Quad Blend</label>
+            <select id="select-fv-blend" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer">
+              <option value="equal">50% HAR-RV / 50% 60D Quad</option>
+              <option value="r2_weighted">R²-Adaptive Blend (30–70% Quad)</option>
+            </select>
+          </div>
         </div>
 
         <!-- Voice Alerts Configuration -->
@@ -1246,8 +1423,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v10.12 - Append Official Settlement Close and Remove Skewed Overvix Alert Marker) -->
-  <script src="/static/dashboard.js?v=10.12"></script>
+  <!-- DASHBOARD SCRIPT (v10.19 - Multi-Day Intraday Session Breaks & Dividers) -->
+  <script src="/static/dashboard.js?v=10.19"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>

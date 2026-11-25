@@ -69,6 +69,12 @@ from session_history import (
     load_notable_dates,
     save_notable_date
 )
+from fair_vix_engine import (
+    DEFAULT_VRP_PTS,
+    compute_fair_vix_asset_model,
+    evaluate_live_fair_vix,
+    safe_to_ohlc_df,
+)
 
 # ==============================================================================
 # CONFIGURATION DEFAULTS
@@ -313,6 +319,14 @@ class DashboardState:
         self.tech_ratio_low: float = 0.0
         self.tech_ratio_high: float = 0.0
         self.hist_version: int = 0
+
+        # Fair VIX Models (Method 2: RV+VRP & Method 4: 60D Quadratic Drawdown)
+        self.df_daily_ohlc = pd.DataFrame()
+        self.fair_vix_spx: Dict[str, Any] = {}
+        self.fair_vix_ndx: Dict[str, Any] = {}
+        self.vrp_mode: str = "auto"
+        self.vrp_fixed_pts: float = DEFAULT_VRP_PTS
+        self.fair_vix_blend: str = "equal"
 
         # Active WebSockets
         self.active_websockets: List[WebSocket] = []
@@ -998,14 +1012,26 @@ def load_history_cache() -> Optional[Dict[str, Any]]:
     return None
 
 
-def save_history_cache(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.DataFrame, cache_date: str, dfs_1m: Optional[Dict[str, pd.DataFrame]] = None):
+def save_history_cache(
+    dfs_pool: Dict[str, pd.DataFrame],
+    df_daily: pd.DataFrame,
+    cache_date: str,
+    dfs_1m: Optional[Dict[str, pd.DataFrame]] = None,
+    df_daily_ohlc: Optional[pd.DataFrame] = None,
+):
     try:
         os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
+        ohlc_to_save = (
+            df_daily_ohlc
+            if (df_daily_ohlc is not None and not df_daily_ohlc.empty)
+            else getattr(state, 'df_daily_ohlc', pd.DataFrame())
+        )
         payload = {
             'cache_date': cache_date,
             'dfs_pool': dfs_pool,
             'df_daily': df_daily,
-            'dfs_1m': dfs_1m
+            'dfs_1m': dfs_1m,
+            'df_daily_ohlc': ohlc_to_save,
         }
         with open(CACHE_PATH, 'wb') as f:
             pickle.dump(payload, f)
@@ -1463,6 +1489,56 @@ def compute_spotvol_baselines(df_daily: pd.DataFrame, active_sess_date: Optional
 
     print(f" SPX Spot-Vol Baseline ({len(state.df_spotvol)} bars): R²={state.r_squared:.4f}, Slope={state.slope:.4f}")
     print(f" NDX Spot-Vol Baseline ({len(state.df_spotvol_ndx)} bars): R²={state.ndx_r_squared:.4f}, Slope={state.ndx_slope:.4f}")
+    compute_fair_vix_models(df_daily, today_et)
+
+
+def _merge_daily_ohlc(new_ohlc: pd.DataFrame):
+    if new_ohlc is None or new_ohlc.empty:
+        return
+    if state.df_daily_ohlc is None or state.df_daily_ohlc.empty:
+        state.df_daily_ohlc = new_ohlc.copy()
+        return
+    merged = state.df_daily_ohlc.combine_first(new_ohlc)
+    for col in new_ohlc.columns:
+        valid = new_ohlc[col].dropna()
+        if not valid.empty:
+            merged.loc[valid.index, col] = valid
+    state.df_daily_ohlc = merged.sort_index()
+
+
+def compute_fair_vix_models(df_daily: pd.DataFrame, today_et: Optional[str] = None):
+    """Recompute Method 2 (RV+VRP) and Method 4 (60D Quadratic Drawdown) models for SPX/VIX & NDX/VXN."""
+    if df_daily is None or df_daily.empty:
+        return
+    now_et = datetime.now(ET_TZ)
+    eff_today = today_et or now_et.strftime('%Y-%m-%d')
+    rth_finished = (now_et.time() >= dtime(16, 0))
+    ohlc_df = state.df_daily_ohlc if not state.df_daily_ohlc.empty else None
+
+    state.fair_vix_spx = compute_fair_vix_asset_model(
+        df_daily=df_daily,
+        df_ohlc=ohlc_df,
+        spot_col='spx',
+        vol_col='vix',
+        window_days=state.window_days,
+        vrp_mode=state.vrp_mode,
+        vrp_fixed_pts=state.vrp_fixed_pts,
+        blend_mode=state.fair_vix_blend,
+        as_of_date=eff_today,
+        inclusive_as_of=rth_finished,
+    )
+    state.fair_vix_ndx = compute_fair_vix_asset_model(
+        df_daily=df_daily,
+        df_ohlc=ohlc_df,
+        spot_col='ndx',
+        vol_col='vxn',
+        window_days=state.window_days,
+        vrp_mode=state.vrp_mode,
+        vrp_fixed_pts=state.vrp_fixed_pts,
+        blend_mode=state.fair_vix_blend,
+        as_of_date=eff_today,
+        inclusive_as_of=rth_finished,
+    )
 
 
 def harmonize_daily_close_with_rth(df_daily: pd.DataFrame, active_sess_date: Optional[str]) -> pd.DataFrame:
@@ -1670,8 +1746,13 @@ async def hydrate_deep_history_background(active_sess_date: Optional[str], today
             df_daily = existing_df_daily
         df_daily = harmonize_daily_close_with_rth(df_daily, active_sess_date)
 
+        ohlc_s2y = safe_to_ohlc_df(spx_bars_2y, 'spx')
+        ohlc_n2y = safe_to_ohlc_df(ndx_bars_2y, 'ndx')
+        _merge_daily_ohlc(ohlc_s2y)
+        _merge_daily_ohlc(ohlc_n2y)
+
         # Save to disk cache
-        save_history_cache(dfs_pool, df_daily, today_et, dfs_1m=dfs_1m)
+        save_history_cache(dfs_pool, df_daily, today_et, dfs_1m=dfs_1m, df_daily_ohlc=state.df_daily_ohlc)
 
         # Apply to state and bump hist_version
         apply_multi_timeframe_pool(dfs_pool, df_daily, active_sess_date, today_et, dfs_1m=dfs_1m)
@@ -1794,6 +1875,9 @@ async def refresh_historical_data():
             cached_dfs = cache_data.get('dfs_pool') or {}
             cached_df_daily = cache_data['df_daily']
             cached_dfs_1m = cache_data.get('dfs_1m') or {}
+            cached_ohlc = cache_data.get('df_daily_ohlc')
+            if isinstance(cached_ohlc, pd.DataFrame) and not cached_ohlc.empty:
+                _merge_daily_ohlc(cached_ohlc)
             daily_ref_df = cached_df_daily
             compute_spotvol_baselines(cached_df_daily, active_sess_date, today_et)
             apply_multi_timeframe_pool(cached_dfs, cached_df_daily, active_sess_date, today_et, dfs_1m=cached_dfs_1m)
@@ -1829,6 +1913,8 @@ async def refresh_historical_data():
             df_vx4m = safe_to_series(vxn_d, 'vxn')
             df_daily_init = pd.concat([df_s4m, df_v4m, df_v34m, df_n4m, df_vx4m], axis=1).dropna()
             df_daily_init = harmonize_daily_close_with_rth(df_daily_init, active_sess_date)
+            _merge_daily_ohlc(safe_to_ohlc_df(spx_d, 'spx'))
+            _merge_daily_ohlc(safe_to_ohlc_df(ndx_d, 'ndx'))
             state.df_daily = df_daily_init
             daily_ref_df = df_daily_init
             compute_spotvol_baselines(df_daily_init, active_sess_date, today_et)
@@ -1838,6 +1924,7 @@ async def refresh_historical_data():
             asyncio.create_task(hydrate_deep_history_background(active_sess_date, today_et))
 
         # 2B. Compute ES-SPX Official Settlement Basis & Stitch 1D_GTH / 5D_GTH / 10D_GTH
+        _merge_daily_ohlc(safe_to_ohlc_df(b_spx_d, 'spx'))
         s_spx_d = safe_to_series(b_spx_d, 'spx')
         s_vix_d = safe_to_series(b_vix_d, 'vix')
         s_es_d = safe_to_series(b_es_d, 'es')
@@ -3415,6 +3502,32 @@ def compute_live_payload() -> Dict[str, Any]:
         rth_session_started = True
         gth_session_started = True
 
+    fair_vix_rth = evaluate_live_fair_vix(
+        state.fair_vix_spx,
+        spot_val=spx_curr,
+        vol_val=vix_curr,
+        spot_pct=curr_x,
+        overvix_resid=residual_pts,
+        threshold_pts=state.spx_threshold_pts,
+    )
+    gth_ov_res = gth_overvix.get("residual_pts")
+    fair_vix_gth = evaluate_live_fair_vix(
+        state.fair_vix_spx,
+        spot_val=gth_syn_spx,
+        vol_val=gth_vix_val,
+        spot_pct=gth_pct,
+        overvix_resid=float(gth_ov_res) if gth_ov_res is not None else 0.0,
+        threshold_pts=state.spx_threshold_pts,
+    )
+    fair_vix_ndx = evaluate_live_fair_vix(
+        state.fair_vix_ndx,
+        spot_val=ndx_curr,
+        vol_val=vxn_curr,
+        spot_pct=curr_ndx_x,
+        overvix_resid=residual_ndx_pts,
+        threshold_pts=state.ndx_threshold_pts,
+    )
+
     payload = {
         "timestamp": curr_time_str,
         "datetime": curr_dt_str,
@@ -3465,6 +3578,7 @@ def compute_live_payload() -> Dict[str, Any]:
                 "threshold_pts": round(state.spx_threshold_pts, 2),
             },
             "overvix": gth_overvix,
+            "fair_vix": fair_vix_gth,
             "current_point": gth_curr_pt,
             "confluence": gth_confluence,
         },
@@ -3561,6 +3675,7 @@ def compute_live_payload() -> Dict[str, Any]:
         },
         "rr_4m": spx_4m_rr_payload,
         "vix_futures": vix_futures_payload,
+        "fair_vix": fair_vix_rth,
         "confluence": {
             "tag": confluence_tag,
             "description": confluence_desc,
@@ -3626,6 +3741,7 @@ def compute_live_payload() -> Dict[str, Any]:
                 "ref_mode": state.ndx_rr_ref_mode or "session_close"
             },
             "rr_4m": ndx_4m_rr_payload,
+            "fair_vix": fair_vix_ndx,
         "confluence": {
                 "tag": ndx_confluence_tag,
                 "description": ndx_confluence_desc,
@@ -4046,7 +4162,18 @@ async def get_bootstrap():
                 "1Y": round(state.corr_1y_ndx, 3),
                 "MAX": round(state.corr_max_ndx, 3)
             }
-        }
+        },
+        "fair_vix": {
+            **(live["ndx"].get("fair_vix") or {}),
+            "scatter_60d": state.fair_vix_ndx.get("scatter_60d", {}),
+            "curve": state.fair_vix_ndx.get("curve", {}),
+            "daily_params": state.fair_vix_ndx.get("daily_params", {}),
+            "config": {
+                "vrp_mode": state.vrp_mode,
+                "vrp_fixed_pts": state.vrp_fixed_pts,
+                "blend_mode": state.fair_vix_blend,
+            },
+        },
     }
 
     tech_vol_bootstrap = {
@@ -4163,7 +4290,18 @@ async def get_bootstrap():
         },
         "ndx": ndx_bootstrap,
         "tech_vol": tech_vol_bootstrap,
-        "vix_futures": live.get("vix_futures")
+        "vix_futures": live.get("vix_futures"),
+        "fair_vix": {
+            **(live.get("fair_vix") or {}),
+            "scatter_60d": state.fair_vix_spx.get("scatter_60d", {}),
+            "curve": state.fair_vix_spx.get("curve", {}),
+            "daily_params": state.fair_vix_spx.get("daily_params", {}),
+            "config": {
+                "vrp_mode": state.vrp_mode,
+                "vrp_fixed_pts": state.vrp_fixed_pts,
+                "blend_mode": state.fair_vix_blend,
+            },
+        },
     }
     return _sanitize_json_floats(bootstrap_data)
 
@@ -4233,7 +4371,11 @@ async def get_historical_session(date: str):
             window_days=state.window_days,
             ndx_contract=state.ndx_contract,
             vxn_contract=state.vxn_contract,
-            ndx_threshold_pts=state.ndx_threshold_pts
+            ndx_threshold_pts=state.ndx_threshold_pts,
+            df_daily_ohlc=state.df_daily_ohlc,
+            vrp_mode=state.vrp_mode,
+            vrp_fixed_pts=state.vrp_fixed_pts,
+            blend_mode=state.fair_vix_blend,
         )
         return payload
     except ValueError as ve:
@@ -4248,6 +4390,9 @@ class ConfigRequest(BaseModel):
     ndx_threshold: Optional[float] = None
     window: Optional[int] = None
     interval: Optional[float] = None
+    vrp_mode: Optional[str] = None
+    vrp_fixed_pts: Optional[float] = None
+    fair_vix_blend: Optional[str] = None
 
 
 @app.post("/api/config")
@@ -4262,9 +4407,26 @@ async def post_config(req: ConfigRequest):
     if req.ndx_threshold is not None:
         state.ndx_threshold_pts = float(req.ndx_threshold)
 
+    fv_changed = False
+    if req.vrp_mode in ("auto", "fixed") and req.vrp_mode != state.vrp_mode:
+        state.vrp_mode = req.vrp_mode
+        fv_changed = True
+    if req.vrp_fixed_pts is not None:
+        val = max(0.0, min(15.0, float(req.vrp_fixed_pts)))
+        if val != state.vrp_fixed_pts:
+            state.vrp_fixed_pts = val
+            fv_changed = True
+    if req.fair_vix_blend in ("equal", "r2_weighted") and req.fair_vix_blend != state.fair_vix_blend:
+        state.fair_vix_blend = req.fair_vix_blend
+        fv_changed = True
+
     if req.window is not None and req.window != state.window_days:
         state.window_days = int(req.window)
         await refresh_historical_data()
+    elif fv_changed and not state.df_daily.empty:
+        compute_fair_vix_models(state.df_daily)
+        state.hist_version += 1
+
     if req.interval is not None:
         state.interval = max(0.2, float(req.interval))
 
@@ -4274,7 +4436,10 @@ async def post_config(req: ConfigRequest):
         "ndx_threshold": state.ndx_threshold_pts,
         "threshold": state.spx_threshold_pts, 
         "window": state.window_days, 
-        "interval": state.interval
+        "interval": state.interval,
+        "vrp_mode": state.vrp_mode,
+        "vrp_fixed_pts": state.vrp_fixed_pts,
+        "fair_vix_blend": state.fair_vix_blend,
     }
 
 

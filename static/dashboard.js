@@ -10,7 +10,6 @@ let currentSpxThreshold = 2.0;
 let currentNdxThreshold = 2.5;
 let currentThreshold = 2.0;
 let currentTimeframe = '1D'; // '1D', '5D', '1Y'
-let currentTrailMode = 'both'; // 'both', 'today', '60d'
 let spotVolClickAction = 'anchor'; // 'anchor' | 'load'
 let currentCorrMode = 'dual'; // 'dual', 'corr_only'
 let isVolInverted = true; // Invert volatility axis on correlation overlay for lockstep tracking
@@ -256,6 +255,18 @@ let userGthOverride = null; // null = auto during GTH/overnight, 'on'/'off' once
 let cachedGthSessionDate = null;
 let cachedGthStatus = null;
 let currentCorrTf = '1D';
+
+// Fair VIX Model & Row 3 Monitor State
+let currentOvervixChartMode = 'linear'; // 'linear' | 'fair'
+let currentFvTf = '1D';
+let currentFvDisplayMode = 'levels'; // 'levels' | 'beta'
+let showFvComponents = false;
+let isMouseHoveringFvChart = false;
+let pendingLiveFvRender = false;
+let currentVrpMode = 'auto';
+let currentVrpFixedPts = 4.0;
+let currentFvBlend = 'equal';
+let lastFairVixData = null;
 
 // Recovery Anchor State for Dynamic Correlation & Divergence Monitor
 let corrAnchor = {
@@ -503,8 +514,14 @@ const btnSaveSettings = document.getElementById('btn-save-settings');
 btnSettings.addEventListener('click', () => {
   const inputSpx = document.getElementById('input-spx-threshold');
   const inputNdx = document.getElementById('input-ndx-threshold');
+  const selVrpMode = document.getElementById('select-vrp-mode');
+  const inpVrpFixed = document.getElementById('input-vrp-fixed');
+  const selFvBlend = document.getElementById('select-fv-blend');
   if (inputSpx) inputSpx.value = currentSpxThreshold;
   if (inputNdx) inputNdx.value = currentNdxThreshold;
+  if (selVrpMode) selVrpMode.value = currentVrpMode;
+  if (inpVrpFixed) inpVrpFixed.value = currentVrpFixedPts;
+  if (selFvBlend) selFvBlend.value = currentFvBlend;
   updateVoiceStatusUI();
   populateVoiceSelector();
   modalSettings.classList.remove('hidden');
@@ -517,6 +534,12 @@ btnSaveSettings.addEventListener('click', async () => {
   const ndxThresh = parseFloat(document.getElementById('input-ndx-threshold').value) || currentNdxThreshold;
   const win = parseInt(document.getElementById('input-window').value, 10);
   const interval = parseFloat(document.getElementById('input-interval').value);
+  const vrpModeEl = document.getElementById('select-vrp-mode');
+  const vrpFixedEl = document.getElementById('input-vrp-fixed');
+  const fvBlendEl = document.getElementById('select-fv-blend');
+  const vrpMode = vrpModeEl ? vrpModeEl.value : currentVrpMode;
+  const vrpFixed = vrpFixedEl ? parseFloat(vrpFixedEl.value) : currentVrpFixedPts;
+  const fvBlend = fvBlendEl ? fvBlendEl.value : currentFvBlend;
 
   try {
     const res = await fetch('/api/config', {
@@ -526,12 +549,18 @@ btnSaveSettings.addEventListener('click', async () => {
         spx_threshold: spxThresh,
         ndx_threshold: ndxThresh,
         window: win, 
-        interval: interval 
+        interval: interval,
+        vrp_mode: vrpMode,
+        vrp_fixed_pts: isNaN(vrpFixed) ? 4.0 : vrpFixed,
+        fair_vix_blend: fvBlend
       })
     });
     if (res.ok) {
       currentSpxThreshold = spxThresh;
       currentNdxThreshold = ndxThresh;
+      currentVrpMode = vrpMode;
+      currentVrpFixedPts = isNaN(vrpFixed) ? 4.0 : vrpFixed;
+      currentFvBlend = fvBlend;
       currentThreshold = (currentAssetPair === 'NDX') ? currentNdxThreshold : currentSpxThreshold;
       const dispEl = document.getElementById('disp-thresh-pts');
       if (dispEl) dispEl.textContent = currentThreshold.toFixed(1);
@@ -721,6 +750,7 @@ function setupGthToggle() {
     }
     renderCorrelationChart(currentCorrMode, currentCorrTf);
     updateCorrMetricDisplay();
+    renderFairVixMonitorChart(currentFvTf);
     if (activeData) {
       updateUI(activeData);
     }
@@ -795,6 +825,7 @@ function switchAssetPair(pair) {
     renderTermStructureChart(currentTimeframe);
     renderCorrelationChart(currentCorrMode, currentCorrTf);
     updateCorrMetricDisplay();
+    renderFairVixMonitorChart(currentFvTf);
     updateUI(liveOrActive);
   }
 }
@@ -958,18 +989,11 @@ function switchTimeframe(tf, triggeredBySlider = false) {
   renderTermStructureChart(tf);
 }
 
-// Trail Mode & Spot-Vol Click Action Selectors (Card 1)
-const btnTrailBoth = document.getElementById('btn-trail-both');
-const btnTrailToday = document.getElementById('btn-trail-today');
-const btnTrail60D = document.getElementById('btn-trail-60d');
-const trailLivePill = document.getElementById('trail-live-pill');
+// Spot-Vol Click Action Selectors (Card 1)
 const btnSpotVolClickAnchor = document.getElementById('btn-spotvol-click-anchor');
 const btnSpotVolClickLoad = document.getElementById('btn-spotvol-click-load');
 
 function setupTrailButtons() {
-  btnTrailBoth.addEventListener('click', () => switchTrailMode('both'));
-  btnTrailToday.addEventListener('click', () => switchTrailMode('today'));
-  btnTrail60D.addEventListener('click', () => switchTrailMode('60d'));
   setupSpotVolClickSwitch();
 }
 
@@ -1037,44 +1061,6 @@ function isSessionStarted(data, isGth) {
   }
 }
 
-function switchTrailMode(mode) {
-  currentTrailMode = mode;
-  const idleCls = "px-2 py-1 rounded-md text-[11px] font-semibold text-slate-400 hover:text-white transition";
-  const activeCls = "px-2 py-1 rounded-md text-[11px] font-semibold bg-cyan-500 text-black shadow-sm transition";
-  [btnTrailBoth, btnTrailToday, btnTrail60D].forEach(btn => {
-    btn.className = idleCls;
-  });
-
-  const activeData = (currentViewMode === 'historical' && cachedHistoricalData)
-    ? cachedHistoricalData
-    : (lastLiveUpdatePayload || cachedBootstrap);
-  const isGth = (currentAssetPair === 'SPX' && Boolean(isGthEnabled));
-  const hasStarted = isSessionStarted(activeData, isGth);
-  const showBeacon = hasStarted && (mode !== '60d');
-
-  if (mode === 'both') {
-    btnTrailBoth.className = activeCls;
-    trailLivePill.textContent = "+ Intraday Trail";
-    Plotly.restyle('overvix-chart', {
-      visible: [true, true, true, true, true, showBeacon],
-      showlegend: [true, true, true, false, true, showBeacon]
-    });
-  } else if (mode === 'today') {
-    btnTrailToday.className = activeCls;
-    trailLivePill.textContent = "Today Trail Only";
-    Plotly.restyle('overvix-chart', {
-      visible: [false, true, true, true, true, showBeacon],
-      showlegend: [false, true, true, false, true, showBeacon]
-    });
-  } else if (mode === '60d') {
-    btnTrail60D.className = activeCls;
-    trailLivePill.textContent = "60D Scatter Only";
-    Plotly.restyle('overvix-chart', {
-      visible: [true, true, true, true, false, false],
-      showlegend: [true, true, true, false, false, false]
-    });
-  }
-}
 
 // Correlation Timeframe & Display Controls
 const btnCorrScale = document.getElementById('btn-corr-scale');
@@ -1273,6 +1259,10 @@ function switchCorrTf(tf, triggeredBySlider = false) {
   updateCorrMetricDisplay();
   updateVixHighsUI(tf);
   renderCorrelationChart(currentCorrMode, tf);
+  const chkSyncFv = document.getElementById('chk-sync-fv');
+  if (chkSyncFv && chkSyncFv.checked && currentFvTf !== tf) {
+    switchFairVixTf(tf, false);
+  }
 }
 
 function getActiveBetaAndIntercept(isNdx) {
@@ -1391,6 +1381,9 @@ function buildOvernightEsOverlay(gthObj) {
 }
 
 function renderOvervixChart(bootstrap) {
+  if (currentOvervixChartMode === 'fair') {
+    return renderFairVixScatterChart(bootstrap);
+  }
   const isNdx = (currentAssetPair === 'NDX');
   const gthMode = (!isNdx && !bootstrap.is_historical && isGthEnabled);
   const hasSessionStarted = isSessionStarted(bootstrap, gthMode);
@@ -1644,7 +1637,7 @@ function renderOvervixChart(bootstrap) {
       },
       hoverlabel: darkHoverlabel,
       hovertemplate: getHistoricalDotHoverTemplate(assetLabel, volLabel),
-      visible: currentTrailMode === 'today' ? false : true
+      visible: true
     },
     // 1: Regression Trendline
     {
@@ -1690,7 +1683,7 @@ function renderOvervixChart(bootstrap) {
                      `${volLabel}: <b>%{customdata[3]}</b> (%{y:+.2f} pts)<br>` +
                      `${residLabel}: <b>%{customdata[0]}</b>%{customdata[1]}<br>` +
                      `<span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`,
-      visible: currentTrailMode === '60d' ? false : true
+      visible: true
     },
     // 5: Session End / Live Current Point
     {
@@ -1707,7 +1700,7 @@ function renderOvervixChart(bootstrap) {
       hoverlabel: darkHoverlabel,
       hovertemplate: beaconHover,
       showlegend: hasSessionStarted,
-      visible: hasSessionStarted && (currentTrailMode !== '60d')
+      visible: hasSessionStarted
     }
   ];
 
@@ -3663,6 +3656,23 @@ function findDistinctVixHighs(times, volRaw, pullbackThresh = 0.20, clusterMinut
   return dailyHighs;
 }
 
+function buildSessionSegments(times) {
+  const segments = [];
+  if (!Array.isArray(times) || times.length === 0) return segments;
+  let segStart = 0;
+  let prevDay = (times[0] || '').slice(0, 10);
+  for (let i = 1; i < times.length; i++) {
+    const curDay = (times[i] || '').slice(0, 10);
+    if (curDay && prevDay && curDay !== prevDay) {
+      segments.push({ start: segStart, end: i, day: prevDay, startTime: times[segStart] });
+      segStart = i;
+      prevDay = curDay;
+    }
+  }
+  segments.push({ start: segStart, end: times.length, day: prevDay, startTime: times[segStart] });
+  return segments;
+}
+
 function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   let targetTf = currentCorrTf;
   if (tf) {
@@ -3726,6 +3736,8 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   const dEnd = times.length > 0 ? times[times.length - 1] : '';
 
   const conf = TF_CONFIG[targetTf] || TF_CONFIG['1D'];
+  const isMultiDayIntradayTf = (targetTf === '5D' || targetTf === '10D' || targetTf === '1M');
+  const sessionSegs = isMultiDayIntradayTf ? buildSessionSegments(times) : [];
   const xTitle = gthChartOn
     ? `${conf.xTitle} — Extended GTH (ES Basis-Adj 03:15–09:15 & 16:00–16:15 ET)`
     : conf.xTitle;
@@ -3849,9 +3861,14 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     });
   }
 
-  // Vertical session divider lines at each day's 09:30 open in Daily Reset mode
-  if (corrAnchor.mode === 'daily_reset' && anchoredSeries.sessionStartTimes && anchoredSeries.sessionStartTimes.length > 1) {
-    anchoredSeries.sessionStartTimes.slice(1).forEach(st => {
+  // Vertical session divider lines at each day's open on multi-day intraday horizons (5D, 10D, 1M) or Daily Reset mode
+  const dividerTimes = (isMultiDayIntradayTf && sessionSegs.length > 1)
+    ? sessionSegs.slice(1).map(s => s.startTime)
+    : ((corrAnchor.mode === 'daily_reset' && anchoredSeries.sessionStartTimes && anchoredSeries.sessionStartTimes.length > 1)
+        ? anchoredSeries.sessionStartTimes.slice(1)
+        : []);
+  if (dividerTimes.length > 0) {
+    dividerTimes.forEach(st => {
       anchorShapes.push({
         type: 'line',
         xref: 'x',
@@ -3861,7 +3878,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         y0: 0,
         y1: 1,
         line: {
-          color: 'rgba(148, 163, 184, 0.25)',
+          color: 'rgba(148, 163, 184, 0.22)',
           width: 1,
           dash: 'dash'
         },
@@ -4343,21 +4360,23 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     }
 
     const isDailyResetMultiDay = (corrAnchor.mode === 'daily_reset' && anchoredSeries.days && anchoredSeries.days.length > 1);
+    const useSessionBreaks = isDailyResetMultiDay || sessionSegs.length > 1;
     const plotTraces = [];
 
-    if (isDailyResetMultiDay) {
-      const days = anchoredSeries.days;
-      const dayMap = anchoredSeries.dayMap;
+    if (useSessionBreaks) {
+      const segments = isDailyResetMultiDay
+        ? anchoredSeries.days.map(d => {
+            const idxs = anchoredSeries.dayMap[d];
+            return { start: idxs[0], end: idxs[idxs.length - 1] + 1 };
+          })
+        : sessionSegs;
 
-      // 1. Dual Ribbon Traces for each day (strictly within each day's bounds)
+      // 1. Dual Ribbon Traces per session (strictly within each day's bounds)
       if (isBetaScaled && isVolInverted) {
-        days.forEach(d => {
-          const idxs = dayMap[d];
-          const start = idxs[0];
-          const end = idxs[idxs.length - 1] + 1;
-          const times_d = times.slice(start, end);
-          const assetPct_d = assetPct.slice(start, end);
-          const volPt_d = volPt.slice(start, end);
+        segments.forEach(seg => {
+          const times_d = times.slice(seg.start, seg.end);
+          const assetPct_d = assetPct.slice(seg.start, seg.end);
+          const volPt_d = volPt.slice(seg.start, seg.end);
 
           const ribbonData = computeDualRibbonSeries(times_d, assetPct_d, volPt_d, beta, alpha);
           if (ribbonData && ribbonData.xArr.length > 0) {
@@ -4411,18 +4430,15 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         });
       }
 
-      // 2. Asset Lines for each day
-      days.forEach((d, dIdx) => {
-        const idxs = dayMap[d];
-        const start = idxs[0];
-        const end = idxs[idxs.length - 1] + 1;
+      // 2. Asset Lines per session
+      segments.forEach((seg, sIdx) => {
         plotTraces.push({
-          x: times.slice(start, end),
-          y: assetPct.slice(start, end),
-          customdata: assetCustomdata.slice(start, end),
-          name: `${assetLabel} % (Daily Reset)`,
+          x: times.slice(seg.start, seg.end),
+          y: assetPct.slice(seg.start, seg.end),
+          customdata: assetCustomdata.slice(seg.start, seg.end),
+          name: traceAsset.name,
           legendgroup: 'asset',
-          showlegend: (dIdx === 0),
+          showlegend: (sIdx === 0),
           mode: 'lines',
           line: { color: assetColor, width: 1.8 },
           xaxis: 'x',
@@ -4431,20 +4447,15 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         });
       });
 
-      // 3. Vol Lines for each day (Visual rendering per day)
-      days.forEach((d, dIdx) => {
-        const idxs = dayMap[d];
-        const start = idxs[0];
-        const end = idxs[idxs.length - 1] + 1;
+      // 3. Vol Lines per session
+      segments.forEach((seg, sIdx) => {
         plotTraces.push({
-          x: times.slice(start, end),
-          y: volPt.slice(start, end),
-          customdata: volCustomdata.slice(start, end),
-          name: isVolInverted 
-            ? `${volLabel} Pt (Daily Reset Inv ▼)` 
-            : `${volLabel} Pt (Daily Reset)`,
+          x: times.slice(seg.start, seg.end),
+          y: volPt.slice(seg.start, seg.end),
+          customdata: volCustomdata.slice(seg.start, seg.end),
+          name: traceVol.name,
           legendgroup: 'vol',
-          showlegend: (dIdx === 0),
+          showlegend: (sIdx === 0),
           mode: 'lines',
           line: { color: volColor, width: 1.8 },
           xaxis: 'x',
@@ -4458,19 +4469,13 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         x: times,
         y: volPt,
         customdata: volCustomdata,
-        name: isVolInverted 
-          ? `${volLabel} Pt (Daily Reset Inv ▼)` 
-          : `${volLabel} Pt (Daily Reset)`,
+        name: traceVol.name,
         mode: 'lines',
         line: { color: 'transparent', width: 0 },
         xaxis: 'x',
         yaxis: 'y2',
         showlegend: false,
-        hovertemplate: 
-          `<b>%{x|${timeHoverFmt}}%{customdata[5]}</b>%{customdata[6]}<br>` +
-          `%{customdata[7]}: <b>%{customdata[0]}</b> (%{customdata[1]})<br>` +
-          `%{customdata[8]}: <b>%{customdata[2]}</b> (%{customdata[3]} pts) · Resid: <b>%{customdata[4]}</b><br>` +
-          `<span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`
+        hovertemplate: traceVol.hovertemplate
       });
 
       // 4. VIX Highs Markers (if any)
@@ -4478,14 +4483,11 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         plotTraces.push(traceVixHighMarks);
       }
 
-      // 5. Positive Residual Fill for each day
-      days.forEach(d => {
-        const idxs = dayMap[d];
-        const start = idxs[0];
-        const end = idxs[idxs.length - 1] + 1;
+      // 5. Positive Residual Fill per session
+      segments.forEach(seg => {
         plotTraces.push({
-          x: times.slice(start, end),
-          y: posResid.slice(start, end),
+          x: times.slice(seg.start, seg.end),
+          y: posResid.slice(seg.start, seg.end),
           mode: 'lines',
           line: { color: 'transparent', width: 0 },
           fill: 'tozeroy',
@@ -4497,14 +4499,11 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         });
       });
 
-      // 6. Negative Residual Fill for each day
-      days.forEach(d => {
-        const idxs = dayMap[d];
-        const start = idxs[0];
-        const end = idxs[idxs.length - 1] + 1;
+      // 6. Negative Residual Fill per session
+      segments.forEach(seg => {
         plotTraces.push({
-          x: times.slice(start, end),
-          y: negResid.slice(start, end),
+          x: times.slice(seg.start, seg.end),
+          y: negResid.slice(seg.start, seg.end),
           mode: 'lines',
           line: { color: 'transparent', width: 0 },
           fill: 'tozeroy',
@@ -4516,18 +4515,15 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         });
       });
 
-      // 7. Residual Lines for each day (Visual rendering per day)
-      days.forEach((d, dIdx) => {
-        const idxs = dayMap[d];
-        const start = idxs[0];
-        const end = idxs[idxs.length - 1] + 1;
+      // 7. Residual Lines per session
+      segments.forEach((seg, sIdx) => {
         plotTraces.push({
-          x: times.slice(start, end),
-          y: residSeries.slice(start, end),
-          customdata: residCustomdata.slice(start, end),
-          name: isNdx ? 'Over-VXN Residual' : 'Overvix Residual',
+          x: times.slice(seg.start, seg.end),
+          y: residSeries.slice(seg.start, seg.end),
+          customdata: residCustomdata.slice(seg.start, seg.end),
+          name: traceResidual.name,
           legendgroup: 'resid',
-          showlegend: (dIdx === 0),
+          showlegend: (sIdx === 0),
           mode: 'lines',
           line: { color: isNdx ? '#C084FC' : '#00E5FF', width: 1.8 },
           xaxis: 'x',
@@ -4541,17 +4537,23 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         x: times,
         y: residSeries,
         customdata: residCustomdata,
-        name: isNdx ? 'Over-VXN Residual' : 'Overvix Residual',
+        name: traceResidual.name,
         mode: 'lines',
         line: { color: 'transparent', width: 0 },
         xaxis: 'x',
         yaxis: 'y3',
         showlegend: false,
-        hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[3]}<br>${isNdx ? 'Over-VXN' : 'Overvix'} Residual: %{customdata[0]} pts<br>${assetLabel}: %{customdata[1]} | ${volLabel}: %{customdata[2]}<extra></extra>`
+        hovertemplate: traceResidual.hovertemplate
       });
 
-      // 8. Horizontal Reference Lines
+      // 8. Horizontal Reference Lines & Anchor Dots
       plotTraces.push(traceZeroLine, traceOvervixAlert, traceVolCrush);
+      if (traceAnchorOrigin) {
+        plotTraces.push(traceAnchorOrigin);
+      }
+      if (traceAnchorOriginY3) {
+        plotTraces.push(traceAnchorOriginY3);
+      }
 
     } else {
       if (dualRibbonTraces && dualRibbonTraces.length > 0) {
@@ -4864,6 +4866,1080 @@ function attachCorrelationChartClickListener() {
 
 let lastVixFuturesData = null;
 let lastSpotVixVal = null;
+
+  // ============================================================================
+  // COMPOSITE FAIR VIX ENGINE (CARD 2 POPOVER, CARD 1 TAB & ROW 3 MONITOR)
+  // ============================================================================
+
+function getActiveFairVixPayload(data) {
+  if (!data) return null;
+  const isNdx = (currentAssetPair === 'NDX');
+  if (isNdx) {
+    return (data.ndx && data.ndx.fair_vix) ? data.ndx.fair_vix : null;
+  }
+  if (!data.is_historical && isGthEnabled && data.session_status === 'GTH_ACTIVE' && data.gth && data.gth.fair_vix && typeof data.gth.fair_vix.combined === 'number') {
+    return data.gth.fair_vix;
+  }
+  return data.fair_vix || null;
+}
+
+function getActiveFairVixModelBoot() {
+  const isNdx = (currentAssetPair === 'NDX');
+  const activeBoot = (currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap;
+  if (!activeBoot) return {};
+  return (isNdx ? (activeBoot.ndx && activeBoot.ndx.fair_vix) : activeBoot.fair_vix) || {};
+}
+
+function renderFairVixMiniChart(fvLive, fvBoot) {
+  const chartEl = document.getElementById('pop-fair-vix-chart');
+  if (!chartEl || !fvBoot) return;
+  const sc = fvBoot.scatter_60d || {};
+  const cv = fvBoot.curve || {};
+  if (!Array.isArray(sc.spot) || sc.spot.length === 0) return;
+
+  const isNdx = (currentAssetPair === 'NDX');
+  const assetLbl = isNdx ? 'NDX' : 'SPX';
+  const volLbl = isNdx ? 'VXN' : 'VIX';
+  const liveSpot = fvLive.live_spot;
+  const liveVol = fvLive.live_vol;
+
+  const traces = [
+    {
+      x: sc.spot,
+      y: sc.vol,
+      text: sc.dates || [],
+      mode: 'markers',
+      name: '60D',
+      marker: { color: isNdx ? 'rgba(192,132,252,0.55)' : 'rgba(230,211,133,0.55)', size: 5 },
+      hovertemplate: `%{text}<br>${assetLbl}: %{x:,.2f}<br>${volLbl}: %{y:.2f}<extra></extra>`
+    }
+  ];
+
+  if (Array.isArray(cv.spot) && cv.spot.length > 0) {
+    traces.push({
+      x: cv.spot,
+      y: cv.vix_quad,
+      mode: 'lines',
+      name: '60D Quad',
+      line: { color: '#A855F7', width: 2, shape: 'spline' },
+      hovertemplate: '60D Quad Fair: %{y:.2f}<extra></extra>'
+    });
+  }
+
+  if (typeof fvLive.fair_m2_rv_vrp === 'number') {
+    const xMin = Math.min(...sc.spot, liveSpot || sc.spot[0]);
+    const xMax = Math.max(...sc.spot, liveSpot || sc.spot[0]);
+    traces.push({
+      x: [xMin, xMax],
+      y: [fvLive.fair_m2_rv_vrp, fvLive.fair_m2_rv_vrp],
+      mode: 'lines',
+      name: 'HAR-RV',
+      line: { color: '#10B981', width: 1.5, dash: 'dash' },
+      hovertemplate: `HAR-RV: %{y:.2f}<extra></extra>`
+    });
+  }
+
+  if (typeof liveSpot === 'number' && typeof fvLive.combined === 'number') {
+    traces.push({
+      x: [liveSpot],
+      y: [fvLive.combined],
+      mode: 'markers',
+      name: 'Composite Fair',
+      marker: { color: '#F59E0B', size: 9, symbol: 'diamond', line: { color: '#0F172A', width: 1.5 } },
+      hovertemplate: `<b>Composite Fair</b>: ${fvLive.combined.toFixed(2)}<extra></extra>`
+    });
+  }
+
+  if (typeof liveSpot === 'number' && typeof liveVol === 'number') {
+    traces.push({
+      x: [liveSpot],
+      y: [liveVol],
+      mode: 'markers',
+      name: `Live ${volLbl}`,
+      marker: { color: '#00E5FF', size: 9, line: { color: '#FFFFFF', width: 1.5 } },
+      hovertemplate: `<b>Live ${volLbl}</b>: ${liveVol.toFixed(2)}<extra></extra>`
+    });
+  }
+
+  Plotly.react(chartEl, traces, {
+    height: 140,
+    margin: { l: 30, r: 10, t: 10, b: 24 },
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    showlegend: false,
+    hovermode: 'closest',
+    xaxis: {
+      tickfont: { size: 9, color: '#94A3B8' },
+      gridcolor: 'rgba(51, 65, 85, 0.25)',
+      zeroline: false
+    },
+    yaxis: {
+      tickfont: { size: 9, color: '#94A3B8' },
+      gridcolor: 'rgba(51, 65, 85, 0.35)',
+      zeroline: false
+    }
+  }, { displayModeBar: false, responsive: true });
+}
+
+function updateFairVixUI(data) {
+  const fv = getActiveFairVixPayload(data);
+  const fvBoot = getActiveFairVixModelBoot();
+  lastFairVixData = fv;
+
+  const kpiLineEl = document.getElementById('kpi-vix-fair-line');
+  if (!fv || typeof fv.combined !== 'number') {
+    if (kpiLineEl) kpiLineEl.textContent = 'Fair: --.-- (--.-)';
+    return;
+  }
+
+  const isNdx = (currentAssetPair === 'NDX');
+  const volLbl = isNdx ? 'VXN' : 'VIX';
+  const gSign = fv.gap_pts >= 0 ? '+' : '';
+  const gColorCls = fv.regime === 'RICH' ? 'text-rose-400' : (fv.regime === 'CHEAP' ? 'text-emerald-400' : 'text-amber-300/90');
+  if (kpiLineEl) {
+    kpiLineEl.textContent = `Fair: ${fv.combined.toFixed(2)} (${gSign}${fv.gap_pts.toFixed(1)})`;
+    kpiLineEl.className = `text-[10px] font-mono mt-0.5 truncate ${gColorCls}`;
+  }
+
+  // Popover DOM Updates
+  const popTitle = document.getElementById('pop-fv-title');
+  const popBadge = document.getElementById('pop-fv-badge');
+  const popCombined = document.getElementById('pop-fv-combined');
+  const popBand = document.getElementById('pop-fv-band');
+  const popGap = document.getElementById('pop-fv-gap');
+  const popGapPct = document.getElementById('pop-fv-gap-pct');
+  const popImp = document.getElementById('pop-fv-imp-move');
+  const popReal = document.getElementById('pop-fv-real-move');
+  const popRvTag = document.getElementById('pop-fv-rv-tag');
+  const popM2Det = document.getElementById('pop-fv-m2-detail');
+  const popM2Wt = document.getElementById('pop-fv-m2-wt');
+  const popM2Val = document.getElementById('pop-fv-m2-val');
+  const popM4Det = document.getElementById('pop-fv-m4-detail');
+  const popM4Wt = document.getElementById('pop-fv-m4-wt');
+  const popM4Val = document.getElementById('pop-fv-m4-val');
+  const popDesc = document.getElementById('pop-fv-desc');
+
+  if (popTitle) popTitle.innerHTML = `<span>🎯</span><span>Composite Fair ${volLbl} Model</span>`;
+  if (popBadge) {
+    popBadge.textContent = fv.regime || 'FAIR';
+    if (fv.regime === 'RICH') {
+      popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-rose-950/90 text-rose-300 border border-rose-700';
+    } else if (fv.regime === 'CHEAP') {
+      popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-emerald-950/90 text-emerald-300 border border-emerald-700';
+    } else {
+      popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-amber-950/80 text-amber-300 border border-amber-700';
+    }
+  }
+  if (popCombined) popCombined.textContent = fv.combined.toFixed(2);
+  if (popBand) popBand.textContent = `Band: ${fv.band_low.toFixed(1)}–${fv.band_high.toFixed(1)}`;
+  if (popGap) {
+    popGap.textContent = `${gSign}${fv.gap_pts.toFixed(2)} pts`;
+    popGap.className = `text-xs font-bold font-mono ${fv.regime === 'RICH' ? 'text-rose-400' : (fv.regime === 'CHEAP' ? 'text-emerald-400' : 'text-white')}`;
+  }
+  if (popGapPct) popGapPct.textContent = `(${gSign}${fv.gap_pct.toFixed(1)}%)`;
+  if (popImp) popImp.textContent = `±${fv.implied_daily_move_pct.toFixed(2)}%`;
+  if (popReal) popReal.textContent = `Real 10D: ±${fv.realized_daily_move_pct.toFixed(2)}%`;
+  if (popRvTag) popRvTag.textContent = `${fv.rv_method || 'RV'} | Exp RV: ${fv.expected_rv.toFixed(1)}%`;
+  if (popM2Det) {
+    if (fv.vrp_mode !== 'fixed' && typeof fv.ew_dn10 === 'number') {
+      popM2Det.textContent = `EWMA 5/21/Dn10: ${fv.ew_5d.toFixed(1)}/${fv.ew_21d.toFixed(1)}/${fv.ew_dn10.toFixed(1)} | R²: ${(fv.har_r2 || 0).toFixed(2)} | Impl VRP: ${fv.vrp_base >= 0 ? '+' : ''}${fv.vrp_base.toFixed(1)}`;
+    } else {
+      popM2Det.textContent = `RV 5/10/21: ${fv.rv_5d.toFixed(1)}/${fv.rv_10d.toFixed(1)}/${fv.rv_21d.toFixed(1)} | VRP: +${fv.vrp_base.toFixed(1)} (Live ${fv.vrp_live >= 0 ? '+' : ''}${fv.vrp_live.toFixed(1)})`;
+    }
+  }
+  if (popM2Wt) popM2Wt.textContent = `${Math.round((fv.w_m2 || 0.5) * 100)}%`;
+  if (popM2Val) popM2Val.textContent = fv.fair_m2_rv_vrp.toFixed(2);
+  if (popM4Det) popM4Det.textContent = `DD: -${fv.drawdown_pct.toFixed(2)}% (Peak ${fv.peak_60d.toLocaleString('en-US', { maximumFractionDigits: 0 })}) | R²: ${fv.quad_r2.toFixed(3)} | c2: ${fv.quad_c2.toFixed(3)}`;
+  if (popM4Wt) popM4Wt.textContent = `${Math.round((fv.w_m4 || 0.5) * 100)}%`;
+  if (popM4Val) popM4Val.textContent = fv.fair_m4_quad.toFixed(2);
+  if (popDesc) {
+    const dir = fv.gap_pts > 0.5 ? 'above' : (fv.gap_pts < -0.5 ? 'below' : 'near');
+    popDesc.textContent = `${volLbl} (${fv.live_vol.toFixed(2)}) trades ${Math.abs(fv.gap_pts).toFixed(2)} pts ${dir} composite fair (${fv.combined.toFixed(2)}). Price-location (60D Quad) implies ${fv.fair_m4_quad.toFixed(2)} vs realized-vol anchor (HAR-RV) at ${fv.fair_m2_rv_vrp.toFixed(2)}.`;
+  }
+
+  const popoverFv = document.getElementById('popover-fair-vix');
+  if (popoverFv && !popoverFv.classList.contains('hidden')) {
+    renderFairVixMiniChart(fv, fvBoot);
+  }
+}
+
+function renderFairVixScatterChart(bootstrap) {
+  const isNdx = (currentAssetPair === 'NDX');
+  const assetLbl = isNdx ? 'NDX' : 'SPX';
+  const volLbl = isNdx ? 'VXN' : 'VIX';
+  const gthMode = (!isNdx && !bootstrap.is_historical && isGthEnabled);
+  const fvBoot = (isNdx ? (bootstrap.ndx && bootstrap.ndx.fair_vix) : bootstrap.fair_vix) || {};
+  const activePayload = lastLiveUpdatePayload || bootstrap;
+  const fvLive = getActiveFairVixPayload(activePayload) || fvBoot;
+  const sc = fvBoot.scatter_60d || {};
+  const cv = fvBoot.curve || {};
+
+  const spTitle = document.getElementById('spotvol-title');
+  if (spTitle) spTitle.textContent = `${assetLbl} Fair ${volLbl} Curve (60D Quad + HAR-RV)`;
+  const spSub = document.getElementById('spotvol-sub');
+  if (spSub && typeof fvLive.combined === 'number') {
+    const rvSubTxt = (fvLive.vrp_mode === 'fixed')
+      ? `${fvLive.rv_method || 'RV'} + ${fvLive.vrp_base || 4} VRP`
+      : `Mean-Rev EWMA R²=${(fvLive.har_r2 || 0).toFixed(2)}`;
+    spSub.textContent = `60D Quad (R²=${(fvLive.quad_r2 || 0).toFixed(2)}) + HAR-RV (${rvSubTxt}) → Fair ${fvLive.combined.toFixed(2)}`;
+  }
+
+  const targetData = (isNdx && bootstrap.ndx && bootstrap.ndx.overvix) ? bootstrap.ndx : bootstrap;
+  const gthTrail = (gthMode && bootstrap.overvix && bootstrap.overvix.intraday_trail_gth) ? bootstrap.overvix.intraday_trail_gth : null;
+  const rthTrail = (targetData.overvix && targetData.overvix.intraday_trail) ? targetData.overvix.intraday_trail : { spot_raw: [], vol_raw: [], times: [] };
+  const trail = (gthTrail && gthTrail.x && gthTrail.x.length > 0) ? gthTrail : rthTrail;
+
+  const spotHist = sc.spot || [];
+  const volHist = sc.vol || [];
+  const ddHist = sc.dd_pct || [];
+  const datesHist = sc.dates || [];
+  const nHist = spotHist.length;
+  const histSizes = nHist <= 1 ? 8 : spotHist.map((_, i) => Number((4.0 + (8.5 - 4.0) * (i / (nHist - 1))).toFixed(2)));
+
+  const liveSpot = (fvLive && typeof fvLive.live_spot === 'number') ? fvLive.live_spot : (trail.spot_raw && trail.spot_raw.length ? trail.spot_raw[trail.spot_raw.length - 1] : null);
+  const liveVol = (fvLive && typeof fvLive.live_vol === 'number') ? fvLive.live_vol : (trail.vol_raw && trail.vol_raw.length ? trail.vol_raw[trail.vol_raw.length - 1] : null);
+
+  const allSpots = spotHist.concat(cv.spot || []).concat(liveSpot ? [liveSpot] : []);
+  const minSpot = allSpots.length ? Math.min(...allSpots) : 6000;
+  const maxSpot = allSpots.length ? Math.max(...allSpots) : 7500;
+
+  const darkHoverlabel = {
+    bgcolor: 'rgba(15, 23, 42, 0.95)',
+    bordercolor: '#F59E0B',
+    font: { family: 'monospace', size: 11, color: '#F8FAFC' },
+    align: 'left'
+  };
+
+  const traces = [
+    // 0: 60D Historical Scatter (Spot vs Vol)
+    {
+      x: spotHist,
+      y: volHist,
+      text: datesHist,
+      customdata: ddHist,
+      mode: 'markers',
+      name: `${assetLbl} 60D History`,
+      marker: {
+        color: isNdx ? '#C084FC' : '#E6D385',
+        size: histSizes,
+        opacity: 0.78,
+        line: { color: isNdx ? '#9333EA' : '#B39F50', width: 0.75 }
+      },
+      hoverlabel: darkHoverlabel,
+      hovertemplate: `<b>%{text}</b><br>${assetLbl}: <b>%{x:,.2f}</b> (-%{customdata:.2f}% DD)<br>${volLbl}: <b>%{y:.2f}</b><extra></extra>`,
+      visible: true
+    },
+    // 1: 60D Quadratic ±1σ Band
+    {
+      x: (cv.spot || []).concat([...(cv.spot || [])].reverse()),
+      y: (cv.upper_1sd || []).concat([...(cv.lower_1sd || [])].reverse()),
+      fill: 'toself',
+      fillcolor: 'rgba(168, 85, 247, 0.12)',
+      line: { color: 'transparent' },
+      name: 'Quad ±1σ Band',
+      hoverinfo: 'skip',
+      showlegend: false
+    },
+    // 2: 60D Quadratic Drawdown Fit Curve
+    {
+      x: cv.spot || [],
+      y: cv.vix_quad || [],
+      customdata: cv.dd_pct || [],
+      mode: 'lines',
+      name: '60D Quad Curve',
+      line: { color: '#A855F7', width: 2.2, shape: 'spline' },
+      hoverlabel: darkHoverlabel,
+      hovertemplate: `60D Quad Fair @ ${assetLbl} %{x:,.2f} (-%{customdata:.2f}% DD): <b>%{y:.2f}</b><extra></extra>`
+    },
+    // 3: HAR-RV Realized Vol Mean-Reverting Anchor Line
+    {
+      x: [minSpot, maxSpot],
+      y: [fvLive.fair_m2_rv_vrp || null, fvLive.fair_m2_rv_vrp || null],
+      mode: 'lines',
+      name: `HAR-RV (${typeof fvLive.fair_m2_rv_vrp === 'number' ? fvLive.fair_m2_rv_vrp.toFixed(2) : '--'})`,
+      line: { color: '#10B981', width: 1.8, dash: 'dash' },
+      hovertemplate: `<b>HAR-RV Fair (${fvLive.vrp_mode === 'fixed' ? 'RV + Fixed VRP' : 'Mean-Rev EWMA'})</b>: %{y:.2f}<extra></extra>`,
+      visible: typeof fvLive.fair_m2_rv_vrp === 'number'
+    },
+    // 4: Today's Intraday Trail (Spot vs Vol)
+    {
+      x: trail.spot_raw || [],
+      y: trail.vol_raw || [],
+      text: trail.times || [],
+      mode: 'lines+markers',
+      name: gthMode ? 'Today Path (GTH+RTH)' : 'Today Path',
+      line: { color: '#00E5FF', width: 1.8 },
+      marker: { color: '#00E5FF', size: 3.5, opacity: 0.8 },
+      hoverlabel: darkHoverlabel,
+      hovertemplate: `<b>%{text}</b><br>${assetLbl}: <b>%{x:,.2f}</b><br>${volLbl}: <b>%{y:.2f}</b><extra></extra>`,
+      visible: true
+    },
+    // 5: Live / Session Vol Beacon
+    {
+      x: liveSpot ? [liveSpot] : [],
+      y: liveVol ? [liveVol] : [],
+      mode: 'markers',
+      name: `Live ${volLbl} (${liveVol ? liveVol.toFixed(2) : '--'})`,
+      marker: { color: '#00E5FF', size: 13, line: { color: '#FFFFFF', width: 2 } },
+      hoverlabel: darkHoverlabel,
+      hovertemplate: `<b>Live ${volLbl}</b>: %{y:.2f} @ ${assetLbl} %{x:,.2f}<br>Composite Fair: <b>${typeof fvLive.combined === 'number' ? fvLive.combined.toFixed(2) : '--'}</b><extra></extra>`,
+      visible: Boolean(liveSpot && liveVol)
+    },
+    // 6: Composite Fair Target Marker at Live Spot
+    {
+      x: (liveSpot && typeof fvLive.combined === 'number') ? [liveSpot] : [],
+      y: (liveSpot && typeof fvLive.combined === 'number') ? [fvLive.combined] : [],
+      mode: 'markers',
+      name: `Composite Fair (${typeof fvLive.combined === 'number' ? fvLive.combined.toFixed(2) : '--'})`,
+      marker: { color: '#F59E0B', size: 12, symbol: 'diamond', line: { color: '#0F172A', width: 1.8 } },
+      hoverlabel: darkHoverlabel,
+      hovertemplate: `<b>Composite Fair ${volLbl}</b>: %{y:.2f}<br>Gap: <b>${typeof fvLive.gap_pts === 'number' ? (fvLive.gap_pts >= 0 ? '+' : '') + fvLive.gap_pts.toFixed(2) : '--'} pts (${fvLive.regime || 'FAIR'})</b><extra></extra>`,
+      visible: Boolean(liveSpot && typeof fvLive.combined === 'number')
+    }
+  ];
+
+  const shapes = [];
+  if (liveSpot && liveVol && typeof fvLive.combined === 'number') {
+    shapes.push({
+      type: 'line',
+      x0: liveSpot,
+      x1: liveSpot,
+      y0: fvLive.combined,
+      y1: liveVol,
+      line: { color: fvLive.gap_pts >= 0 ? '#FB7185' : '#34D399', width: 2, dash: 'dot' }
+    });
+  }
+
+  const layout = {
+    paper_bgcolor: 'transparent',
+    plot_bgcolor: 'transparent',
+    autosize: true,
+    hovermode: 'closest',
+    hoverdistance: 35,
+    hoverlabel: darkHoverlabel,
+    margin: { l: 50, r: 20, t: 25, b: 45 },
+    xaxis: {
+      title: { text: `${assetLbl} Spot Price Level (Peak: ${fvLive.peak_60d ? fvLive.peak_60d.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '--'})`, font: { color: '#94A3B8', size: 11 } },
+      gridcolor: '#1e293b',
+      tickfont: { color: '#94A3B8', size: 10 },
+      tickformat: ',.0f'
+    },
+    yaxis: {
+      title: { text: `${volLbl} Level (Actual vs Fair)`, font: { color: '#94A3B8', size: 11 } },
+      gridcolor: '#1e293b',
+      tickfont: { color: '#94A3B8', size: 10 }
+    },
+    legend: {
+      orientation: 'h',
+      x: 0,
+      y: 1.15,
+      font: { color: '#94A3B8', size: 10 }
+    },
+    shapes: shapes,
+    showlegend: true
+  };
+
+  Plotly.newPlot('overvix-chart', traces, layout, { responsive: true, displayModeBar: false });
+}
+
+function setupOvervixModeTabs() {
+  const btnLin = document.getElementById('btn-ov-mode-linear');
+  const btnFair = document.getElementById('btn-ov-mode-fair');
+  const activeCls = "px-2 py-1 rounded-md text-[10px] font-semibold bg-cyan-500 text-black shadow-sm transition whitespace-nowrap";
+  const activeAmberCls = "px-2 py-1 rounded-md text-[10px] font-semibold bg-amber-500 text-black shadow-sm transition whitespace-nowrap";
+  const idleCls = "px-2 py-1 rounded-md text-[10px] font-semibold text-slate-400 hover:text-white transition whitespace-nowrap";
+
+  const applyMode = (mode) => {
+    currentOvervixChartMode = mode;
+    if (btnLin) btnLin.className = (mode === 'linear') ? activeCls : idleCls;
+    if (btnFair) btnFair.className = (mode === 'fair') ? activeAmberCls : idleCls;
+
+    const isNdx = (currentAssetPair === 'NDX');
+    const spTitle = document.getElementById('spotvol-title');
+    const spSub = document.getElementById('spotvol-sub');
+    if (mode === 'linear' && spTitle && spSub) {
+      spTitle.textContent = isNdx ? "Nasdaq Spot-Vol Regression & Over-VXN Zone" : "Spot-Vol Regression & Overvix Zone";
+      const thr = isNdx ? currentNdxThreshold : currentSpxThreshold;
+      spSub.textContent = `${isNdx ? 'NDX' : 'SPX'} % vs ${isNdx ? 'VXN' : 'VIX'} Point Move with +${thr.toFixed(1)} pt Threshold & Intraday Path`;
+    }
+    const activeData = (currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap;
+    if (activeData) {
+      renderOvervixChart(activeData);
+      if (mode === 'linear' && lastLiveUpdatePayload && currentViewMode === 'live') {
+        updateUI(lastLiveUpdatePayload);
+      }
+    }
+  };
+
+  if (btnLin) btnLin.addEventListener('click', () => applyMode('linear'));
+  if (btnFair) btnFair.addEventListener('click', () => applyMode('fair'));
+}
+
+function updateFvSliderUI(tf) {
+  const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
+  const badge = document.getElementById('fv-slider-badge');
+  const pill = document.getElementById('fv-tf-pill');
+  const ticks = document.getElementById('fv-tick-labels');
+  if (badge) badge.innerHTML = conf.badgeText;
+  if (pill) {
+    pill.textContent = conf.pillText;
+    pill.className = `text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border ${conf.pillClass}`;
+  }
+  if (ticks) {
+    ticks.querySelectorAll('span[data-step]').forEach(span => {
+      const s = parseInt(span.getAttribute('data-step'), 10);
+      span.className = (s === conf.step)
+        ? "cursor-pointer font-bold text-cyan-400 transition"
+        : "cursor-pointer text-slate-400 hover:text-cyan-300 transition";
+    });
+  }
+}
+
+function switchFairVixTf(tf, syncToCorr = true) {
+  currentFvTf = tf;
+  const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
+  const sliderFv = document.getElementById('slider-fv-timeframe');
+  if (sliderFv && sliderFv.value != conf.step) {
+    sliderFv.value = conf.step;
+  }
+  updateFvSliderUI(tf);
+  renderFairVixMonitorChart(tf);
+
+  const chkSyncFv = document.getElementById('chk-sync-fv');
+  if (syncToCorr && chkSyncFv && chkSyncFv.checked && currentCorrTf !== tf) {
+    switchCorrTf(tf, true);
+  }
+}
+
+function setupFairVixMonitorControls() {
+  const sliderFv = document.getElementById('slider-fv-timeframe');
+  const ticksFv = document.getElementById('fv-tick-labels');
+  const btnLevels = document.getElementById('btn-fv-mode-levels');
+  const btnBeta = document.getElementById('btn-fv-mode-beta');
+  const btnComp = document.getElementById('btn-fv-components');
+  const chartEl = document.getElementById('fair-vix-chart');
+
+  if (sliderFv) {
+    sliderFv.addEventListener('input', (e) => {
+      const idx = parseInt(e.target.value, 10);
+      updateFvSliderUI(TF_STEPS[idx] || '1D');
+    });
+    sliderFv.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.value, 10);
+      switchFairVixTf(TF_STEPS[idx] || '1D', true);
+    });
+  }
+
+  if (ticksFv) {
+    ticksFv.querySelectorAll('span[data-step]').forEach(span => {
+      span.addEventListener('click', () => {
+        const step = parseInt(span.getAttribute('data-step'), 10);
+        switchFairVixTf(TF_STEPS[step] || '1D', true);
+      });
+    });
+  }
+
+  const activeAmber = "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition whitespace-nowrap";
+  const idleMode = "px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap";
+
+  if (btnLevels) {
+    btnLevels.addEventListener('click', () => {
+      currentFvDisplayMode = 'levels';
+      btnLevels.className = activeAmber;
+      if (btnBeta) btnBeta.className = idleMode;
+      renderFairVixMonitorChart(currentFvTf);
+    });
+  }
+  if (btnBeta) {
+    btnBeta.addEventListener('click', () => {
+      currentFvDisplayMode = 'beta';
+      btnBeta.className = activeAmber;
+      if (btnLevels) btnLevels.className = idleMode;
+      renderFairVixMonitorChart(currentFvTf);
+    });
+  }
+  if (btnComp) {
+    btnComp.addEventListener('click', () => {
+      showFvComponents = !showFvComponents;
+      btnComp.className = showFvComponents
+        ? "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-purple-500 text-white shadow-sm transition whitespace-nowrap"
+        : idleMode;
+      renderFairVixMonitorChart(currentFvTf);
+    });
+  }
+
+  if (chartEl && !chartEl._hasFvHoverTracking) {
+    chartEl._hasFvHoverTracking = true;
+    chartEl.addEventListener('mouseenter', () => { isMouseHoveringFvChart = true; });
+    chartEl.addEventListener('mousemove', () => { isMouseHoveringFvChart = true; });
+    chartEl.addEventListener('mouseleave', () => {
+      isMouseHoveringFvChart = false;
+      if (pendingLiveFvRender) {
+        pendingLiveFvRender = false;
+        renderFairVixMonitorChart(currentFvTf);
+      }
+    });
+  }
+}
+
+function renderFairVixMonitorChart(tf = currentFvTf) {
+  const chartEl = document.getElementById('fair-vix-chart');
+  if (!chartEl) return;
+
+  const targetTf = tf || currentFvTf || '1D';
+  const isNdx = (currentAssetPair === 'NDX');
+  const assetLabel = isNdx ? 'NDX' : 'SPX';
+  const volLabel = isNdx ? 'VXN' : 'VIX';
+  const ovLabel = isNdx ? 'Over-VXN' : 'Overvix';
+  const thresh = isNdx ? currentNdxThreshold : currentSpxThreshold;
+
+  const titleEl = document.getElementById('fv-monitor-title');
+  if (titleEl) {
+    titleEl.textContent = isNdx
+      ? "Composite Fair VXN & Structural Residual Monitor"
+      : "Composite Fair VIX & Structural Residual Monitor";
+  }
+
+  const c = getCorrDataset(isNdx, targetTf);
+  if (!c || !Array.isArray(c.times) || c.times.length === 0) {
+    return;
+  }
+
+  const times = c.times;
+  const raw = getRawSpotVolSeries(c, isNdx);
+  const spotRaw = raw.spot || [];
+  const volRaw = raw.vol || [];
+  const baseSpotPct = (isNdx ? (c.ndx_pct || c.spx_pct) : c.spx_pct) || [];
+  const baseVolPt = (isNdx ? (c.vxn_pt || c.vix_pt) : c.vix_pt) || [];
+
+  const activeData = (currentViewMode === 'live' && lastLiveUpdatePayload) ? lastLiveUpdatePayload : ((currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap);
+  const fvBoot = getActiveFairVixModelBoot();
+  const fvLive = getActiveFairVixPayload(activeData) || fvBoot;
+  const dailyParams = fvBoot.daily_params || {};
+  const paramDates = Object.keys(dailyParams).sort();
+  const lastSettledDate = fvBoot.last_settled_date || (paramDates.length ? paramDates[paramDates.length - 1] : '');
+
+  const fallbackParams = {
+    peak_60d: fvLive.peak_60d || fvBoot.peak_60d || (spotRaw.length ? spotRaw[0] : 1),
+    c0: fvLive.quad_c0 !== undefined ? fvLive.quad_c0 : (fvBoot.c0 || 15.0),
+    c1: fvLive.quad_c1 !== undefined ? fvLive.quad_c1 : (fvBoot.c1 || 1.0),
+    c2: fvLive.quad_c2 !== undefined ? fvLive.quad_c2 : (fvBoot.c2 || 0.0),
+    fair_m2: fvLive.fair_m2_rv_vrp !== undefined ? fvLive.fair_m2_rv_vrp : (fvBoot.fair_m2 || 20.0),
+    w_m2: fvLive.w_m2 !== undefined ? fvLive.w_m2 : (fvBoot.w_m2 || 0.5),
+    w_m4: fvLive.w_m4 !== undefined ? fvLive.w_m4 : (fvBoot.w_m4 || 0.5),
+  };
+
+  const getParamsForDate = (dStr) => {
+    if (dailyParams[dStr]) return dailyParams[dStr];
+    if (lastSettledDate && dStr > lastSettledDate) return fallbackParams;
+    for (let j = paramDates.length - 1; j >= 0; j--) {
+      if (paramDates[j] <= dStr) return dailyParams[paramDates[j]];
+    }
+    return fallbackParams;
+  };
+
+  // Build daily prior closes to align intraday Overvix Residual cleanly per session
+  const officialCloses = {};
+  let dailyDatesList = [];
+  if (cachedBootstrap && cachedBootstrap.intraday_correlation) {
+    const dailyDs = cachedBootstrap.intraday_correlation['1Y'] || cachedBootstrap.intraday_correlation['YTD'];
+    if (dailyDs && dailyDs.dates && dailyDs.dates.length > 0) {
+      dailyDatesList = dailyDs.dates;
+      const dSpot = isNdx ? (dailyDs.ndx_raw || dailyDs.spot_raw) : (dailyDs.spx_raw || dailyDs.spot_raw);
+      const dVol = isNdx ? (dailyDs.vxn_raw || dailyDs.vol_raw) : (dailyDs.vix_raw || dailyDs.vol_raw);
+      for (let j = 0; j < dailyDatesList.length; j++) {
+        if (dSpot && dSpot[j] !== undefined && dVol && dVol[j] !== undefined) {
+          officialCloses[dailyDatesList[j]] = { spot: dSpot[j], vol: dVol[j] };
+        }
+      }
+    }
+  }
+
+  const { beta, rawSlope, rawIntercept } = getActiveBetaAndIntercept(isNdx);
+  const slope = rawSlope;
+  const intercept = rawIntercept;
+  const absBeta = Math.max(0.5, beta);
+  const isIntradayTf = ['1D', '5D', '10D', '1M'].includes(targetTf);
+  const isGth = (!isNdx && isGthChartActive(targetTf));
+
+  const liveVolArr = [];
+  const compFairArr = [];
+  const m2Arr = [];
+  const m4Arr = [];
+  const compResArr = [];
+  const ovResArr = [];
+  const spotPctDailyArr = [];
+  const volPtDailyArr = [];
+  const fairPtDailyArr = [];
+  const stickyX = [];
+  const stickyY = [];
+  const stickyCustom = [];
+
+  const n = times.length;
+  let curDay = '';
+  let refSpot = (spotRaw[0] || 1);
+  let refVol = (volRaw[0] || 20);
+  const firstRefVol = refVol;
+
+  for (let i = 0; i < n; i++) {
+    const tStr = times[i] || '';
+    const dStr = tStr.slice(0, 10);
+    const sVal = (typeof spotRaw[i] === 'number' && !isNaN(spotRaw[i])) ? spotRaw[i] : null;
+    const vVal = (typeof volRaw[i] === 'number' && !isNaN(volRaw[i])) ? volRaw[i] : null;
+
+    if (isIntradayTf && dStr !== curDay) {
+      curDay = dStr;
+      if (isGth && cachedBootstrap && cachedBootstrap.gth && cachedBootstrap.gth.ref_spx && cachedBootstrap.gth.ref_vix && dStr >= (cachedBootstrap.gth.session_date || dStr)) {
+        refSpot = cachedBootstrap.gth.ref_spx;
+        refVol = cachedBootstrap.gth.ref_vix;
+      } else {
+        let foundPrior = false;
+        for (let j = dailyDatesList.length - 1; j >= 0; j--) {
+          if (dailyDatesList[j] < dStr && officialCloses[dailyDatesList[j]]) {
+            refSpot = officialCloses[dailyDatesList[j]].spot;
+            refVol = officialCloses[dailyDatesList[j]].vol;
+            foundPrior = true;
+            break;
+          }
+        }
+        if (!foundPrior) {
+          refSpot = (i > 0 && typeof spotRaw[i - 1] === 'number') ? spotRaw[i - 1] : (sVal || 1);
+          refVol = (i > 0 && typeof volRaw[i - 1] === 'number') ? volRaw[i - 1] : (vVal || 20);
+        }
+      }
+    }
+
+    const p = getParamsForDate(dStr);
+    let fM2 = p.fair_m2;
+    let fM4 = p.fair_m2;
+    let cFair = p.fair_m2;
+    let cRes = 0;
+
+    if (sVal !== null && vVal !== null && p.peak_60d > 0) {
+      const dd = Math.max(0.0, (p.peak_60d - sVal) / p.peak_60d * 100.0);
+      fM4 = p.c0 + p.c1 * dd + p.c2 * (dd * dd);
+      cFair = p.w_m2 * fM2 + p.w_m4 * fM4;
+      cRes = vVal - cFair;
+    }
+
+    let sPct = (typeof baseSpotPct[i] === 'number') ? baseSpotPct[i] : 0;
+    let vPt = (typeof baseVolPt[i] === 'number') ? baseVolPt[i] : 0;
+    if (targetTf === '1D' && typeof baseSpotPct[i] === 'number' && typeof baseVolPt[i] === 'number') {
+      sPct = baseSpotPct[i];
+      vPt = baseVolPt[i];
+    } else if (isIntradayTf && sVal !== null && vVal !== null && refSpot > 0) {
+      sPct = (sVal - refSpot) / refSpot * 100.0;
+      vPt = vVal - refVol;
+    } else if (!isIntradayTf && i > 0 && sVal !== null && vVal !== null && typeof spotRaw[i - 1] === 'number' && spotRaw[i - 1] > 0 && typeof volRaw[i - 1] === 'number') {
+      sPct = (sVal - spotRaw[i - 1]) / spotRaw[i - 1] * 100.0;
+      vPt = vVal - volRaw[i - 1];
+    }
+
+    const ovRes = vPt - (intercept + slope * sPct);
+
+    liveVolArr.push(vVal);
+    compFairArr.push(Number(cFair.toFixed(2)));
+    m2Arr.push(Number(fM2.toFixed(2)));
+    m4Arr.push(Number(fM4.toFixed(2)));
+    compResArr.push(Number(cRes.toFixed(2)));
+    ovResArr.push(Number(ovRes.toFixed(2)));
+    spotPctDailyArr.push(typeof baseSpotPct[i] === 'number' ? baseSpotPct[i] : sPct);
+    const vHorizonPt = (vVal !== null) ? (vVal - firstRefVol) : 0;
+    const fHorizonPt = cFair - firstRefVol;
+    volPtDailyArr.push(Number(vHorizonPt.toFixed(2)));
+    fairPtDailyArr.push(Number(fHorizonPt.toFixed(2)));
+
+    if (cRes > 0 && ovRes > 0 && sPct > 0 && vVal !== null) {
+      stickyX.push(tStr);
+      stickyY.push(Number(cRes.toFixed(2)));
+      stickyCustom.push([sPct.toFixed(2), cRes.toFixed(2), ovRes.toFixed(2)]);
+    }
+  }
+
+  // Update HUD metrics from latest point / live Fair VIX
+  const latestV = (typeof fvLive.live_vol === 'number') ? fvLive.live_vol : liveVolArr[n - 1];
+  const latestFair = (typeof fvLive.combined === 'number') ? fvLive.combined : compFairArr[n - 1];
+  const latestM2 = (typeof fvLive.fair_m2_rv_vrp === 'number') ? fvLive.fair_m2_rv_vrp : m2Arr[n - 1];
+  const latestM4 = (typeof fvLive.fair_m4_quad === 'number') ? fvLive.fair_m4_quad : m4Arr[n - 1];
+  const latestCRes = (typeof fvLive.gap_pts === 'number') ? fvLive.gap_pts : compResArr[n - 1];
+  const latestOvRes = ovResArr[n - 1];
+
+  const setTxt = (id, txt, cls) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.textContent = txt;
+      if (cls) el.className = cls;
+    }
+  };
+  if (typeof latestV === 'number') setTxt('fv-hud-live', latestV.toFixed(2));
+  if (typeof latestFair === 'number') setTxt('fv-hud-fair', latestFair.toFixed(2));
+  if (typeof latestM2 === 'number') setTxt('fv-hud-m2', latestM2.toFixed(2));
+  if (typeof latestM4 === 'number') setTxt('fv-hud-m4', latestM4.toFixed(2));
+  if (typeof latestCRes === 'number') {
+    const s = latestCRes >= 0 ? '+' : '';
+    setTxt('fv-hud-comp-res', `${s}${latestCRes.toFixed(2)} pts`, latestCRes >= thresh ? 'text-rose-400 font-bold' : (latestCRes <= -thresh ? 'text-emerald-400 font-bold' : 'text-amber-300 font-bold'));
+  }
+  if (typeof latestOvRes === 'number') {
+    const s = latestOvRes >= 0 ? '+' : '';
+    setTxt('fv-hud-ov-res', `${s}${latestOvRes.toFixed(2)} pts`, latestOvRes >= thresh ? 'text-rose-400 font-bold' : 'text-cyan-300 font-bold');
+  }
+
+  const regimePill = document.getElementById('fv-regime-pill');
+  if (regimePill && typeof latestCRes === 'number') {
+    const gRegime = fvLive.regime || (latestCRes >= thresh ? 'RICH' : (latestCRes <= -thresh ? 'CHEAP' : 'FAIR'));
+    const s = latestCRes >= 0 ? '+' : '';
+    regimePill.textContent = `${gRegime} (${s}${latestCRes.toFixed(2)} pts)`;
+    if (gRegime === 'RICH') {
+      regimePill.className = 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-rose-950/90 text-rose-300 border border-rose-700';
+    } else if (gRegime === 'CHEAP') {
+      regimePill.className = 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-700';
+    } else {
+      regimePill.className = 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-700';
+    }
+  }
+
+  const stickyPill = document.getElementById('fv-sticky-pill');
+  const sumEl = document.getElementById('fv-summary-comment');
+  const dualPos = (typeof latestCRes === 'number' && typeof latestOvRes === 'number' && latestCRes > 0 && latestOvRes > 0);
+  const lastSpotPct = spotPctDailyArr[n - 1] || 0;
+  if (stickyPill) {
+    if (dualPos) stickyPill.classList.remove('hidden');
+    else stickyPill.classList.add('hidden');
+  }
+  if (sumEl && typeof latestCRes === 'number') {
+    if (dualPos && lastSpotPct > 0) {
+      sumEl.textContent = `High-conviction sticky vol: Spot rallying while both Composite (+${latestCRes.toFixed(2)}) & ${ovLabel} (+${latestOvRes.toFixed(2)}) residuals stay positive.`;
+      sumEl.className = 'text-[11px] text-rose-300 font-sans font-semibold';
+    } else if (dualPos) {
+      sumEl.textContent = `Dual positive stress: ${volLabel} rich vs both multi-week fair (+${latestCRes.toFixed(2)} pts) & intraday flow (+${latestOvRes.toFixed(2)} pts).`;
+      sumEl.className = 'text-[11px] text-amber-300 font-sans font-medium';
+    } else if (latestCRes <= -thresh) {
+      sumEl.textContent = `${volLabel} trading ${Math.abs(latestCRes).toFixed(2)} pts below Composite Fair (${latestFair.toFixed(2)}) — realized/structural vol underpriced.`;
+      sumEl.className = 'text-[11px] text-emerald-300 font-sans font-medium';
+    } else {
+      sumEl.textContent = `${volLabel} near Composite Fair (${latestFair ? latestFair.toFixed(2) : '--'}) | HAR-RV=${latestM2 ? latestM2.toFixed(1) : '--'}, 60D Quad=${latestM4 ? latestM4.toFixed(1) : '--'}.`;
+      sumEl.className = 'text-[11px] text-slate-300 font-sans font-normal';
+    }
+  }
+
+  const tfConf = TF_CONFIG[targetTf] || TF_CONFIG['1D'];
+  const timeHoverFmt = tfConf.timeHoverFmt;
+  const isMultiDayIntradayTf = (targetTf === '5D' || targetTf === '10D' || targetTf === '1M');
+  const fvSessionSegs = isMultiDayIntradayTf ? buildSessionSegments(times) : [];
+  const useFvBreaks = (fvSessionSegs.length > 1);
+  const fvSegs = useFvBreaks ? fvSessionSegs : [{ start: 0, end: n, day: '', startTime: times[0] }];
+  const traces = [];
+  const customUpper = times.map((_, i) => [
+    liveVolArr[i] !== null ? liveVolArr[i].toFixed(2) : '-',
+    compFairArr[i].toFixed(2),
+    m2Arr[i].toFixed(2),
+    m4Arr[i].toFixed(2),
+    (compResArr[i] >= 0 ? '+' : '') + compResArr[i].toFixed(2),
+    (ovResArr[i] >= 0 ? '+' : '') + ovResArr[i].toFixed(2)
+  ]);
+
+  if (currentFvDisplayMode === 'beta') {
+    fvSegs.forEach((seg, sIdx) => {
+      const tSeg = times.slice(seg.start, seg.end);
+      const cSeg = customUpper.slice(seg.start, seg.end);
+      traces.push(
+        {
+          x: tSeg,
+          y: spotPctDailyArr.slice(seg.start, seg.end),
+          name: `${assetLabel} %`,
+          legendgroup: 'fv_spot',
+          showlegend: (sIdx === 0),
+          mode: 'lines',
+          line: { color: '#10B981', width: 1.8 },
+          xaxis: 'x',
+          yaxis: 'y',
+          hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${assetLabel}: <b>%{y:+.2f}%</b><extra></extra>`
+        },
+        {
+          x: tSeg,
+          y: volPtDailyArr.slice(seg.start, seg.end),
+          customdata: cSeg,
+          name: `${volLabel} Pt (Inv ▼)`,
+          legendgroup: 'fv_vpt',
+          showlegend: (sIdx === 0),
+          mode: 'lines',
+          line: { color: '#00E5FF', width: 2.0 },
+          xaxis: 'x',
+          yaxis: 'y2',
+          hovertemplate: `${volLabel}: <b>%{customdata[0]}</b> (%{y:+.2f} pts)<extra></extra>`
+        },
+        {
+          x: tSeg,
+          y: fairPtDailyArr.slice(seg.start, seg.end),
+          customdata: cSeg,
+          name: `Composite Fair ${volLabel} (Inv ▼)`,
+          legendgroup: 'fv_fpt',
+          showlegend: (sIdx === 0),
+          mode: 'lines',
+          line: { color: '#F59E0B', width: 2.2, dash: 'dash' },
+          xaxis: 'x',
+          yaxis: 'y2',
+          hovertemplate: `Composite Fair: <b>%{customdata[1]}</b> | Gap: <b>%{customdata[4]} pts</b><extra></extra>`
+        }
+      );
+    });
+  } else {
+    fvSegs.forEach((seg, sIdx) => {
+      const tSeg = times.slice(seg.start, seg.end);
+      const cSeg = customUpper.slice(seg.start, seg.end);
+      traces.push(
+        {
+          x: tSeg,
+          y: liveVolArr.slice(seg.start, seg.end),
+          customdata: cSeg,
+          name: `Live ${volLabel}`,
+          legendgroup: 'fv_live',
+          showlegend: (sIdx === 0),
+          mode: 'lines',
+          line: { color: '#00E5FF', width: 2.0 },
+          xaxis: 'x',
+          yaxis: 'y',
+          hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>Live ${volLabel}: <b>%{y:.2f}</b><br>Comp Fair: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)<extra></extra>`
+        },
+        {
+          x: tSeg,
+          y: compFairArr.slice(seg.start, seg.end),
+          customdata: cSeg,
+          name: `Composite Fair ${volLabel}`,
+          legendgroup: 'fv_fair',
+          showlegend: (sIdx === 0),
+          mode: 'lines',
+          line: { color: '#F59E0B', width: 2.2, dash: 'dash' },
+          fill: 'tonexty',
+          fillcolor: 'rgba(245, 158, 11, 0.10)',
+          xaxis: 'x',
+          yaxis: 'y',
+          hovertemplate: `Composite Fair: <b>%{y:.2f}</b> (HAR-RV: %{customdata[2]}, 60D Quad: %{customdata[3]})<extra></extra>`
+        }
+      );
+      if (showFvComponents) {
+        traces.push(
+          {
+            x: tSeg,
+            y: m2Arr.slice(seg.start, seg.end),
+            name: 'HAR-RV',
+            legendgroup: 'fv_har',
+            showlegend: (sIdx === 0),
+            mode: 'lines',
+            line: { color: '#10B981', width: 1.4, dash: 'dot' },
+            xaxis: 'x',
+            yaxis: 'y',
+            hovertemplate: 'HAR-RV: <b>%{y:.2f}</b><extra></extra>'
+          },
+          {
+            x: tSeg,
+            y: m4Arr.slice(seg.start, seg.end),
+            name: '60D Quad',
+            legendgroup: 'fv_quad',
+            showlegend: (sIdx === 0),
+            mode: 'lines',
+            line: { color: '#A855F7', width: 1.4, dash: 'dot' },
+            xaxis: 'x',
+            yaxis: 'y',
+            hovertemplate: '60D Quad: <b>%{y:.2f}</b><extra></extra>'
+          }
+        );
+      }
+    });
+  }
+
+  // Lower Panel Traces (yaxis3): Composite Residual + Intraday Overvix Residual + Reference Lines
+  fvSegs.forEach((seg, sIdx) => {
+    const tSeg = times.slice(seg.start, seg.end);
+    const cSeg = customUpper.slice(seg.start, seg.end);
+    traces.push(
+      {
+        x: tSeg,
+        y: compResArr.slice(seg.start, seg.end),
+        customdata: cSeg,
+        name: `Composite Resid (${volLabel} − Fair)`,
+        legendgroup: 'fv_compres',
+        showlegend: (sIdx === 0),
+        mode: 'lines',
+        line: { color: '#F59E0B', width: 2.0 },
+        fill: 'tozeroy',
+        fillcolor: 'rgba(245, 158, 11, 0.14)',
+        xaxis: 'x',
+        yaxis: 'y3',
+        hovertemplate: `Comp Residual: <b>%{customdata[4]} pts</b><extra></extra>`
+      },
+      {
+        x: tSeg,
+        y: ovResArr.slice(seg.start, seg.end),
+        customdata: cSeg,
+        name: `${ovLabel} Residual (Flow)`,
+        legendgroup: 'fv_ovres',
+        showlegend: (sIdx === 0),
+        mode: 'lines',
+        line: { color: '#00E5FF', width: 1.5 },
+        xaxis: 'x',
+        yaxis: 'y3',
+        hovertemplate: `${ovLabel} Residual: <b>%{customdata[5]} pts</b><extra></extra>`
+      }
+    );
+  });
+
+  traces.push(
+    {
+      x: [times[0], times[n - 1]],
+      y: [0, 0],
+      mode: 'lines',
+      line: { color: '#475569', width: 1 },
+      hoverinfo: 'skip',
+      showlegend: false,
+      xaxis: 'x',
+      yaxis: 'y3'
+    },
+    {
+      x: [times[0], times[n - 1]],
+      y: [thresh, thresh],
+      mode: 'lines',
+      line: { color: 'rgba(255, 83, 112, 0.5)', width: 1, dash: 'dot' },
+      hoverinfo: 'skip',
+      showlegend: false,
+      xaxis: 'x',
+      yaxis: 'y3'
+    },
+    {
+      x: [times[0], times[n - 1]],
+      y: [-thresh, -thresh],
+      mode: 'lines',
+      line: { color: 'rgba(16, 185, 129, 0.45)', width: 1, dash: 'dot' },
+      hoverinfo: 'skip',
+      showlegend: false,
+      xaxis: 'x',
+      yaxis: 'y3'
+    }
+  );
+
+  if (stickyX.length > 0) {
+    traces.push({
+      x: stickyX,
+      y: stickyY,
+      customdata: stickyCustom,
+      name: 'Sticky Vol (Rally + Dual +)',
+      mode: 'markers',
+      marker: { color: '#FF5370', size: 5.5, opacity: 0.9 },
+      xaxis: 'x',
+      yaxis: 'y3',
+      hovertemplate: `<b>🔥 Sticky Vol Confluence</b><br>${assetLabel} %: +%{customdata[0]}% | Comp Res: +%{customdata[1]} pts | ${ovLabel}: +%{customdata[2]} pts<extra></extra>`
+    });
+  }
+
+  let rangeY = null;
+  let rangeY2 = null;
+  if (currentFvDisplayMode === 'beta') {
+    const sMin = Math.min(...spotPctDailyArr);
+    const sMax = Math.max(...spotPctDailyArr);
+    const vAll = volPtDailyArr.concat(fairPtDailyArr);
+    const vMin = Math.min(...vAll);
+    const vMax = Math.max(...vAll);
+    const halfS = Math.max(0.25, (sMax - sMin) / 2, (vMax - vMin) / (2 * absBeta)) * 1.15;
+    const midS = (sMin + sMax) / 2;
+    const midV = (vMin + vMax) / 2;
+    rangeY = [midS - halfS, midS + halfS];
+    rangeY2 = [midV + halfS * absBeta, midV - halfS * absBeta];
+  }
+
+  const fvShapes = [];
+  if (useFvBreaks) {
+    fvSessionSegs.slice(1).forEach(seg => {
+      fvShapes.push({
+        type: 'line',
+        xref: 'x',
+        yref: 'paper',
+        x0: seg.startTime,
+        x1: seg.startTime,
+        y0: 0,
+        y1: 1,
+        line: {
+          color: 'rgba(148, 163, 184, 0.22)',
+          width: 1,
+          dash: 'dash'
+        },
+        layer: 'below'
+      });
+    });
+  }
+
+  let fvRangebreaks = tfConf.rangebreaks || [];
+  if (isGth) {
+    fvRangebreaks = (targetTf === '5D' || targetTf === '10D')
+      ? [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 3.25] }, { pattern: 'hour', bounds: [9.25, 9.5] }]
+      : [{ pattern: 'hour', bounds: [16.25, 3.25] }, { pattern: 'hour', bounds: [9.25, 9.5] }];
+  }
+  const hasFvSpan = Boolean(n > 1 && times[0] && times[n - 1] && times[0] !== times[n - 1]);
+
+  const layout = {
+    paper_bgcolor: 'transparent',
+    plot_bgcolor: 'transparent',
+    autosize: true,
+    height: 410,
+    hovermode: 'x unified',
+    hoverlabel: {
+      bgcolor: 'rgba(15, 23, 42, 0.95)',
+      bordercolor: '#F59E0B',
+      font: { family: 'monospace', size: 11, color: '#F8FAFC' }
+    },
+    margin: { l: 55, r: 58, t: 28, b: 36 },
+    legend: {
+      orientation: 'h',
+      x: 0,
+      y: 1.07,
+      font: { color: '#94A3B8', size: 10 }
+    },
+    xaxis: {
+      type: 'date',
+      range: hasFvSpan ? [times[0], times[n - 1]] : undefined,
+      autorange: !hasFvSpan,
+      rangebreaks: fvRangebreaks,
+      gridcolor: '#1e293b',
+      tickfont: { color: '#94A3B8', size: 10 },
+      fixedrange: true,
+      showspikes: true,
+      spikecolor: '#475569',
+      spikethickness: 1,
+      spikedash: 'dot'
+    },
+    shapes: fvShapes,
+    yaxis: {
+      domain: [0.43, 1.0],
+      title: { text: currentFvDisplayMode === 'beta' ? `${assetLabel} %` : `${volLabel} Level`, font: { color: '#94A3B8', size: 11 } },
+      gridcolor: '#1e293b',
+      tickfont: { color: '#94A3B8', size: 10 },
+      range: rangeY || undefined,
+      autorange: rangeY ? false : true
+    },
+    yaxis3: {
+      domain: [0.0, 0.34],
+      title: { text: 'Residual (pts)', font: { color: '#F59E0B', size: 11 } },
+      gridcolor: '#1e293b',
+      zeroline: true,
+      zerolinecolor: '#334155',
+      tickfont: { color: '#94A3B8', size: 10 }
+    }
+  };
+
+  if (currentFvDisplayMode === 'beta') {
+    layout.yaxis2 = {
+      domain: [0.43, 1.0],
+      overlaying: 'y',
+      side: 'right',
+      title: { text: `${volLabel} Pt (Inv ▼)`, font: { color: '#F59E0B', size: 11 } },
+      tickfont: { color: '#F59E0B', size: 10 },
+      showgrid: false,
+      range: rangeY2,
+      autorange: false
+    };
+  }
+
+  Plotly.react(chartEl, traces, layout, { displayModeBar: false, responsive: true });
+}
 
 function renderVixFuturesCurveChart(vf, spotVix) {
   const chartEl = document.getElementById('pop-futures-curve-chart');
@@ -5609,6 +6685,9 @@ function updateUI(data) {
     updateVixFuturesUI(data.vix_futures, spotVixVal);
   }
 
+  // Update Card 2 Fair VIX sub-line & Fair VIX Popover
+  updateFairVixUI(data);
+
   // Card 7: 25Δ Risk Reversal (Put Skew)
   const rrData = (isNdx && ndx && ndx.risk_reversal) ? ndx.risk_reversal : data.risk_reversal;
   const cardRr = document.getElementById('card-rr25');
@@ -6142,7 +7221,21 @@ function updateUI(data) {
 
   const ovChartEl = document.getElementById('overvix-chart');
 
-  if (!hasLiveSessionStarted) {
+  if (currentOvervixChartMode === 'fair') {
+    const fvLive = getActiveFairVixPayload(data);
+    if (fvLive && typeof fvLive.live_spot === 'number' && typeof fvLive.live_vol === 'number' && ovChartEl && ovChartEl.data && ovChartEl.data[5]) {
+      Plotly.restyle('overvix-chart', {
+        x: [[fvLive.live_spot]],
+        y: [[fvLive.live_vol]]
+      }, [5]);
+      if (ovChartEl.data[6] && typeof fvLive.combined === 'number') {
+        Plotly.restyle('overvix-chart', {
+          x: [[fvLive.live_spot]],
+          y: [[fvLive.combined]]
+        }, [6]);
+      }
+    }
+  } else if (!hasLiveSessionStarted) {
     if (ovChartEl && ovChartEl.data && ovChartEl.data[5] && ovChartEl.data[5].x && ovChartEl.data[5].x.length > 0) {
       Plotly.restyle('overvix-chart', {
         x: [[]],
@@ -6205,7 +7298,7 @@ function updateUI(data) {
         'marker.color': ['#00E5FF'],
         'marker.size': [14],
         'marker.line': [{ color: '#FFFFFF', width: 2 }],
-        visible: [currentTrailMode !== '60d'],
+        visible: [true],
         showlegend: [true]
       }, [5]);
     }
@@ -6236,7 +7329,7 @@ function updateUI(data) {
       name: [pointLabel],
       customdata: [[[liveResStr, liveTag, liveSpotStr, liveVolStr]]],
       'marker.color': [isTargetOvervixed ? '#FF1744' : (isSpxGthLive ? '#818CF8' : '#00E5FF')],
-      visible: [currentTrailMode !== '60d'],
+      visible: [true],
       showlegend: [true]
     }, [5]);
 
@@ -6574,6 +7667,13 @@ function updateUI(data) {
           renderCorrelationChart('dual', currentCorrTf);
         }
       }
+      if (activeCorrTfs.includes(currentFvTf)) {
+        if (isMouseHoveringFvChart) {
+          pendingLiveFvRender = true;
+        } else {
+          renderFairVixMonitorChart(currentFvTf);
+        }
+      }
     } else if (!isNdx) {
       if (data.is_rth_active) {
         if (!cachedCorr['1D']) cachedCorr['1D'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], spot_raw: [], vol_raw: [] };
@@ -6598,6 +7698,13 @@ function updateUI(data) {
           pendingLiveCorrRender = true;
         } else {
           renderCorrelationChart('dual', currentCorrTf);
+        }
+      }
+      if (activeCorrTfs.includes(currentFvTf)) {
+        if (isMouseHoveringFvChart) {
+          pendingLiveFvRender = true;
+        } else {
+          renderFairVixMonitorChart(currentFvTf);
         }
       }
     }
@@ -6637,6 +7744,11 @@ async function bootstrapData() {
     if (inputNdx) inputNdx.value = currentNdxThreshold;
     const inputWin = document.getElementById('input-window');
     if (inputWin && data.model) inputWin.value = data.model.window_days;
+    if (data.fair_vix && data.fair_vix.config) {
+      currentVrpMode = data.fair_vix.config.vrp_mode || 'auto';
+      currentVrpFixedPts = (typeof data.fair_vix.config.vrp_fixed_pts === 'number') ? data.fair_vix.config.vrp_fixed_pts : 4.0;
+      currentFvBlend = data.fair_vix.config.blend_mode || 'equal';
+    }
 
     // Cache multi-timeframe datasets across all 9 horizons (1D, 5D, 10D, 1M, 3M, 6M, YTD, 1Y, MAX)
     TF_STEPS.forEach(tf => {
@@ -6691,6 +7803,7 @@ async function bootstrapData() {
     renderTermStructureChart(currentTimeframe);
     renderCorrelationChart(currentCorrMode, currentCorrTf);
     updateCorrMetricDisplay();
+    renderFairVixMonitorChart(currentFvTf);
     updateUI(data);
 
     connectWebSocket();
@@ -6997,10 +8110,14 @@ async function loadHistoricalSession(dateStr) {
     // Force timeframe to 1D to inspect that day's intraday bars
     currentTimeframe = '1D';
     currentCorrTf = '1D';
+    currentFvTf = '1D';
     if (sliderTsTimeframe) sliderTsTimeframe.value = 0;
     if (sliderCorrTimeframe) sliderCorrTimeframe.value = 0;
+    const sliderFv = document.getElementById('slider-fv-timeframe');
+    if (sliderFv) sliderFv.value = 0;
     updateTsSliderUI('1D');
     updateCorrSliderUI('1D');
+    updateFvSliderUI('1D');
     resetCorrAnchor(false);
 
     if (tsLivePill) {
@@ -7025,6 +8142,7 @@ async function loadHistoricalSession(dateStr) {
     renderTermStructureChart('1D');
     renderCorrelationChart(currentCorrMode, '1D');
     updateCorrMetricDisplay();
+    renderFairVixMonitorChart('1D');
     updateGthToggleUI(data);
     updateUI(data);
 
@@ -7098,6 +8216,7 @@ function returnToLiveMode() {
     renderTermStructureChart(currentTimeframe);
     renderCorrelationChart(currentCorrMode, currentCorrTf);
     updateCorrMetricDisplay();
+    renderFairVixMonitorChart(currentFvTf);
   }
 
   if (lastLiveUpdatePayload) {
@@ -7109,8 +8228,9 @@ function setupRiskReversalPopovers() {
   const popover25 = document.getElementById('popover-rr25');
   const popover4m = document.getElementById('popover-rr4m');
   const popoverTs = document.getElementById('popover-vix-futures');
+  const popoverFv = document.getElementById('popover-fair-vix');
 
-  const allPopovers = [popover25, popover4m, popoverTs];
+  const allPopovers = [popover25, popover4m, popoverTs, popoverFv];
 
   const attachPopoverHandler = (cardId, popoverId, closeBtnId) => {
     const card = document.getElementById(cardId);
@@ -7137,6 +8257,12 @@ function setupRiskReversalPopovers() {
           setTimeout(() => {
             renderVixFuturesCurveChart(lastVixFuturesData, lastSpotVixVal);
           }, 30);
+        } else if (popoverId === 'popover-fair-vix') {
+          setTimeout(() => {
+            const fvBoot = getActiveFairVixModelBoot();
+            const fvLive = lastFairVixData || getActiveFairVixPayload(lastLiveUpdatePayload || cachedBootstrap) || fvBoot;
+            renderFairVixMiniChart(fvLive, fvBoot);
+          }, 30);
         }
       } else {
         popover.classList.add('hidden');
@@ -7154,11 +8280,13 @@ function setupRiskReversalPopovers() {
   attachPopoverHandler('card-rr25', 'popover-rr25', 'btn-close-rr25-popover');
   attachPopoverHandler('card-rr4m', 'popover-rr4m', 'btn-close-rr4m-popover');
   attachPopoverHandler('card-term-structure', 'popover-vix-futures', 'btn-close-futures-popover');
+  attachPopoverHandler('card-vix-fair', 'popover-fair-vix', 'btn-close-fair-vix-popover');
 
   document.addEventListener('click', (e) => {
     const card25 = document.getElementById('card-rr25');
     const card4m = document.getElementById('card-rr4m');
     const cardTs = document.getElementById('card-term-structure');
+    const cardFv = document.getElementById('card-vix-fair');
     if (popover25 && !popover25.classList.contains('hidden') && (!card25 || !card25.contains(e.target))) {
       popover25.classList.add('hidden');
     }
@@ -7167,6 +8295,9 @@ function setupRiskReversalPopovers() {
     }
     if (popoverTs && !popoverTs.classList.contains('hidden') && (!cardTs || !cardTs.contains(e.target))) {
       popoverTs.classList.add('hidden');
+    }
+    if (popoverFv && !popoverFv.classList.contains('hidden') && (!cardFv || !cardFv.contains(e.target))) {
+      popoverFv.classList.add('hidden');
     }
   });
 
@@ -7305,6 +8436,8 @@ window.addEventListener('DOMContentLoaded', () => {
   setupAssetSwitcher();
   setupGthToggle();
   setupRiskReversalPopovers();
+  setupOvervixModeTabs();
+  setupFairVixMonitorControls();
   initHistoricalControls();
   bootstrapData();
 });

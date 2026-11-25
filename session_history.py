@@ -19,6 +19,11 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 from ib_async import IB, Contract, util
+from fair_vix_engine import (
+    DEFAULT_VRP_PTS,
+    compute_fair_vix_asset_model,
+    evaluate_live_fair_vix,
+)
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data', 'sessions')
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -150,11 +155,19 @@ def save_cached_session(date_str: str, payload: Dict[str, Any]):
         print(f"[Cache Error] Failed saving cache for {date_str}: {e}")
 
 
-def harmonize_session_payload(payload: Dict[str, Any], df_daily: pd.DataFrame, target_date: str) -> Dict[str, Any]:
+def harmonize_session_payload(
+    payload: Dict[str, Any],
+    df_daily: pd.DataFrame,
+    target_date: str,
+    df_daily_ohlc: Optional[pd.DataFrame] = None,
+    vrp_mode: str = "auto",
+    vrp_fixed_pts: float = DEFAULT_VRP_PTS,
+    blend_mode: str = "equal",
+) -> Dict[str, Any]:
     """
     Harmonize historical session payload with official CBOE / exchange daily settlement closes
     from df_daily (e.g. VIX official settlement 35.89 instead of 15:59 intraday bar 39.53).
-    Updates market metrics, current_point, overvix residual, term structure ratio, and confluence status.
+    Updates market metrics, current_point, overvix residual, term structure ratio, confluence, and Fair VIX.
     """
     if not payload or not isinstance(df_daily, pd.DataFrame) or df_daily.empty:
         return payload
@@ -391,6 +404,68 @@ def harmonize_session_payload(payload: Dict[str, Any], df_daily: pd.DataFrame, t
                 ndx_pkg['overvix']['status'] = "OVER-VXN" if is_overvxned else "NORMAL"
             ndx_pkg['current_point'] = {'x': final_ndx_x, 'y': final_ndx_y}
 
+    # Attach point-in-time Fair VIX evaluation (strictly prior to target_date)
+    win_days = int(payload.get('model', {}).get('window_days', 60) or 60)
+    thresh_spx = float(payload.get('model', {}).get('threshold_pts', 2.0) or 2.0)
+    fv_spx_mod = compute_fair_vix_asset_model(
+        df_daily=df_d,
+        df_ohlc=df_daily_ohlc,
+        spot_col='spx',
+        vol_col='vix',
+        window_days=win_days,
+        vrp_mode=vrp_mode,
+        vrp_fixed_pts=vrp_fixed_pts,
+        blend_mode=blend_mode,
+        as_of_date=target_date,
+        inclusive_as_of=False,
+    )
+    if fv_spx_mod:
+        spx_close_pt = float(payload.get('market', {}).get('spx', {}).get('current') or 0.0)
+        vix_close_pt = float(payload.get('market', {}).get('vix', {}).get('current') or 0.0)
+        spx_pct_pt = float(payload.get('market', {}).get('spx', {}).get('pct_change') or 0.0)
+        ov_res_pt = float(payload.get('overvix', {}).get('residual_pts') or 0.0)
+        fv_spx_eval = evaluate_live_fair_vix(
+            fv_spx_mod, spx_close_pt, vix_close_pt, spx_pct_pt, ov_res_pt, threshold_pts=thresh_spx
+        )
+        payload['fair_vix'] = {
+            **fv_spx_eval,
+            "scatter_60d": fv_spx_mod.get("scatter_60d", {}),
+            "curve": fv_spx_mod.get("curve", {}),
+            "daily_params": fv_spx_mod.get("daily_params", {}),
+            "config": {"vrp_mode": vrp_mode, "vrp_fixed_pts": vrp_fixed_pts, "blend_mode": blend_mode},
+        }
+
+    if 'ndx' in payload and isinstance(payload['ndx'], dict):
+        ndx_pkg = payload['ndx']
+        thresh_ndx = float(ndx_pkg.get('model', {}).get('threshold_pts', 2.5) or 2.5)
+        fv_ndx_mod = compute_fair_vix_asset_model(
+            df_daily=df_d,
+            df_ohlc=df_daily_ohlc,
+            spot_col='ndx',
+            vol_col='vxn',
+            window_days=win_days,
+            vrp_mode=vrp_mode,
+            vrp_fixed_pts=vrp_fixed_pts,
+            blend_mode=blend_mode,
+            as_of_date=target_date,
+            inclusive_as_of=False,
+        )
+        if fv_ndx_mod:
+            ndx_close_pt = float(ndx_pkg.get('market', {}).get('current') or 0.0)
+            vxn_close_pt = float(ndx_pkg.get('market', {}).get('vxn', {}).get('current') or 0.0)
+            ndx_pct_pt = float(ndx_pkg.get('market', {}).get('pct_change') or 0.0)
+            ndx_ov_res = float(ndx_pkg.get('overvix', {}).get('residual_pts') or 0.0)
+            fv_ndx_eval = evaluate_live_fair_vix(
+                fv_ndx_mod, ndx_close_pt, vxn_close_pt, ndx_pct_pt, ndx_ov_res, threshold_pts=thresh_ndx
+            )
+            ndx_pkg['fair_vix'] = {
+                **fv_ndx_eval,
+                "scatter_60d": fv_ndx_mod.get("scatter_60d", {}),
+                "curve": fv_ndx_mod.get("curve", {}),
+                "daily_params": fv_ndx_mod.get("daily_params", {}),
+                "config": {"vrp_mode": vrp_mode, "vrp_fixed_pts": vrp_fixed_pts, "blend_mode": blend_mode},
+            }
+
     return payload
 
 
@@ -419,7 +494,11 @@ async def fetch_and_build_historical_session(
     window_days: int = 60,
     ndx_contract: Optional[Contract] = None,
     vxn_contract: Optional[Contract] = None,
-    ndx_threshold_pts: float = 2.5
+    ndx_threshold_pts: float = 2.5,
+    df_daily_ohlc: Optional[pd.DataFrame] = None,
+    vrp_mode: str = "auto",
+    vrp_fixed_pts: float = DEFAULT_VRP_PTS,
+    blend_mode: str = "equal",
 ) -> Dict[str, Any]:
     """
     Fetch and assemble full historical session payload for target_date (YYYY-MM-DD):
@@ -434,7 +513,11 @@ async def fetch_and_build_historical_session(
     if cached is not None:
         if ndx_contract is None or ("ndx" in cached and "tech_vol" in cached):
             print(f"[Session History] Returning cached data for {target_date} (0ms)")
-            cached = harmonize_session_payload(cached, df_daily, target_date)
+            cached = harmonize_session_payload(
+                cached, df_daily, target_date,
+                df_daily_ohlc=df_daily_ohlc, vrp_mode=vrp_mode,
+                vrp_fixed_pts=vrp_fixed_pts, blend_mode=blend_mode,
+            )
             save_cached_session(target_date, cached)
             return cached
 
@@ -443,7 +526,11 @@ async def fetch_and_build_historical_session(
         cached = load_cached_session(target_date)
         if cached is not None:
             if ndx_contract is None or ("ndx" in cached and "tech_vol" in cached):
-                cached = harmonize_session_payload(cached, df_daily, target_date)
+                cached = harmonize_session_payload(
+                    cached, df_daily, target_date,
+                    df_daily_ohlc=df_daily_ohlc, vrp_mode=vrp_mode,
+                    vrp_fixed_pts=vrp_fixed_pts, blend_mode=blend_mode,
+                )
                 save_cached_session(target_date, cached)
                 return cached
 
@@ -872,7 +959,11 @@ async def fetch_and_build_historical_session(
         }
 
         # Harmonize with official daily settlement close if present in df_daily
-        payload = harmonize_session_payload(payload, df_daily, target_date)
+        payload = harmonize_session_payload(
+            payload, df_daily, target_date,
+            df_daily_ohlc=df_daily_ohlc, vrp_mode=vrp_mode,
+            vrp_fixed_pts=vrp_fixed_pts, blend_mode=blend_mode,
+        )
 
         # Save to disk cache
         save_cached_session(target_date, payload)
