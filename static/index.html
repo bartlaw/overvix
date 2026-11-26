@@ -902,11 +902,10 @@
             </div>
           </div>
 
-          <!-- Scale Mode Switcher (Beta Locked vs Auto Fit) -->
-          <div id="corr-scale-group" class="flex items-center space-x-1 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium flex-shrink-0">
-            <button id="btn-corr-scale" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition flex items-center space-x-1 whitespace-nowrap" title="Lock dual axes to Spot-Vol Slope (1% Spot = |Slope| pts Vol) so visual separation equals Overvix residual">
-              <span id="corr-scale-label">Beta Scaled</span>
-            </button>
+          <!-- Anchor / Daily Mode Toggles (neither selected = Session Baseline / None) -->
+          <div id="corr-mode-group" class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium flex-shrink-0">
+            <button id="btn-anchor-mode" class="px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-500 opacity-60 cursor-default transition whitespace-nowrap" title="Click anywhere on the chart to set an anchor point">Anchor</button>
+            <button id="btn-anchor-daily-reset" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition whitespace-nowrap" title="Toggle Daily Reset (anchor each day to prior official close; click again for Session Baseline)">Daily</button>
           </div>
 
           <!-- Volatility Axis Invert Toggle -->
@@ -916,61 +915,18 @@
               <span id="corr-invert-icon" class="text-[10px] font-bold">▼</span>
             </button>
           </div>
-
-          <!-- VIX Highs Toggle -->
-          <div id="corr-vix-highs-group" class="flex items-center space-x-1 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium flex-shrink-0">
-            <button id="btn-corr-vix-highs" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1 whitespace-nowrap" title="Toggle marks at distinct VIX new highs across sessions">
-              <span class="text-[10px] font-bold">▲</span>
-              <span id="corr-vix-highs-label">VIX Highs</span>
-            </button>
-          </div>
         </div>
       </div>
 
-      <!-- TIER 2: ANCHOR ACTION BAR & PERFORMANCE HUD -->
-      <div class="flex flex-col bg-slate-950/70 border border-slate-800/80 rounded-lg px-3 py-2 mb-2 gap-1.5 text-xs">
-        <!-- Row 1: Fixed Stationary Action Buttons (Left) & Real-Time Performance HUD (Right) -->
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <!-- Left: Fixed Stationary Action Buttons (Never Shift!) -->
-          <div class="flex flex-wrap items-center gap-1.5 flex-shrink-0">
-            <span class="text-cyan-400 font-bold text-xs flex items-center space-x-1 mr-0.5">
-              <span>⚓</span>
-              <span>Anchor:</span>
-            </span>
-
-            <div class="flex items-center space-x-1 bg-slate-900/90 p-0.5 rounded-md border border-slate-800 text-[11px]">
-              <button id="btn-anchor-open" class="px-2.5 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1 font-semibold" title="No Anchor / Session Baseline">None</button>
-              <button id="btn-anchor-daily-reset" class="px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1" title="Anchor each trading day to its prior official close (16:00 ET) across all horizons">
-                <span>📅</span>
-                <span>Daily Reset</span>
-              </button>
-              <button id="btn-anchor-custom-toggle" class="px-2.5 py-1 rounded text-slate-400 hover:text-cyan-400 transition flex items-center space-x-1" title="Specify a custom date/time to anchor">
-                <span>🕒</span>
-                <span>Custom</span>
-              </button>
-            </div>
-
-            <!-- Custom Time Input (hidden by default, toggled via Custom button) -->
-            <div id="anchor-custom-wrapper" class="hidden items-center space-x-1 bg-slate-900/90 px-1.5 py-0.5 rounded-md border border-slate-700">
-              <input type="text" id="anchor-time-picker" class="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-[11px] text-white font-mono focus:outline-none focus:border-cyan-500 w-24" placeholder="HH:MM" value="09:30">
-              <button id="btn-apply-custom-time" class="px-2 py-0.5 bg-cyan-500 hover:bg-cyan-400 text-black font-bold rounded text-[10px] transition">Set</button>
-            </div>
-          </div>
-
-          <!-- Right: Real-Time Recovery Diagnostic Strip -->
-          <div id="corr-recovery-banner" class="flex flex-wrap items-center gap-2 font-mono text-[11px] ml-auto">
+      <!-- TIER 2: COMPACT DIAGNOSTIC HUD STRIP -->
+      <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-950/70 border border-slate-800/80 rounded-lg px-3 py-1.5 mb-2 text-[11px] font-mono">
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="anchor-status-pill" class="text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold flex-shrink-0">Daily Reset (Prior Close)</span>
+          <div id="corr-recovery-banner" class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
             <!-- Injected dynamically by dashboard.js -->
           </div>
         </div>
-
-        <!-- Row 2: Anchor Status Pill & Analytical Commentary in the Empty Spot to the Right -->
-        <div class="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800/60 font-mono text-[11px]">
-          <!-- Active Anchor Status Pill -->
-          <span id="anchor-status-pill" class="text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold flex-shrink-0">Daily Reset (Prior Close)</span>
-
-          <!-- Analytical Commentary (Moved to the empty spot to the right of the anchor pill) -->
-          <span id="anchor-summary-comment" class="text-[11px] text-slate-300 font-sans font-normal"></span>
-        </div>
+        <span id="anchor-summary-comment" class="text-[11px] text-slate-300 font-sans font-normal"></span>
       </div>
 
       <!-- Intraday Correlation Plotly Chart -->
@@ -1416,8 +1372,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v10.33 - Clean Row 3 Residual Baseline) -->
-  <script src="/static/dashboard.js?v=10.33"></script>
+  <!-- DASHBOARD SCRIPT (v10.35 - Streamlined Row 2 Anchor & Daily Toggles) -->
+  <script src="/static/dashboard.js?v=10.35"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>

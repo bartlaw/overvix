@@ -1089,65 +1089,35 @@ function isSessionStarted(data, isGth) {
 
 
 // Correlation Timeframe & Display Controls
-const btnCorrScale = document.getElementById('btn-corr-scale');
-const corrScaleLabel = document.getElementById('corr-scale-label');
 const btnCorrInvert = document.getElementById('btn-corr-invert');
 const corrInvertGroup = document.getElementById('corr-invert-group');
 const corrInvertIcon = document.getElementById('corr-invert-icon');
-const btnCorrVixHighs = document.getElementById('btn-corr-vix-highs');
-const corrVixHighsLabel = document.getElementById('corr-vix-highs-label');
 const corrTfPill = document.getElementById('corr-tf-pill');
 const corrSubtitle = document.getElementById('corr-subtitle');
 const corrLiveLabel = document.getElementById('corr-live-label');
 
 function setupCorrButtons() {
-  if (btnCorrScale) btnCorrScale.addEventListener('click', () => toggleCorrScaleMode());
   if (btnCorrInvert) btnCorrInvert.addEventListener('click', () => toggleCorrVolInvert());
-  if (btnCorrVixHighs) btnCorrVixHighs.addEventListener('click', () => toggleCorrVixHighs());
   setupAnchorButtons();
 }
 
 function setupAnchorButtons() {
-  const btnOpen = document.getElementById('btn-anchor-open');
+  const btnAnchor = document.getElementById('btn-anchor-mode');
   const btnDailyReset = document.getElementById('btn-anchor-daily-reset');
-  const btnCustomToggle = document.getElementById('btn-anchor-custom-toggle');
-  const btnApplyCustom = document.getElementById('btn-apply-custom-time');
-  const customWrapper = document.getElementById('anchor-custom-wrapper');
-  const timePicker = document.getElementById('anchor-time-picker');
 
-  if (btnOpen) {
-    btnOpen.addEventListener('click', () => setCorrAnchor('open'));
+  if (btnAnchor) {
+    btnAnchor.addEventListener('click', () => {
+      if (corrAnchor.active && corrAnchor.mode !== 'daily_reset') {
+        setCorrAnchor('open');
+      }
+    });
   }
   if (btnDailyReset) {
     btnDailyReset.addEventListener('click', () => {
-      setCorrAnchor('daily_reset');
-    });
-  }
-  if (btnCustomToggle) {
-    btnCustomToggle.addEventListener('click', () => {
-      if (customWrapper) {
-        customWrapper.classList.toggle('hidden');
-        customWrapper.classList.toggle('flex');
-        if (!customWrapper.classList.contains('hidden') && timePicker) {
-          timePicker.focus();
-          timePicker.select();
-        }
-      }
-    });
-  }
-  if (btnApplyCustom) {
-    btnApplyCustom.addEventListener('click', () => {
-      if (timePicker && timePicker.value) {
-        setCorrAnchor('custom', timePicker.value.trim());
-      }
-    });
-  }
-  if (timePicker) {
-    timePicker.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        if (timePicker.value) {
-          setCorrAnchor('custom', timePicker.value.trim());
-        }
+      if (corrAnchor.active && corrAnchor.mode === 'daily_reset') {
+        setCorrAnchor('open');
+      } else {
+        setCorrAnchor('daily_reset');
       }
     });
   }
@@ -1181,62 +1151,22 @@ function setupCorrHoverTracking() {
   });
 }
 
-function toggleCorrScaleMode() {
-  isBetaScaled = !isBetaScaled;
-  if (btnCorrScale && corrScaleLabel) {
-    if (isBetaScaled) {
-      btnCorrScale.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition flex items-center space-x-1";
-      corrScaleLabel.textContent = "Beta Scaled";
-      btnCorrScale.title = "Lock dual axes to Spot-Vol Slope (1% Spot = |Slope| pts Vol). Click to switch to Auto Fit.";
-    } else {
-      btnCorrScale.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 transition flex items-center space-x-1";
-      corrScaleLabel.textContent = "Auto Fit";
-      btnCorrScale.title = "Independent min-max scale auto-fit. Click to lock dual axes to Spot-Vol Slope.";
-    }
-  }
-  renderCorrelationChart('dual', currentCorrTf);
-}
-
 function toggleCorrVolInvert() {
   isVolInverted = !isVolInverted;
   if (btnCorrInvert) {
     if (isVolInverted) {
-      btnCorrInvert.className = "px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1";
+      btnCorrInvert.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1 whitespace-nowrap";
       if (corrInvertIcon) corrInvertIcon.textContent = "▼";
     } else {
-      btnCorrInvert.className = "px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1";
+      btnCorrInvert.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1 whitespace-nowrap";
       if (corrInvertIcon) corrInvertIcon.textContent = "▲";
     }
   }
   renderCorrelationChart(currentCorrMode, currentCorrTf);
 }
 
-function toggleCorrVixHighs() {
-  const isEligibleTf = (currentCorrTf === '1D' || currentCorrTf === '5D' || currentCorrTf === '10D' || currentCorrTf === '1M');
-  if (!isEligibleTf) return;
-  isVixHighsMarked = !isVixHighsMarked;
-  updateVixHighsUI();
-  renderCorrelationChart(currentCorrMode, currentCorrTf);
-}
-
 function updateVixHighsUI(tf = currentCorrTf) {
-  const btn = document.getElementById('btn-corr-vix-highs');
-  const label = document.getElementById('corr-vix-highs-label');
-  const volLabel = (currentAssetPair === 'NDX') ? 'VXN' : 'VIX';
-  if (label) label.textContent = `${volLabel} Highs`;
-  const isEligibleTf = (tf === '1D' || tf === '5D' || tf === '10D' || tf === '1M');
-  if (btn) {
-    if (!isEligibleTf) {
-      btn.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-500 bg-slate-900/60 border border-slate-800 cursor-not-allowed opacity-50 flex items-center space-x-1 whitespace-nowrap";
-      btn.title = `${volLabel} High marks are only available on 1D, 5D, 10D, and 1M horizons`;
-    } else if (isVixHighsMarked) {
-      btn.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition flex items-center space-x-1 whitespace-nowrap";
-      btn.title = `Toggle marks at distinct ${volLabel} new highs across sessions (active on 1D, 5D, 10D, 1M)`;
-    } else {
-      btn.className = "px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition flex items-center space-x-1 whitespace-nowrap";
-      btn.title = `Toggle marks at distinct ${volLabel} new highs across sessions (active on 1D, 5D, 10D, 1M)`;
-    }
-  }
+  // VIX Highs markers stay always ON for 1D-1M; UI button removed.
 }
 
 function switchCorrMode(mode = 'dual') {
@@ -2636,13 +2566,6 @@ function setCorrAnchor(mode, targetTime = null) {
   }
   corrAnchor.label = `${modePrefix}${timeLabel} (${assetLabel}: ${corrAnchor.spotBase.toFixed(2)}, ${volLabel}: ${corrAnchor.volBase.toFixed(2)})`;
 
-  // Sync custom time input if available
-  const timePicker = document.getElementById('anchor-time-picker');
-  if (timePicker) {
-    const timeVal = is1D ? (corrAnchor.time.length > 10 ? corrAnchor.time.slice(11, 16) : corrAnchor.time) : corrAnchor.time;
-    timePicker.value = timeVal;
-  }
-
   updateAnchorUI();
   renderCorrelationChart(currentCorrMode, currentCorrTf);
 }
@@ -3569,45 +3492,48 @@ function updateAnchorUI() {
 
   const pill = document.getElementById('anchor-status-pill');
   const banner = document.getElementById('corr-recovery-banner');
-  const btnOpen = document.getElementById('btn-anchor-open');
+  const btnAnchor = document.getElementById('btn-anchor-mode');
   const btnDailyReset = document.getElementById('btn-anchor-daily-reset');
-  const btnCustom = document.getElementById('btn-anchor-custom-toggle');
   const isLongHorizon = ['3M', '6M', 'YTD', '1Y', 'MAX'].includes(currentCorrTf);
 
-  [btnOpen, btnDailyReset, btnCustom].forEach(btn => {
-    if (btn) btn.className = "px-2.5 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1 font-semibold";
-  });
+  const activeBtnClass = "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition whitespace-nowrap";
+  const idleDailyClass = "px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap";
+  const dimmedAnchorClass = "px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-500 opacity-60 cursor-default transition whitespace-nowrap";
 
+  if (btnAnchor) {
+    btnAnchor.className = dimmedAnchorClass;
+    btnAnchor.title = "Click anywhere on the chart to set an anchor point";
+  }
   if (btnDailyReset) {
+    btnDailyReset.className = idleDailyClass;
     btnDailyReset.title = isLongHorizon
-      ? "Daily Reset Scanner (≥3M): plots SPX/VIX context above and color-coded settled 1-day Overvix Residuals (causal 60D β) below"
-      : "Anchor each day to its prior official close (16:00 ET) so each day renders like a 1-day chart";
+      ? "Daily Reset Scanner (≥3M): plots SPX/VIX context above and color-coded settled 1-day Overvix Residuals (causal 60D β) below; click again for Session Baseline"
+      : "Anchor each day to its prior official close (16:00 ET); click again for Session Baseline";
   }
 
   if (!corrAnchor.active) {
     if (pill) {
       pill.textContent = "Session Baseline";
-      pill.className = "text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-medium";
+      pill.className = "text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-medium flex-shrink-0";
     }
-    if (btnOpen) btnOpen.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-slate-800 shadow-sm transition hover:text-white";
     if (banner) {
       banner.innerHTML = '';
     }
     const commentEl = document.getElementById('anchor-summary-comment');
     if (commentEl) {
-      commentEl.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from session open. Select <strong>[Daily Reset]</strong> or <strong>[Custom]</strong>, or click chart to set an anchor point.</span>`;
+      commentEl.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from session open. Select <strong>[Daily]</strong> or click chart to set an anchor.</span>`;
     }
     return;
   }
 
   if (pill) {
     pill.textContent = corrAnchor.label;
-    pill.className = "text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold";
+    pill.className = "text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold flex-shrink-0";
   }
 
   if (corrAnchor.mode === 'daily_reset') {
     if (btnDailyReset) {
-      btnDailyReset.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
+      btnDailyReset.className = activeBtnClass;
     }
     const commentEl = document.getElementById('anchor-summary-comment');
     if (commentEl) {
@@ -3615,8 +3541,15 @@ function updateAnchorUI() {
         ? `<span class="text-cyan-400/90 text-[11px] font-sans">Daily Reset Scanner: Upper shows ${assetLabel} &amp; ${volLabel} regime; Lower shows settled 1-day Overvix Residuals using causal rolling 60D β.</span>`
         : `<span class="text-cyan-400/90 text-[11px] font-sans">Each day anchored to its prior official close (16:00 ET). Traces display daily trajectories with overnight reset.</span>`;
     }
-  } else if ((corrAnchor.mode === 'custom' || corrAnchor.mode === 'date_close') && btnCustom) {
-    btnCustom.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
+  } else {
+    if (btnAnchor) {
+      btnAnchor.className = activeBtnClass;
+      btnAnchor.title = "Active chart anchor — click to turn off (returns to Session Baseline)";
+    }
+    const commentEl = document.getElementById('anchor-summary-comment');
+    if (commentEl) {
+      commentEl.innerHTML = `<span class="text-cyan-400/90 text-[11px] font-sans">Anchored trajectory — click <strong>[Anchor]</strong> to clear back to Session Baseline, or click chart to move.</span>`;
+    }
   }
 }
 
@@ -3961,7 +3894,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     } else {
       banner.innerHTML = '';
       if (commentEl) {
-        commentEl.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from session open. Select <strong>[Daily Reset]</strong> or <strong>[Custom]</strong>, or click chart to set an anchor point and evaluate post-anchor Overvix residual.</span>`;
+        commentEl.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from session open. Select <strong>[Daily]</strong> or click chart to set an anchor point and evaluate post-anchor Overvix residual.</span>`;
       }
     }
   }
@@ -3974,9 +3907,6 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   // Option A: Daily Event Scanner for >=3M horizons in Daily Reset mode
   if (anchoredSeries.isLongDailyReset && times.length > 0) {
     const { beta: activeBeta } = getActiveBetaAndIntercept(isNdx);
-    if (corrScaleLabel && isBetaScaled) {
-      corrScaleLabel.textContent = `Beta Scale (1:${activeBeta.toFixed(2)})`;
-    }
     const thresh = isNdx ? currentNdxThreshold : currentThreshold;
     const resids = anchoredSeries.dailyResids || [];
     const betas = anchoredSeries.dailyBetas || [];
@@ -4492,11 +4422,6 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
 
   // 60-Day Macro Baseline Spot-Vol Slope & Intercept from Overvix model
   const { beta, rawSlope, rawIntercept } = getActiveBetaAndIntercept(isNdx);
-
-  // Sync button label with active beta
-  if (corrScaleLabel && isBetaScaled) {
-    corrScaleLabel.textContent = `Beta Scale (1:${beta.toFixed(2)})`;
-  }
 
   const dualRanges = computeZeroAlignedDualRanges(assetPct, volPt, isVolInverted, isBetaScaled, beta);
 
