@@ -380,6 +380,13 @@ def compute_fair_vix_asset_model(
     dates_all = list(df_fit.index)
     spots_all = df_fit["spot"].values.astype(float)
     vols_all = df_fit["vol"].values.astype(float)
+    dx_all = np.full(len(spots_all), np.nan, dtype=float)
+    dy_all = np.full(len(vols_all), np.nan, dtype=float)
+    if len(spots_all) > 1:
+        valid_prev = spots_all[:-1] > 0
+        safe_prev = np.where(valid_prev, spots_all[:-1], 1.0)
+        dx_all[1:] = np.where(valid_prev, (spots_all[1:] - spots_all[:-1]) / safe_prev * 100.0, np.nan)
+        dy_all[1:] = vols_all[1:] - vols_all[:-1]
     roll_peak_all = pd.Series(spots_all).rolling(window_days, min_periods=1).max().values.astype(float)
     dd_all = np.maximum(0.0, (roll_peak_all - spots_all) / np.where(roll_peak_all > 0, roll_peak_all, 1.0) * 100.0)
     quad_fit_win = max(window_days, QUAD_FIT_WINDOW_DAYS)
@@ -467,7 +474,24 @@ def compute_fair_vix_asset_model(
                 vrp_i = DEFAULT_VRP_PTS
                 fair_m2_i = e_rv_i + vrp_i
 
-        daily_params[d_str] = {
+        beta_slope = None
+        beta_intercept = None
+        b_start = max(1, i - window_days)
+        xb = dx_all[b_start:i]
+        yb = dy_all[b_start:i]
+        b_mask = np.isfinite(xb) & np.isfinite(yb)
+        if int(np.sum(b_mask)) >= 15:
+            xb_v = xb[b_mask]
+            yb_v = yb[b_mask]
+            mean_x = float(np.mean(xb_v))
+            mean_y = float(np.mean(yb_v))
+            var_x = float(np.sum((xb_v - mean_x) ** 2))
+            if var_x > 1e-6:
+                raw_sl = float(np.sum((xb_v - mean_x) * (yb_v - mean_y)) / var_x)
+                beta_slope = max(-5.0, min(-0.3, raw_sl))
+                beta_intercept = float(mean_y - beta_slope * mean_x)
+
+        entry = {
             "peak_60d": round(q_i["peak"], 2),
             "c0": round(q_i["c0"], 4),
             "c1": round(q_i["c1"], 4),
@@ -482,6 +506,10 @@ def compute_fair_vix_asset_model(
             "w_m2": round(wm2_i, 4),
             "w_m4": round(wm4_i, 4),
         }
+        if beta_slope is not None and beta_intercept is not None:
+            entry["beta_slope"] = round(beta_slope, 4)
+            entry["beta_intercept"] = round(beta_intercept, 4)
+        daily_params[d_str] = entry
 
     # Include next-session (today live) params under key "__live__" as well as today_et if known
     return {

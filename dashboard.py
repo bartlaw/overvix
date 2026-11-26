@@ -323,6 +323,10 @@ class DashboardState:
         self.tech_ratio_low: float = 0.0
         self.tech_ratio_high: float = 0.0
         self.hist_version: int = 0
+        self.is_hydrating_deep_history: bool = False
+        self.last_deep_hydration_ts: float = 0.0
+        self.is_refreshing_history: bool = False
+        self.cached_spx_2d_series: pd.Series = pd.Series(dtype=float, name='spx')
 
         # Fair VIX Models (Method 2: RV+VRP & Method 4: 60D Quadratic Drawdown)
         self.df_daily_ohlc = pd.DataFrame()
@@ -1701,10 +1705,11 @@ def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.D
         df_daily = harmonize_daily_close_with_rth(df_daily, active_sess_date)
         state.df_daily = df_daily
 
-        # MAX
+        # MAX (display trailing 2Y (~504 trading days) while keeping full 3Y state.df_daily for 252D & 60D warmup)
+        df_max_pool = state.df_daily.iloc[-504:] if len(state.df_daily) >= 504 else state.df_daily
         (state.df_ts_max, state.df_spx_vix_max, state.df_ndx_vxn_max,
          state.df_tech_vol_max, state.corr_max, state.corr_max_ndx) = build_from_daily_df(
-            state.df_daily, roll_win=60, min_p=20
+            df_max_pool, roll_win=60, min_p=20
         )
 
         # 1Y
@@ -1740,13 +1745,16 @@ def apply_multi_timeframe_pool(dfs_pool: Dict[str, pd.DataFrame], df_daily: pd.D
 
 async def hydrate_deep_history_background(active_sess_date: Optional[str], today_et: str):
     """
-    Background worker that fetches 1M (5-min), 6M (30-min) and 2Y (1-day) bars from IBKR in paced batches
+    Background worker that fetches 1M (5-min), 6M (30-min) and 3Y (1-day) bars from IBKR in paced batches
     (<= 5 simultaneous requests with 1.5s pause to prevent IBKR error 162 pacing violations),
     persists them to disk cache (history_cache.pkl), updates state multi-timeframe horizons,
     and bumps state.hist_version so connected browser clients receive updated datasets without UI blocking.
     """
+    if state.is_hydrating_deep_history:
+        return
+    state.is_hydrating_deep_history = True
     try:
-        print("[Background Cache] Hydrating deep history (1M 5-min, 6M 30-min & 2Y daily) from IBKR in paced batches...")
+        print("[Background Cache] Hydrating deep history (1M 5-min, 6M 30-min & 3Y daily) from IBKR in paced batches...")
         # Batch 1: 1M 5-minute bars (max 5 simultaneous requests)
         (b1m_spx, b1m_vix, b1m_vix3m, b1m_ndx, b1m_vxn) = await asyncio.gather(
             state.ib.reqHistoricalDataAsync(state.spx_contract, '', '1 M', '5 mins', 'TRADES', True, 1),
@@ -1767,13 +1775,13 @@ async def hydrate_deep_history_background(active_sess_date: Optional[str], today
         )
         await asyncio.sleep(1.5)
 
-        # Batch 3: 2Y daily bars (max 5 simultaneous requests)
+        # Batch 3: 3Y daily bars (gives 1Y warmup buffer prior to 2Y MAX display)
         (spx_bars_2y, vix_bars_2y, vix3m_bars_2y, ndx_bars_2y, vxn_bars_2y) = await asyncio.gather(
-            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
-            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '2 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.spx_contract, '', '3 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '3 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vix3m_contract, '', '3 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.ndx_contract, '', '3 Y', '1 day', 'TRADES', True, 1),
+            state.ib.reqHistoricalDataAsync(state.vxn_contract, '', '3 Y', '1 day', 'TRADES', True, 1),
         )
 
         existing_cache = load_history_cache() or {}
@@ -1826,6 +1834,9 @@ async def hydrate_deep_history_background(active_sess_date: Optional[str], today
         print(f"[Background Cache] Deep history (with 1M 5m) successfully hydrated and saved to disk. (Version {state.hist_version})")
     except Exception as e:
         print(f"[Background Cache Error] Failed hydrating deep history: {e}")
+    finally:
+        state.is_hydrating_deep_history = False
+        state.last_deep_hydration_ts = time.time()
 
 
 async def _empty_bars():
@@ -1841,6 +1852,9 @@ async def refresh_historical_data():
       - 10D / 10D_GTH: 5-minute 2-week bars
       - 1M, 3M, 6M, YTD, 1Y, MAX: Loaded instantly from disk cache (<0.01s) or hydrated in background
     """
+    if state.is_refreshing_history:
+        return
+    state.is_refreshing_history = True
     print("[IBKR] Fetching historical baseline & multi-timeframe datasets (Fast Startup + GTH)...")
     try:
         has_es = (state.es_contract is not None)
@@ -1891,6 +1905,8 @@ async def refresh_historical_data():
         win_info = classify_market_window(now_et)
 
         df_s2 = safe_to_series(b2_spx, 'spx')
+        if not df_s2.empty:
+            state.cached_spx_2d_series = df_s2.copy()
         df_n1_raw = util.df(b1_ndx) if b1_ndx else None
         active_sess_date = None
         if not df_s2.empty:
@@ -1957,7 +1973,10 @@ async def refresh_historical_data():
                 if not spx_1m_df.empty and 'day' in spx_1m_df.columns:
                     has_today_in_1m = any(str(d) == today_et for d in spx_1m_df['day'].tail(50))
 
-            if cache_data.get('cache_date') < today_et or not is_cache_healthy or not has_today_in_1m:
+            rth_started_today = is_weekday and (now_et.time() >= dtime(9, 35))
+            missing_today_1m = (rth_started_today and not has_today_in_1m)
+            has_3y_daily = len(cached_df_daily) >= 650
+            if cache_data.get('cache_date') < today_et or not is_cache_healthy or missing_today_1m or not has_3y_daily:
                 need_background_hydration = True
         else:
             # Cold first launch with no disk cache: fetch 4M (1-day) bars in parallel (~0.25s) for immediate Spot-Vol baselines
@@ -1983,7 +2002,7 @@ async def refresh_historical_data():
             compute_spotvol_baselines(df_daily_init, active_sess_date, today_et)
             need_background_hydration = True
 
-        if need_background_hydration:
+        if need_background_hydration and not state.is_hydrating_deep_history and (time.time() - state.last_deep_hydration_ts >= 600.0):
             asyncio.create_task(hydrate_deep_history_background(active_sess_date, today_et))
 
         # 2B. Compute ES-SPX Official Settlement Basis & Stitch 1D_GTH / 5D_GTH / 10D_GTH
@@ -2272,6 +2291,62 @@ async def refresh_historical_data():
         import traceback
         traceback.print_exc()
         print(f"[IBKR Error] Historical data refresh failed: {ex}")
+    finally:
+        state.is_refreshing_history = False
+
+
+async def refresh_gth_intraday():
+    """
+    Lightweight GTH-only refresh (only 2 IBKR queries: VIX + ES 2D 1-min bars)
+    for pre-market hours (03:15-09:15 ET) so we stay well within IBKR pacing limits
+    without re-polling closed RTH indices every 60 seconds.
+    """
+    if state.is_refreshing_history or not state.is_connected or not state.ib or not state.ib.isConnected():
+        return
+    if not state.daily_basis_map or state.cached_spx_2d_series.empty:
+        await refresh_historical_data()
+        return
+
+    state.is_refreshing_history = True
+    try:
+        has_es = (state.es_contract is not None)
+        b2_vix_gth, b2_es = await asyncio.gather(
+            state.ib.reqHistoricalDataAsync(state.vix_contract, '', '2 D', '1 min', 'TRADES', False, 1),
+            state.ib.reqHistoricalDataAsync(state.es_contract, '', '2 D', '1 min', 'TRADES', False, 1) if has_es else _empty_bars(),
+        )
+        s_vix_2d_gth = safe_to_series(b2_vix_gth, 'vix')
+        s_es_2d = safe_to_series(b2_es, 'es')
+
+        prev_len = len(state.df_spx_vix_1d_gth) if isinstance(state.df_spx_vix_1d_gth, pd.DataFrame) else 0
+        prev_last = str(state.df_spx_vix_1d_gth.index[-1]) if prev_len > 0 else ""
+
+        gth_1d_pack = build_gth_stitched_df(
+            state.cached_spx_2d_series,
+            s_vix_2d_gth,
+            s_es_2d,
+            state.daily_basis_map,
+            sorted(state.daily_basis_map.keys()),
+            state.daily_spx_close_map,
+            state.daily_vix_close_map,
+            is_1d=True,
+            roll_win=30,
+            min_p=10,
+        )
+        new_df = gth_1d_pack["df"]
+        if not new_df.empty:
+            state.df_spx_vix_1d_gth = new_df
+            state.gth_session_date = gth_1d_pack["session_date"]
+            state.gth_ref_spx = gth_1d_pack["ref_spx"]
+            state.gth_ref_vix = gth_1d_pack["ref_vix"]
+            state.current_rolling_corr_gth = gth_1d_pack["rolling_corr"]
+            state.last_gth_bar_refresh_ts = time.time()
+            new_last = str(new_df.index[-1])
+            if len(new_df) != prev_len or new_last != prev_last:
+                state.hist_version += 1
+    except Exception as ex:
+        print(f"[GTH Sync Warning] Lightweight GTH refresh failed: {ex}")
+    finally:
+        state.is_refreshing_history = False
 
 
 # 4M OTM Risk Reversal Evaluation (Merridew Skew: 10% OTM Call vs 15% OTM Put ~120 DTE)
@@ -3845,6 +3920,7 @@ async def broadcast_loop():
     """
     last_reconnect_attempt = 0
     last_hist_refresh = time.time()
+    last_gth_refresh = time.time()
 
     while True:
         try:
@@ -3864,32 +3940,40 @@ async def broadcast_loop():
                     except Exception as e:
                         print(f"[IBKR Reconnect] Still waiting for TWS/Gateway: {e}")
 
-            # Check for GTH open (03:15 ET), RTH open (09:30 ET), 60s periodic bar sync during active hours, or post-close settlement sync
-            if state.is_connected and state.ib and state.ib.isConnected():
-                should_refresh = False
+            # Paced historical syncs within IBKR 60 req / 10 min limit:
+            # - Pre-market / GTH (03:15-09:15 & 16:00-16:15 ET): lightweight 2-req ES+VIX sync every 60s
+            # - RTH (09:30-16:00 ET) & post-close settlement (16:00-17:15 ET): full 16-req sync every 180s
+            if state.is_connected and state.ib and state.ib.isConnected() and not state.is_refreshing_history:
                 win_loop = classify_market_window(now_et)
-                # 03:15 ET GTH open transition for today's CBOE VIX pre-market session
-                if is_weekday and (dtime(3, 15) <= now_et.time() < dtime(9, 15)) and (state.gth_session_date != today_et):
-                    should_refresh = True
-                # 09:30 ET RTH open transition when active session is still prior day
-                elif is_weekday and (now_et.time() >= dtime(9, 30)) and (state.active_session_date != today_et):
-                    should_refresh = True
-                # Periodic refresh every 60s during RTH (09:30-16:00) OR CBOE GTH active windows (03:15-09:15 & 16:00-16:15)
-                elif is_weekday and (win_loop["is_rth_window"] or win_loop["is_vix_gth_window"]) and (now - last_hist_refresh >= 60.0):
-                    should_refresh = True
-                # Post-close settlement window (16:00 to 17:15 ET):
-                # Poll periodically every 60s throughout 16:00-17:15 ET so official CBOE & SPX settlement closes are captured as soon as they arrive!
-                elif is_weekday and (dtime(16, 0) <= now_et.time() < dtime(17, 15)) and (now - last_hist_refresh >= 60.0):
-                    should_refresh = True
-                # Post-close final sync: immediately after 16:00 ET, and once after 16:15 curb to capture daily settlement basis
-                elif is_weekday and (now_et.time() >= dtime(16, 0)) and (last_hist_refresh < datetime.combine(now_et.date(), dtime(16, 0)).replace(tzinfo=ET_TZ).timestamp()):
-                    should_refresh = True
-                elif is_weekday and (now_et.time() >= dtime(16, 16)) and (state.last_eod_basis_sync_date != today_et):
-                    should_refresh = True
-                    state.last_eod_basis_sync_date = today_et
+                should_full_refresh = False
+                should_gth_refresh = False
 
-                if should_refresh:
+                if is_weekday and win_loop["is_vix_gth_window"] and not win_loop["is_rth_window"]:
+                    if (dtime(3, 15) <= now_et.time() < dtime(9, 15)) and (state.gth_session_date != today_et) and (now - last_gth_refresh >= 60.0):
+                        should_gth_refresh = True
+                    elif now - last_gth_refresh >= 60.0:
+                        should_gth_refresh = True
+
+                if is_weekday:
+                    # 09:30 ET RTH open transition when active session is still prior day (with holiday cooldown)
+                    if (now_et.time() >= dtime(9, 30)) and (state.active_session_date != today_et) and (now - last_hist_refresh >= 180.0):
+                        should_full_refresh = True
+                    # Periodic full refresh every 180s during RTH (09:30-16:00)
+                    elif win_loop["is_rth_window"] and (now - last_hist_refresh >= 180.0):
+                        should_full_refresh = True
+                    # Post-close settlement window (16:00 to 17:15 ET) every 180s
+                    elif (dtime(16, 0) <= now_et.time() < dtime(17, 15)) and (now - last_hist_refresh >= 180.0):
+                        should_full_refresh = True
+                    # Post-close final sync immediately after 16:00 ET and once after 16:16 ET (with 60s cooldown)
+                    elif (now_et.time() >= dtime(16, 0)) and (last_hist_refresh < datetime.combine(now_et.date(), dtime(16, 0)).replace(tzinfo=ET_TZ).timestamp()) and (now - last_hist_refresh >= 60.0):
+                        should_full_refresh = True
+                    elif (now_et.time() >= dtime(16, 16)) and (state.last_eod_basis_sync_date != today_et) and (now - last_hist_refresh >= 60.0):
+                        should_full_refresh = True
+                        state.last_eod_basis_sync_date = today_et
+
+                if should_full_refresh:
                     last_hist_refresh = now
+                    last_gth_refresh = now
                     try:
                         print(f"[Intraday Sync] Refreshing historical data at {now_et.strftime('%H:%M:%S')} ET...")
                         await refresh_historical_data()
@@ -3899,6 +3983,12 @@ async def broadcast_loop():
                             cancel_live_bar_streams()
                     except Exception as e:
                         print(f"[Intraday Sync Error] {e}")
+                elif should_gth_refresh:
+                    last_gth_refresh = now
+                    try:
+                        await refresh_gth_intraday()
+                    except Exception as e:
+                        print(f"[GTH Sync Error] {e}")
 
             if not state.active_websockets:
                 continue

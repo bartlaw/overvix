@@ -1029,9 +1029,10 @@
             <button id="btn-fv-mode-beta" class="px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap" title="Invert and beta-scale Live VIX &amp; Fair VIX alongside SPX % change">Beta vs SPX</button>
           </div>
 
-          <!-- Toggle Individual HAR-RV & EWM Quad Lines -->
-          <div class="flex items-center space-x-1 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium flex-shrink-0">
+          <!-- Toggle Individual HAR-RV & EWM Quad Lines + Overvix Residual (Flow) -->
+          <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium flex-shrink-0">
             <button id="btn-fv-components" class="px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap" title="Show/hide individual HAR-RV and 252D EWM Quad curves">HAR-RV / Quad</button>
+            <button id="btn-fv-overvix" class="px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap" title="Show/hide Overvix Residual (Flow) line in lower pane">Overvix</button>
           </div>
         </div>
       </div>
@@ -1415,8 +1416,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v10.29 - 252D EWM Quadratic Drawdown Model) -->
-  <script src="/static/dashboard.js?v=10.29"></script>
+  <!-- DASHBOARD SCRIPT (v10.33 - Clean Row 3 Residual Baseline) -->
+  <script src="/static/dashboard.js?v=10.33"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>

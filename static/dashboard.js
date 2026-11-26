@@ -261,6 +261,7 @@ let currentOvervixChartMode = 'linear'; // 'linear' | 'fair'
 let currentFvTf = '1D';
 let currentFvDisplayMode = 'levels'; // 'levels' | 'beta'
 let showFvComponents = false;
+let showFvOvervixFlow = false;
 let isMouseHoveringFvChart = false;
 let pendingLiveFvRender = false;
 let currentVrpMode = 'auto';
@@ -2886,7 +2887,7 @@ function harmonizeIntradayWithSettlements(c, isNdx, targetTf = currentCorrTf) {
     if (isLiveRth) return false;
     if (isGthActive && isLiveGth) return false;
     if (isPreMarketToday && curSessDate && d === curSessDate) return false;
-    return hhmm >= '15:55';
+    return hhmm >= '15:30' || Boolean(officialCloses[d]);
   }
 
   const latestDay = days[days.length - 1];
@@ -2997,6 +2998,11 @@ function harmonizeIntradayWithSettlements(c, isNdx, targetTf = currentCorrTf) {
 
 function buildRollingDailyBetaMap(isNdx, windowDays = 60) {
   const betaMap = {};
+  const fvBoot = isNdx
+    ? (cachedBootstrap && cachedBootstrap.ndx && cachedBootstrap.ndx.fair_vix)
+    : (cachedBootstrap && cachedBootstrap.fair_vix);
+  const fvParams = (fvBoot && fvBoot.daily_params) ? fvBoot.daily_params : {};
+
   const corrSrc = isNdx
     ? (cachedBootstrap && cachedBootstrap.ndx && cachedBootstrap.ndx.intraday_correlation)
     : (cachedBootstrap && cachedBootstrap.intraday_correlation);
@@ -3024,6 +3030,12 @@ function buildRollingDailyBetaMap(isNdx, windowDays = 60) {
   }
 
   for (let k = 0; k < dates.length; k++) {
+    const dStr = dates[k];
+    const fp = fvParams[dStr];
+    if (fp && typeof fp.beta_slope === 'number' && typeof fp.beta_intercept === 'number') {
+      betaMap[dStr] = { slope: fp.beta_slope, intercept: fp.beta_intercept, beta: Math.abs(fp.beta_slope) };
+      continue;
+    }
     const startIdx = Math.max(1, k - windowDays);
     let n = 0, sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
     for (let j = startIdx; j < k; j++) {
@@ -5789,6 +5801,7 @@ function setupFairVixMonitorControls() {
   const btnLevels = document.getElementById('btn-fv-mode-levels');
   const btnBeta = document.getElementById('btn-fv-mode-beta');
   const btnComp = document.getElementById('btn-fv-components');
+  const btnOvervix = document.getElementById('btn-fv-overvix');
   const chartEl = document.getElementById('fair-vix-chart');
 
   if (sliderFv) {
@@ -5837,6 +5850,15 @@ function setupFairVixMonitorControls() {
       showFvComponents = !showFvComponents;
       btnComp.className = showFvComponents
         ? "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-purple-500 text-white shadow-sm transition whitespace-nowrap"
+        : idleMode;
+      renderFairVixMonitorChart(currentFvTf);
+    });
+  }
+  if (btnOvervix) {
+    btnOvervix.addEventListener('click', () => {
+      showFvOvervixFlow = !showFvOvervixFlow;
+      btnOvervix.className = showFvOvervixFlow
+        ? "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition whitespace-nowrap"
         : idleMode;
       renderFairVixMonitorChart(currentFvTf);
     });
@@ -5920,7 +5942,9 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
   const slope = rawSlope;
   const intercept = rawIntercept;
   const absBeta = Math.max(0.5, beta);
-  const isIntradayTf = ['1D', '5D', '10D', '1M'].includes(targetTf);
+  const hasIntradayBars = times.some(t => typeof t === 'string' && t.length > 10);
+  const isIntradayTf = hasIntradayBars || ['1D', '5D', '10D', '1M', '3M', '6M'].includes(targetTf);
+  const useCausalDailyBeta = ['3M', '6M', 'YTD', '1Y', 'MAX'].includes(targetTf);
   const isGth = (!isNdx && isGthChartActive(targetTf));
 
   const liveVolArr = [];
@@ -5940,6 +5964,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
   let curDay = '';
   let refSpot = (spotRaw[0] || 1);
   let refVol = (volRaw[0] || 20);
+  let lastDailySpotPct = 0;
   const firstRefVol = refVol;
 
   for (let i = 0; i < n; i++) {
@@ -6002,7 +6027,10 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       vPt = vVal - volRaw[i - 1];
     }
 
-    const ovRes = vPt - (intercept + slope * sPct);
+    lastDailySpotPct = sPct;
+    const ovSlope = (useCausalDailyBeta && p && typeof p.beta_slope === 'number') ? p.beta_slope : slope;
+    const ovIntercept = (useCausalDailyBeta && p && typeof p.beta_intercept === 'number') ? p.beta_intercept : intercept;
+    const ovRes = vPt - (ovIntercept + ovSlope * sPct);
 
     liveVolArr.push(vVal);
     compFairArr.push(cFair !== null ? Number(cFair.toFixed(2)) : null);
@@ -6068,7 +6096,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
   const stickyPill = document.getElementById('fv-sticky-pill');
   const sumEl = document.getElementById('fv-summary-comment');
   const dualPos = (typeof latestCRes === 'number' && typeof latestOvRes === 'number' && latestCRes > 0 && latestOvRes > 0);
-  const lastSpotPct = spotPctDailyArr[n - 1] || 0;
+  const lastSpotPct = lastDailySpotPct;
   if (stickyPill) {
     if (dualPos) stickyPill.classList.remove('hidden');
     else stickyPill.classList.add('hidden');
@@ -6221,23 +6249,23 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
   fvSegs.forEach((seg, sIdx) => {
     const tSeg = times.slice(seg.start, seg.end);
     const cSeg = customUpper.slice(seg.start, seg.end);
-    traces.push(
-      {
-        x: tSeg,
-        y: compResArr.slice(seg.start, seg.end),
-        customdata: cSeg,
-        name: `Composite Resid (${volLabel} − Fair)`,
-        legendgroup: 'fv_compres',
-        showlegend: (sIdx === 0),
-        mode: 'lines',
-        line: { color: '#F59E0B', width: 2.0 },
-        fill: 'tozeroy',
-        fillcolor: 'rgba(245, 158, 11, 0.14)',
-        xaxis: 'x',
-        yaxis: 'y3',
-        hovertemplate: `Comp Residual: <b>%{customdata[4]} pts</b><extra></extra>`
-      },
-      {
+    traces.push({
+      x: tSeg,
+      y: compResArr.slice(seg.start, seg.end),
+      customdata: cSeg,
+      name: `Composite Resid (${volLabel} − Fair)`,
+      legendgroup: 'fv_compres',
+      showlegend: (sIdx === 0),
+      mode: 'lines',
+      line: { color: '#F59E0B', width: 2.0 },
+      fill: 'tozeroy',
+      fillcolor: 'rgba(245, 158, 11, 0.14)',
+      xaxis: 'x',
+      yaxis: 'y3',
+      hovertemplate: `Comp Residual: <b>%{customdata[4]} pts</b><extra></extra>`
+    });
+    if (showFvOvervixFlow) {
+      traces.push({
         x: tSeg,
         y: ovResArr.slice(seg.start, seg.end),
         customdata: cSeg,
@@ -6249,42 +6277,20 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
         xaxis: 'x',
         yaxis: 'y3',
         hovertemplate: `${ovLabel} Residual: <b>%{customdata[5]} pts</b><extra></extra>`
-      }
-    );
+      });
+    }
   });
 
-  traces.push(
-    {
-      x: [times[0], times[n - 1]],
-      y: [0, 0],
-      mode: 'lines',
-      line: { color: '#475569', width: 1 },
-      hoverinfo: 'skip',
-      showlegend: false,
-      xaxis: 'x',
-      yaxis: 'y3'
-    },
-    {
-      x: [times[0], times[n - 1]],
-      y: [thresh, thresh],
-      mode: 'lines',
-      line: { color: 'rgba(255, 83, 112, 0.5)', width: 1, dash: 'dot' },
-      hoverinfo: 'skip',
-      showlegend: false,
-      xaxis: 'x',
-      yaxis: 'y3'
-    },
-    {
-      x: [times[0], times[n - 1]],
-      y: [-thresh, -thresh],
-      mode: 'lines',
-      line: { color: 'rgba(16, 185, 129, 0.45)', width: 1, dash: 'dot' },
-      hoverinfo: 'skip',
-      showlegend: false,
-      xaxis: 'x',
-      yaxis: 'y3'
-    }
-  );
+  traces.push({
+    x: [times[0], times[n - 1]],
+    y: [0, 0],
+    mode: 'lines',
+    line: { color: '#475569', width: 1 },
+    hoverinfo: 'skip',
+    showlegend: false,
+    xaxis: 'x',
+    yaxis: 'y3'
+  });
 
   if (stickyX.length > 0) {
     traces.push({

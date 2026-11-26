@@ -564,8 +564,8 @@ async def fetch_and_build_historical_session(
         prior_tech_spread = prior_vxn - prior_vix if has_ndx_history else 0.0
         prior_tech_ratio = prior_vxn / prior_vix if (has_ndx_history and prior_vix > 0) else 1.0
 
-        # 60-day baseline prior to target_date (SPX / VIX)
-        baseline_slice = prior_daily.iloc[-window_days:].copy()
+        # 60-day baseline prior to target_date (SPX / VIX) - fetch window_days + 1 closes so diff has window_days returns
+        baseline_slice = prior_daily.iloc[-(window_days + 1):].copy()
         baseline_slice['spx_pct'] = baseline_slice['spx'].pct_change() * 100.0
         baseline_slice['vix_pt'] = baseline_slice['vix'].diff()
         baseline_clean = baseline_slice.dropna(subset=['spx_pct', 'vix_pt'])
