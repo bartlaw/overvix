@@ -19,6 +19,7 @@ Usage:
 
 import sys
 import os
+import json
 import time
 import math
 import argparse
@@ -88,8 +89,11 @@ DEFAULT_SPX_THRESHOLD_PTS = 2.0
 DEFAULT_NDX_THRESHOLD_PTS = 2.5
 DEFAULT_THRESHOLD_PTS = DEFAULT_SPX_THRESHOLD_PTS
 DEFAULT_UPDATE_INTERVAL = 1.0
+DEFAULT_VRP_MODE = "auto"
+DEFAULT_FAIR_VIX_BLEND = "r2_weighted"
 COMMON_IBKR_PORTS = [7496, 7497, 4001, 4002]
 CACHE_PATH = os.path.join(os.path.dirname(__file__), 'data', 'history_cache.pkl')
+USER_CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'data', 'user_config.json')
 ET_TZ = pytz.timezone('US/Eastern')
 
 
@@ -324,12 +328,71 @@ class DashboardState:
         self.df_daily_ohlc = pd.DataFrame()
         self.fair_vix_spx: Dict[str, Any] = {}
         self.fair_vix_ndx: Dict[str, Any] = {}
-        self.vrp_mode: str = "auto"
+        self.vrp_mode: str = DEFAULT_VRP_MODE
         self.vrp_fixed_pts: float = DEFAULT_VRP_PTS
-        self.fair_vix_blend: str = "equal"
+        self.fair_vix_blend: str = DEFAULT_FAIR_VIX_BLEND
 
         # Active WebSockets
         self.active_websockets: List[WebSocket] = []
+
+        self.load_user_config()
+
+    def load_user_config(self) -> None:
+        """Load persisted user settings from disk, falling back cleanly to defaults."""
+        if not os.path.exists(USER_CONFIG_PATH):
+            return
+        try:
+            with open(USER_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            if not isinstance(cfg, dict):
+                return
+            if isinstance(cfg.get('spx_threshold_pts'), (int, float)):
+                val = float(cfg['spx_threshold_pts'])
+                if 0.5 <= val <= 10.0:
+                    self.spx_threshold_pts = val
+                    self.threshold_pts = val
+            if isinstance(cfg.get('ndx_threshold_pts'), (int, float)):
+                val = float(cfg['ndx_threshold_pts'])
+                if 0.5 <= val <= 10.0:
+                    self.ndx_threshold_pts = val
+            if isinstance(cfg.get('window_days'), (int, float)):
+                val = int(cfg['window_days'])
+                if 20 <= val <= 252:
+                    self.window_days = val
+            if isinstance(cfg.get('interval'), (int, float)):
+                val = float(cfg['interval'])
+                if 0.2 <= val <= 30.0:
+                    self.interval = val
+            if cfg.get('vrp_mode') in ('auto', 'fixed'):
+                self.vrp_mode = cfg['vrp_mode']
+            if isinstance(cfg.get('vrp_fixed_pts'), (int, float)):
+                val = float(cfg['vrp_fixed_pts'])
+                if 0.0 <= val <= 15.0:
+                    self.vrp_fixed_pts = val
+            if cfg.get('fair_vix_blend') in ('equal', 'r2_weighted'):
+                self.fair_vix_blend = cfg['fair_vix_blend']
+        except Exception as e:
+            print(f"[Config Warning] Failed loading {USER_CONFIG_PATH}: {e}")
+
+    def save_user_config(self) -> None:
+        """Atomically persist user settings to disk so Settings modal changes survive restarts."""
+        payload = {
+            'spx_threshold_pts': self.spx_threshold_pts,
+            'ndx_threshold_pts': self.ndx_threshold_pts,
+            'window_days': self.window_days,
+            'interval': self.interval,
+            'vrp_mode': self.vrp_mode,
+            'vrp_fixed_pts': self.vrp_fixed_pts,
+            'fair_vix_blend': self.fair_vix_blend,
+        }
+        try:
+            os.makedirs(os.path.dirname(USER_CONFIG_PATH), exist_ok=True)
+            tmp_path = USER_CONFIG_PATH + '.tmp'
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, indent=2)
+            os.replace(tmp_path, USER_CONFIG_PATH)
+        except Exception as e:
+            print(f"[Config Warning] Failed saving {USER_CONFIG_PATH}: {e}")
 
 state = DashboardState()
 
@@ -4429,6 +4492,8 @@ async def post_config(req: ConfigRequest):
 
     if req.interval is not None:
         state.interval = max(0.2, float(req.interval))
+
+    state.save_user_config()
 
     return {
         "status": "ok", 

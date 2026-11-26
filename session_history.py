@@ -162,7 +162,7 @@ def harmonize_session_payload(
     df_daily_ohlc: Optional[pd.DataFrame] = None,
     vrp_mode: str = "auto",
     vrp_fixed_pts: float = DEFAULT_VRP_PTS,
-    blend_mode: str = "equal",
+    blend_mode: str = "r2_weighted",
 ) -> Dict[str, Any]:
     """
     Harmonize historical session payload with official CBOE / exchange daily settlement closes
@@ -498,7 +498,7 @@ async def fetch_and_build_historical_session(
     df_daily_ohlc: Optional[pd.DataFrame] = None,
     vrp_mode: str = "auto",
     vrp_fixed_pts: float = DEFAULT_VRP_PTS,
-    blend_mode: str = "equal",
+    blend_mode: str = "r2_weighted",
 ) -> Dict[str, Any]:
     """
     Fetch and assemble full historical session payload for target_date (YYYY-MM-DD):

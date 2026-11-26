@@ -265,18 +265,20 @@ let isMouseHoveringFvChart = false;
 let pendingLiveFvRender = false;
 let currentVrpMode = 'auto';
 let currentVrpFixedPts = 4.0;
-let currentFvBlend = 'equal';
+let currentFvBlend = 'r2_weighted';
 let lastFairVixData = null;
 
 // Recovery Anchor State for Dynamic Correlation & Divergence Monitor
 let corrAnchor = {
-  active: false,
-  mode: 'open',       // 'open' (default), 'spot_low', 'vol_high', 'custom'
-  time: null,         // timestamp string or null
+  active: true,
+  mode: 'daily_reset', // 'daily_reset' (default), 'open', 'custom'
+  time: null,          // timestamp string or null
   index: -1,
+  isOfficialPriorClose: true,
+  targetDate: null,
   spotBase: null,
   volBase: null,
-  label: 'Session Baseline'
+  label: 'Daily Reset (Prior Close)'
 };
 
 // Dedicated Voice Alert Subsystem via Web Speech API
@@ -737,7 +739,9 @@ function setupGthToggle() {
     }
     if (corrAnchor.active) {
       if (currentCorrTf === '1D') {
-        resetCorrAnchor(false);
+        if (corrAnchor.mode !== 'daily_reset') {
+          resetCorrAnchor(false);
+        }
       } else {
         syncCorrAnchorForTimeframe(currentCorrTf);
       }
@@ -841,6 +845,47 @@ const tsLivePill = document.getElementById('ts-live-pill');
 const sliderCorrTimeframe = document.getElementById('slider-corr-timeframe');
 const corrSliderBadge = document.getElementById('corr-slider-badge');
 const corrTickLabels = document.getElementById('corr-tick-labels');
+const chkSyncCorr = document.getElementById('chk-sync-corr');
+
+function isHorizonSynced(key) {
+  if (key === 'ts') return Boolean(chkSyncTimeframe && chkSyncTimeframe.checked);
+  if (key === 'corr') return Boolean(chkSyncCorr && chkSyncCorr.checked);
+  if (key === 'fv') {
+    const chkFv = document.getElementById('chk-sync-fv');
+    return Boolean(chkFv && chkFv.checked);
+  }
+  return false;
+}
+
+function previewHorizonSync(sourceKey, idx, tf) {
+  if (!isHorizonSynced(sourceKey)) return;
+  if (sourceKey !== 'ts' && isHorizonSynced('ts')) {
+    if (sliderTsTimeframe) sliderTsTimeframe.value = idx;
+    updateTsSliderUI(tf);
+  }
+  if (sourceKey !== 'corr' && isHorizonSynced('corr')) {
+    if (sliderCorrTimeframe) sliderCorrTimeframe.value = idx;
+    updateCorrSliderUI(tf);
+  }
+  if (sourceKey !== 'fv' && isHorizonSynced('fv')) {
+    const sliderFv = document.getElementById('slider-fv-timeframe');
+    if (sliderFv) sliderFv.value = idx;
+    updateFvSliderUI(tf);
+  }
+}
+
+function propagateHorizonSync(sourceKey, tf) {
+  if (!isHorizonSynced(sourceKey)) return;
+  if (sourceKey !== 'ts' && isHorizonSynced('ts') && currentTimeframe !== tf) {
+    switchTimeframe(tf, false, false);
+  }
+  if (sourceKey !== 'corr' && isHorizonSynced('corr') && currentCorrTf !== tf) {
+    switchCorrTf(tf, false, false);
+  }
+  if (sourceKey !== 'fv' && isHorizonSynced('fv') && currentFvTf !== tf) {
+    switchFairVixTf(tf, false);
+  }
+}
 
 function setupTimeframeSliders() {
   if (sliderTsTimeframe) {
@@ -848,10 +893,7 @@ function setupTimeframeSliders() {
       const idx = parseInt(e.target.value, 10);
       const tf = TF_STEPS[idx] || '1D';
       updateTsSliderUI(tf);
-      if (chkSyncTimeframe && chkSyncTimeframe.checked) {
-        if (sliderCorrTimeframe) sliderCorrTimeframe.value = idx;
-        updateCorrSliderUI(tf);
-      }
+      previewHorizonSync('ts', idx, tf);
     });
 
     sliderTsTimeframe.addEventListener('change', (e) => {
@@ -877,10 +919,7 @@ function setupTimeframeSliders() {
       const idx = parseInt(e.target.value, 10);
       const tf = TF_STEPS[idx] || '1D';
       updateCorrSliderUI(tf);
-      if (chkSyncTimeframe && chkSyncTimeframe.checked) {
-        if (sliderTsTimeframe) sliderTsTimeframe.value = idx;
-        updateTsSliderUI(tf);
-      }
+      previewHorizonSync('corr', idx, tf);
     });
 
     sliderCorrTimeframe.addEventListener('change', (e) => {
@@ -961,32 +1000,18 @@ function updateCorrSliderUI(tf) {
   }
 }
 
-function switchTimeframe(tf, triggeredBySlider = false) {
+function switchTimeframe(tf, triggeredBySlider = false, propagate = true) {
   currentTimeframe = tf;
   const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
   if (sliderTsTimeframe && sliderTsTimeframe.value != conf.step) {
     sliderTsTimeframe.value = conf.step;
   }
   updateTsSliderUI(tf);
-
-  if (chkSyncTimeframe && chkSyncTimeframe.checked) {
-    currentCorrTf = tf;
-    if (sliderCorrTimeframe && sliderCorrTimeframe.value != conf.step) {
-      sliderCorrTimeframe.value = conf.step;
-    }
-    updateCorrSliderUI(tf);
-    if (tf === '1D') {
-      if (corrAnchor.mode !== 'daily_reset') {
-        resetCorrAnchor(false);
-      }
-    } else {
-      syncCorrAnchorForTimeframe(tf);
-    }
-    renderCorrelationChart(currentCorrMode, tf);
-    updateCorrMetricDisplay();
-  }
-
   renderTermStructureChart(tf);
+
+  if (propagate) {
+    propagateHorizonSync('ts', tf);
+  }
 }
 
 // Spot-Vol Click Action Selectors (Card 1)
@@ -1083,10 +1108,7 @@ function setupCorrButtons() {
 
 function setupAnchorButtons() {
   const btnOpen = document.getElementById('btn-anchor-open');
-  const btnPriorClose = document.getElementById('btn-anchor-prior-close');
   const btnDailyReset = document.getElementById('btn-anchor-daily-reset');
-  const btnSpotLow = document.getElementById('btn-anchor-spot-low');
-  const btnVolHigh = document.getElementById('btn-anchor-vol-high');
   const btnCustomToggle = document.getElementById('btn-anchor-custom-toggle');
   const btnApplyCustom = document.getElementById('btn-apply-custom-time');
   const customWrapper = document.getElementById('anchor-custom-wrapper');
@@ -1095,22 +1117,10 @@ function setupAnchorButtons() {
   if (btnOpen) {
     btnOpen.addEventListener('click', () => setCorrAnchor('open'));
   }
-  if (btnPriorClose) {
-    btnPriorClose.addEventListener('click', () => setCorrAnchor('prior_close'));
-  }
   if (btnDailyReset) {
     btnDailyReset.addEventListener('click', () => {
-      const isEligible = ['1D', '5D', '10D', '1M'].includes(currentCorrTf);
-      if (isEligible) {
-        setCorrAnchor('daily_reset');
-      }
+      setCorrAnchor('daily_reset');
     });
-  }
-  if (btnSpotLow) {
-    btnSpotLow.addEventListener('click', () => setCorrAnchor('spot_low'));
-  }
-  if (btnVolHigh) {
-    btnVolHigh.addEventListener('click', () => setCorrAnchor('vol_high'));
   }
   if (btnCustomToggle) {
     btnCustomToggle.addEventListener('click', () => {
@@ -1142,6 +1152,7 @@ function setupAnchorButtons() {
   }
 
   setupCorrHoverTracking();
+  updateAnchorUI();
 }
 
 let isMouseHoveringCorrChart = false;
@@ -1232,22 +1243,13 @@ function switchCorrMode(mode = 'dual') {
   renderCorrelationChart('dual', currentCorrTf);
 }
 
-function switchCorrTf(tf, triggeredBySlider = false) {
+function switchCorrTf(tf, triggeredBySlider = false, propagate = true) {
   currentCorrTf = tf;
   const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
   if (sliderCorrTimeframe && sliderCorrTimeframe.value != conf.step) {
     sliderCorrTimeframe.value = conf.step;
   }
   updateCorrSliderUI(tf);
-
-  if (chkSyncTimeframe && chkSyncTimeframe.checked) {
-    currentTimeframe = tf;
-    if (sliderTsTimeframe && sliderTsTimeframe.value != conf.step) {
-      sliderTsTimeframe.value = conf.step;
-    }
-    updateTsSliderUI(tf);
-    renderTermStructureChart(tf);
-  }
 
   if (tf === '1D') {
     if (corrAnchor.mode !== 'daily_reset') {
@@ -1259,9 +1261,9 @@ function switchCorrTf(tf, triggeredBySlider = false) {
   updateCorrMetricDisplay();
   updateVixHighsUI(tf);
   renderCorrelationChart(currentCorrMode, tf);
-  const chkSyncFv = document.getElementById('chk-sync-fv');
-  if (chkSyncFv && chkSyncFv.checked && currentFvTf !== tf) {
-    switchFairVixTf(tf, false);
+
+  if (propagate) {
+    propagateHorizonSync('corr', tf);
   }
 }
 
@@ -1293,7 +1295,7 @@ function updateCorrMetricDisplay() {
   const targetTf = currentCorrTf;
   const c = getCorrDataset(isNdx, targetTf);
   if (!c) return;
-  const anchoredSeries = computeAnchoredSeries(c, isNdx);
+  const anchoredSeries = computeAnchoredSeries(c, isNdx, targetTf);
   const times = anchoredSeries.times || [];
   const thresh = isNdx ? currentNdxThreshold : currentThreshold;
   const el = document.getElementById('corr-live-val');
@@ -1304,12 +1306,17 @@ function updateCorrMetricDisplay() {
 
   if (times && times.length > 0) {
     const lastIdx = times.length - 1;
-    const sPct = anchoredSeries.spotPct[lastIdx] || 0;
-    const vPt = anchoredSeries.volPt[lastIdx] || 0;
-    const { beta, rawIntercept } = getActiveBetaAndIntercept(isNdx);
-    const isSessionBaseline = (corrAnchor.mode === 'prior_close' || corrAnchor.mode === 'daily_reset' || (!anchoredSeries.isAnchored && targetTf === '1D'));
-    const alpha = isSessionBaseline ? rawIntercept : 0;
-    const resid = vPt - alpha + beta * sPct;
+    let resid;
+    if (anchoredSeries.isLongDailyReset && Array.isArray(anchoredSeries.dailyResids) && typeof anchoredSeries.dailyResids[lastIdx] === 'number') {
+      resid = anchoredSeries.dailyResids[lastIdx];
+    } else {
+      const sPct = anchoredSeries.spotPct[lastIdx] || 0;
+      const vPt = anchoredSeries.volPt[lastIdx] || 0;
+      const { beta, rawIntercept } = getActiveBetaAndIntercept(isNdx);
+      const isSessionBaseline = (corrAnchor.mode === 'prior_close' || corrAnchor.mode === 'daily_reset' || (!anchoredSeries.isAnchored && targetTf === '1D'));
+      const alpha = isSessionBaseline ? rawIntercept : 0;
+      resid = vPt - alpha + beta * sPct;
+    }
     const residSign = resid >= 0 ? '+' : '';
     const residStr = `${residSign}${resid.toFixed(2)} pts`;
 
@@ -1851,16 +1858,8 @@ function ensureCorrRangeCoversTarget(targetStr, isNdx) {
     sliderCorrTimeframe.value = conf.step;
   }
   updateCorrSliderUI(bestTf);
-
-  if (chkSyncTimeframe && chkSyncTimeframe.checked) {
-    currentTimeframe = bestTf;
-    if (sliderTsTimeframe && sliderTsTimeframe.value != conf.step) {
-      sliderTsTimeframe.value = conf.step;
-    }
-    updateTsSliderUI(bestTf);
-    renderTermStructureChart(bestTf);
-  }
   updateCorrMetricDisplay();
+  propagateHorizonSync('corr', bestTf);
 
   if (corrSliderBadge) {
     corrSliderBadge.classList.add('ring-2', 'ring-cyan-400', 'animate-pulse');
@@ -2508,8 +2507,6 @@ function setCorrAnchor(mode, targetTime = null) {
   }
 
   if (mode === 'daily_reset') {
-    const isEligible = ['1D', '5D', '10D', '1M'].includes(currentCorrTf);
-    if (!isEligible) return;
     corrAnchor.active = true;
     corrAnchor.mode = 'daily_reset';
     corrAnchor.label = 'Daily Reset (Prior Close)';
@@ -2520,6 +2517,7 @@ function setCorrAnchor(mode, targetTime = null) {
     corrAnchor.spotBase = null;
     corrAnchor.volBase = null;
     updateAnchorUI();
+    updateCorrMetricDisplay();
     renderCorrelationChart(currentCorrMode, currentCorrTf);
     return;
   }
@@ -2710,10 +2708,6 @@ function computeAnchoredCorrelation(spotRaw, volRaw, anchorIdx) {
 function syncCorrAnchorForTimeframe(tf) {
   if (!corrAnchor.active) return;
   if (corrAnchor.mode === 'daily_reset') {
-    const isEligible = ['1D', '5D', '10D', '1M'].includes(tf);
-    if (!isEligible) {
-      resetCorrAnchor(false);
-    }
     updateAnchorUI();
     return;
   }
@@ -2807,19 +2801,277 @@ function syncCorrAnchorForTimeframe(tf) {
   updateAnchorUI();
 }
 
-function computeAnchoredSeries(c, isNdx) {
-  const times = c.times || [];
+function harmonizeIntradayWithSettlements(c, isNdx, targetTf = currentCorrTf) {
+  const rawTimes = (c && Array.isArray(c.times)) ? c.times : [];
   const raw = getRawSpotVolSeries(c, isNdx);
-  const spotRaw = raw.spot;
-  const volRaw = raw.vol;
+  const rawSpot = Array.isArray(raw.spot) ? raw.spot : [];
+  const rawVol = Array.isArray(raw.vol) ? raw.vol : [];
+  const rawSpotPct = (c && (isNdx ? (c.ndx_pct || c.spx_pct) : c.spx_pct)) || [];
+  const rawVolPt = (c && (isNdx ? (c.vxn_pt || c.vix_pt) : c.vix_pt)) || [];
+
+  const isGthActive = (!isNdx && (Boolean(c && Array.isArray(c.is_gth) && c.is_gth.length > 0) || isGthChartActive(targetTf)));
+  const officialCloses = {};
+  let dailyDatesList = [];
+  const corrSrc = isNdx
+    ? (cachedBootstrap && cachedBootstrap.ndx && cachedBootstrap.ndx.intraday_correlation)
+    : (cachedBootstrap && cachedBootstrap.intraday_correlation);
+  if (corrSrc) {
+    const dailyDs = corrSrc['MAX'] || corrSrc['1Y'] || corrSrc['YTD'];
+    if (dailyDs && dailyDs.dates && dailyDs.dates.length > 0) {
+      dailyDatesList = dailyDs.dates;
+      const dSpot = isNdx ? (dailyDs.ndx_raw || dailyDs.spot_raw) : (dailyDs.spx_raw || dailyDs.spot_raw);
+      const dVol = isNdx ? (dailyDs.vxn_raw || dailyDs.vol_raw) : (dailyDs.vix_raw || dailyDs.vol_raw);
+      for (let j = 0; j < dailyDatesList.length; j++) {
+        if (dSpot && dSpot[j] !== undefined && dVol && dVol[j] !== undefined) {
+          officialCloses[dailyDatesList[j]] = { spot: dSpot[j], vol: dVol[j] };
+        }
+      }
+    }
+  }
+
+  if (rawTimes.length === 0) {
+    return {
+      times: rawTimes,
+      spotRaw: rawSpot,
+      volRaw: rawVol,
+      baseSpotPct: rawSpotPct,
+      baseVolPt: rawVolPt,
+      settlementMap: {},
+      settledDays: {},
+      officialCloses: officialCloses,
+      dailyDatesList: dailyDatesList,
+      isGthActive: isGthActive
+    };
+  }
+
+  const rawDayMap = {};
+  for (let i = 0; i < rawTimes.length; i++) {
+    const dStr = (rawTimes[i] || '').slice(0, 10);
+    if (!rawDayMap[dStr]) rawDayMap[dStr] = [];
+    rawDayMap[dStr].push(i);
+  }
+  const days = Object.keys(rawDayMap);
+
+  const isHistoricalView = Boolean(cachedBootstrap && cachedBootstrap.is_historical);
+  const liveState = (!isHistoricalView && currentViewMode === 'live' && lastLiveUpdatePayload) ? lastLiveUpdatePayload : cachedBootstrap;
+  const curSessDate = liveState ? (liveState.session_date || '') : '';
+  const isLiveRth = Boolean(!isHistoricalView && liveState && liveState.is_rth_active === true);
+  const isLiveGth = Boolean(!isHistoricalView && liveState && (liveState.session_status === 'GTH_ACTIVE' || (liveState.gth && liveState.gth.is_gth_active === true)));
+  const isPreMarketToday = Boolean(!isHistoricalView && liveState && liveState.session_status === 'PRE_MARKET');
+
+  function isDaySessionCompleted(d, dIndices) {
+    if (!d || !dIndices || dIndices.length === 0) return false;
+    if (isHistoricalView) return true;
+    const lastBar = rawTimes[dIndices[dIndices.length - 1]];
+    const isDailyBar = Boolean(lastBar && lastBar.length === 10);
+    const hhmm = lastBar ? lastBar.slice(11, 16) : '';
+    const dayK = days.indexOf(d);
+
+    if (isDailyBar) {
+      if ((curSessDate && d < curSessDate) || (dayK >= 0 && dayK < days.length - 1)) {
+        return true;
+      }
+      if (isLiveRth || (isGthActive && isLiveGth) || (isPreMarketToday && curSessDate && d === curSessDate)) {
+        return false;
+      }
+      return true;
+    }
+
+    if (curSessDate && d < curSessDate) {
+      return hhmm >= '15:30' || Boolean(officialCloses[d]);
+    }
+    if (dayK >= 0 && dayK < days.length - 1) {
+      return hhmm >= '15:30' || Boolean(officialCloses[d]);
+    }
+    if (isLiveRth) return false;
+    if (isGthActive && isLiveGth) return false;
+    if (isPreMarketToday && curSessDate && d === curSessDate) return false;
+    return hhmm >= '15:55';
+  }
+
+  const latestDay = days[days.length - 1];
+  const latestDayIndices = rawDayMap[latestDay];
+  const latestDayCompleted = isDaySessionCompleted(latestDay, latestDayIndices);
+
+  if (latestDayCompleted) {
+    if (!officialCloses[latestDay] && cachedBootstrap && cachedBootstrap.reference_closes) {
+      const refSpot = isNdx
+        ? (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.ndx : (cachedBootstrap.ndx && cachedBootstrap.ndx.market ? cachedBootstrap.ndx.market.current : null))
+        : (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.spx : (cachedBootstrap.market && cachedBootstrap.market.spx ? cachedBootstrap.market.spx.current : null));
+      const refVol = isNdx
+        ? (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.vxn : (cachedBootstrap.ndx && cachedBootstrap.ndx.market && cachedBootstrap.ndx.market.vxn ? cachedBootstrap.ndx.market.vxn.current : null))
+        : (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.vix : (cachedBootstrap.market && cachedBootstrap.market.vix ? cachedBootstrap.market.vix.current : null));
+
+      if (refSpot && refVol) {
+        officialCloses[latestDay] = { spot: refSpot, vol: refVol };
+      }
+    }
+  } else {
+    delete officialCloses[latestDay];
+  }
+
+  // Recover exact unanchored horizon baseline (sBase, vBase) so harmonized 16:00 bars stay mathematically consistent
+  let sBase = null;
+  let vBase = null;
+  for (let i = 0; i < rawTimes.length; i++) {
+    if (sBase === null && typeof rawSpot[i] === 'number' && rawSpot[i] > 0) {
+      const p0 = (typeof rawSpotPct[i] === 'number' && !isNaN(rawSpotPct[i])) ? rawSpotPct[i] : 0;
+      const denom = 1.0 + p0 / 100.0;
+      sBase = denom > 0.01 ? (rawSpot[i] / denom) : rawSpot[i];
+    }
+    if (vBase === null && typeof rawVol[i] === 'number' && !isNaN(rawVol[i])) {
+      const vp0 = (typeof rawVolPt[i] === 'number' && !isNaN(rawVolPt[i])) ? rawVolPt[i] : 0;
+      vBase = rawVol[i] - vp0;
+    }
+    if (sBase !== null && vBase !== null) break;
+  }
+
+  const outTimes = [];
+  const outSpotRaw = [];
+  const outVolRaw = [];
+  const outSpotPct = [];
+  const outVolPt = [];
+  const settlementMap = {};
+  const settledDays = {};
+  const isDailyHorizon = Boolean(rawTimes[0] && rawTimes[0].length === 10);
+
+  for (let k = 0; k < days.length; k++) {
+    const d = days[k];
+    const indices = rawDayMap[d];
+    const isCompleted = isDaySessionCompleted(d, indices);
+    settledDays[d] = Boolean(isCompleted);
+
+    for (let j = 0; j < indices.length; j++) {
+      const idx = indices[j];
+      outTimes.push(rawTimes[idx]);
+      outSpotRaw.push(rawSpot[idx]);
+      outVolRaw.push(rawVol[idx]);
+      outSpotPct.push(typeof rawSpotPct[idx] === 'number' ? rawSpotPct[idx] : 0);
+      outVolPt.push(typeof rawVolPt[idx] === 'number' ? rawVolPt[idx] : 0);
+    }
+
+    const offSettle = officialCloses[d];
+    if (!isDailyHorizon && !isGthActive && isCompleted && offSettle && offSettle.spot && offSettle.vol) {
+      const s = offSettle.spot;
+      const v = offSettle.vol;
+      const sPct = (sBase && sBase > 0) ? Math.round(((s - sBase) / sBase * 100.0) * 10000) / 10000 : 0;
+      const vPt = (vBase !== null) ? Math.round((v - vBase) * 10000) / 10000 : 0;
+      const lastRawTime = rawTimes[indices[indices.length - 1]] || '';
+      const has1600 = (lastRawTime.slice(11, 16) >= '16:00');
+
+      if (!has1600) {
+        const settleTime = `${d} 16:00`;
+        outTimes.push(settleTime);
+        outSpotRaw.push(s);
+        outVolRaw.push(v);
+        outSpotPct.push(sPct);
+        outVolPt.push(vPt);
+        settlementMap[settleTime] = true;
+      } else {
+        const lastOutIdx = outTimes.length - 1;
+        outSpotRaw[lastOutIdx] = s;
+        outVolRaw[lastOutIdx] = v;
+        outSpotPct[lastOutIdx] = sPct;
+        outVolPt[lastOutIdx] = vPt;
+        settlementMap[outTimes[lastOutIdx]] = true;
+      }
+    } else if (isDailyHorizon && isCompleted && offSettle && offSettle.spot && offSettle.vol) {
+      const lastOutIdx = outTimes.length - 1;
+      settlementMap[outTimes[lastOutIdx]] = true;
+    }
+  }
+
+  return {
+    times: outTimes,
+    spotRaw: outSpotRaw,
+    volRaw: outVolRaw,
+    baseSpotPct: outSpotPct,
+    baseVolPt: outVolPt,
+    settlementMap: settlementMap,
+    settledDays: settledDays,
+    officialCloses: officialCloses,
+    dailyDatesList: dailyDatesList,
+    isGthActive: isGthActive
+  };
+}
+
+function buildRollingDailyBetaMap(isNdx, windowDays = 60) {
+  const betaMap = {};
+  const corrSrc = isNdx
+    ? (cachedBootstrap && cachedBootstrap.ndx && cachedBootstrap.ndx.intraday_correlation)
+    : (cachedBootstrap && cachedBootstrap.intraday_correlation);
+  if (!corrSrc) return betaMap;
+  const ds = corrSrc['MAX'] || corrSrc['1Y'] || corrSrc['YTD'];
+  if (!ds || !Array.isArray(ds.dates) || ds.dates.length < 2) return betaMap;
+
+  const dates = ds.dates;
+  const sArr = isNdx ? (ds.ndx_raw || ds.spot_raw || []) : (ds.spx_raw || ds.spot_raw || []);
+  const vArr = isNdx ? (ds.vxn_raw || ds.vol_raw || []) : (ds.vix_raw || ds.vol_raw || []);
+  const fallback = getActiveBetaAndIntercept(isNdx);
+
+  const dx = [null];
+  const dy = [null];
+  for (let i = 1; i < dates.length; i++) {
+    const s0 = sArr[i - 1], s1 = sArr[i];
+    const v0 = vArr[i - 1], v1 = vArr[i];
+    if (typeof s0 === 'number' && typeof s1 === 'number' && s0 > 0 && typeof v0 === 'number' && typeof v1 === 'number') {
+      dx.push((s1 - s0) / s0 * 100.0);
+      dy.push(v1 - v0);
+    } else {
+      dx.push(null);
+      dy.push(null);
+    }
+  }
+
+  for (let k = 0; k < dates.length; k++) {
+    const startIdx = Math.max(1, k - windowDays);
+    let n = 0, sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
+    for (let j = startIdx; j < k; j++) {
+      const xj = dx[j], yj = dy[j];
+      if (xj !== null && yj !== null && !isNaN(xj) && !isNaN(yj)) {
+        n++;
+        sumX += xj;
+        sumY += yj;
+        sumXX += xj * xj;
+        sumXY += xj * yj;
+      }
+    }
+    if (n >= 15) {
+      const meanX = sumX / n;
+      const meanY = sumY / n;
+      const varX = sumXX - n * meanX * meanX;
+      if (varX > 1e-6) {
+        const rawSlope = (sumXY - n * meanX * meanY) / varX;
+        const slope = Math.max(-5.0, Math.min(-0.3, rawSlope));
+        const intercept = meanY - slope * meanX;
+        betaMap[dates[k]] = { slope, intercept, beta: Math.abs(slope) };
+        continue;
+      }
+    }
+    betaMap[dates[k]] = {
+      slope: fallback.rawSlope,
+      intercept: fallback.rawIntercept,
+      beta: fallback.beta
+    };
+  }
+  return betaMap;
+}
+
+function computeAnchoredSeries(c, isNdx, targetTf = currentCorrTf) {
+  const h = harmonizeIntradayWithSettlements(c, isNdx, targetTf);
+  const times = h.times;
+  const spotRaw = h.spotRaw;
+  const volRaw = h.volRaw;
 
   if (!corrAnchor.active || times.length === 0) {
     return {
       times: times,
-      spotPct: isNdx ? (c.ndx_pct || c.spx_pct || []) : (c.spx_pct || []),
-      volPt: isNdx ? (c.vxn_pt || c.vix_pt || []) : (c.vix_pt || []),
+      spotPct: h.baseSpotPct,
+      volPt: h.baseVolPt,
       spotRaw: spotRaw,
       volRaw: volRaw,
+      settlementMap: h.settlementMap,
+      settledDays: h.settledDays,
       isAnchored: false,
       anchorIdx: -1,
       anchorTime: null,
@@ -2831,7 +3083,12 @@ function computeAnchoredSeries(c, isNdx) {
 
   // Daily Reset Anchor Mode: each day anchored to its prior official close
   if (corrAnchor.mode === 'daily_reset') {
-    const isGthActive = (!isNdx && (Boolean(c && Array.isArray(c.is_gth) && c.is_gth.length > 0) || isGthChartActive(currentCorrTf)));
+    const isGthActive = h.isGthActive;
+    const officialCloses = h.officialCloses;
+    const dailyDatesList = h.dailyDatesList;
+    const settlementMap = h.settlementMap;
+    const settledDays = h.settledDays;
+
     const rawDayMap = {};
     for (let i = 0; i < times.length; i++) {
       const dStr = times[i].slice(0, 10);
@@ -2839,98 +3096,7 @@ function computeAnchoredSeries(c, isNdx) {
       rawDayMap[dStr].push(i);
     }
     const days = Object.keys(rawDayMap);
-
-    // Look up official daily closes for each date from dailyDs (1Y or YTD)
-    const officialCloses = {};
-    let dailyDatesList = [];
-    if (cachedBootstrap && cachedBootstrap.intraday_correlation) {
-      const dailyDs = cachedBootstrap.intraday_correlation['1Y'] || cachedBootstrap.intraday_correlation['YTD'];
-      if (dailyDs && dailyDs.dates && dailyDs.dates.length > 0) {
-        dailyDatesList = dailyDs.dates;
-        const dSpot = isNdx ? (dailyDs.ndx_raw || dailyDs.spot_raw) : (dailyDs.spx_raw || dailyDs.spot_raw);
-        const dVol = isNdx ? (dailyDs.vxn_raw || dailyDs.vol_raw) : (dailyDs.vix_raw || dailyDs.vol_raw);
-        for (let j = 0; j < dailyDatesList.length; j++) {
-          if (dSpot && dSpot[j] !== undefined && dVol && dVol[j] !== undefined) {
-            officialCloses[dailyDatesList[j]] = {
-              spot: dSpot[j],
-              vol: dVol[j]
-            };
-          }
-        }
-      }
-    }
-
-    // Determine which days in the series are completed and have an official close
-    const isHistoricalView = Boolean(cachedBootstrap && cachedBootstrap.is_historical);
-    const liveState = (!isHistoricalView && currentViewMode === 'live' && lastLiveUpdatePayload) ? lastLiveUpdatePayload : cachedBootstrap;
-    const curSessDate = liveState ? (liveState.session_date || '') : '';
-    const isLiveRth = Boolean(!isHistoricalView && liveState && liveState.is_rth_active === true);
-    const isLiveGth = Boolean(!isHistoricalView && liveState && (liveState.session_status === 'GTH_ACTIVE' || (liveState.gth && liveState.gth.is_gth_active === true)));
-    const isPreMarketToday = Boolean(!isHistoricalView && liveState && liveState.session_status === 'PRE_MARKET');
-
-    function isDaySessionCompleted(d, dIndices) {
-      if (!d || !dIndices || dIndices.length === 0) return false;
-      if (isHistoricalView) return true;
-      const lastBar = times[dIndices[dIndices.length - 1]];
-      const isDailyBar = Boolean(lastBar && lastBar.length === 10);
-      const hhmm = lastBar ? lastBar.slice(11, 16) : '';
-      const dayK = days.indexOf(d);
-
-      if (isDailyBar) {
-        if ((curSessDate && d < curSessDate) || (dayK >= 0 && dayK < days.length - 1)) {
-          return true;
-        }
-        if (isLiveRth || (isGthActive && isLiveGth) || (isPreMarketToday && curSessDate && d === curSessDate)) {
-          return false;
-        }
-        return true;
-      }
-
-      // 1. Prior trading days strictly before active session date:
-      if (curSessDate && d < curSessDate) {
-        return hhmm >= '15:30' || Boolean(officialCloses[d]);
-      }
-
-      // 2. Any day that is not the last day in the displayed horizon:
-      if (dayK >= 0 && dayK < days.length - 1) {
-        return hhmm >= '15:30' || Boolean(officialCloses[d]);
-      }
-
-      // 3. The latest displayed day:
-      // If RTH cash is currently active, it is NOT completed:
-      if (isLiveRth) return false;
-      // If GTH chart and GTH is active, NOT completed:
-      if (isGthActive && isLiveGth) return false;
-      // If pre-market on today's session date, NOT completed:
-      if (isPreMarketToday && curSessDate && d === curSessDate) return false;
-
-      // Closed if reached near-close (>= 15:55 ET):
-      return hhmm >= '15:55';
-    }
-
     const latestDay = days[days.length - 1];
-    const latestDayIndices = rawDayMap[latestDay];
-    const latestDayCompleted = isDaySessionCompleted(latestDay, latestDayIndices);
-
-    if (latestDayCompleted) {
-      if (!officialCloses[latestDay] && cachedBootstrap && cachedBootstrap.reference_closes) {
-        const refSpot = isNdx
-          ? (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.ndx : (cachedBootstrap.ndx && cachedBootstrap.ndx.market ? cachedBootstrap.ndx.market.current : null))
-          : (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.spx : (cachedBootstrap.market && cachedBootstrap.market.spx ? cachedBootstrap.market.spx.current : null));
-        const refVol = isNdx
-          ? (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.vxn : (cachedBootstrap.ndx && cachedBootstrap.ndx.market && cachedBootstrap.ndx.market.vxn ? cachedBootstrap.ndx.market.vxn.current : null))
-          : (cachedBootstrap.reference_closes ? cachedBootstrap.reference_closes.vix : (cachedBootstrap.market && cachedBootstrap.market.vix ? cachedBootstrap.market.vix.current : null));
-
-        if (refSpot && refVol) {
-          officialCloses[latestDay] = {
-            spot: refSpot,
-            vol: refVol
-          };
-        }
-      }
-    } else {
-      delete officialCloses[latestDay];
-    }
 
     // Determine prior close anchor for each day
     const dayPriorCloses = {};
@@ -2984,7 +3150,76 @@ function computeAnchoredSeries(c, isNdx) {
       }
     }
 
-    // Build the per-day time series, seamlessly appending the 16:00 official settlement point
+    const isLongDailyReset = ['3M', '6M', 'YTD', '1Y', 'MAX'].includes(targetTf);
+    if (isLongDailyReset) {
+      const rollingBetaMap = buildRollingDailyBetaMap(isNdx, 60);
+      const fallbackModel = getActiveBetaAndIntercept(isNdx);
+      const dailyDates = [];
+      const dailySpotPct = [];
+      const dailyVolPt = [];
+      const dailySpotRaw = [];
+      const dailyVolRaw = [];
+      const dailyResids = [];
+      const dailyBetas = [];
+      const dailyIntercepts = [];
+      const dayMap = {};
+
+      for (let k = 0; k < days.length; k++) {
+        const d = days[k];
+        const indices = rawDayMap[d];
+        const termIdx = indices[indices.length - 1];
+        const ref = dayPriorCloses[d];
+        const s0 = ref.spot;
+        const v0 = ref.vol;
+        const s = spotRaw[termIdx];
+        const v = volRaw[termIdx];
+        if (typeof s !== 'number' || isNaN(s) || typeof v !== 'number' || isNaN(v)) continue;
+
+        const sPct = (s0 > 0) ? Math.round(((s - s0) / s0 * 100.0) * 10000) / 10000 : 0;
+        const vPt = Math.round((v - v0) * 10000) / 10000;
+        const m = rollingBetaMap[d] || { slope: fallbackModel.rawSlope, intercept: fallbackModel.rawIntercept, beta: fallbackModel.beta };
+        const r = Math.round((vPt - (m.intercept + m.slope * sPct)) * 10000) / 10000;
+
+        dayMap[d] = [dailyDates.length];
+        dailyDates.push(d);
+        dailySpotPct.push(sPct);
+        dailyVolPt.push(vPt);
+        dailySpotRaw.push(s);
+        dailyVolRaw.push(v);
+        dailyResids.push(r);
+        dailyBetas.push(Number(m.beta.toFixed(2)));
+        dailyIntercepts.push(m.intercept);
+      }
+
+      const lastSpot = dayPriorCloses[latestDay] ? dayPriorCloses[latestDay].spot : (dailySpotRaw[dailySpotRaw.length - 1] || 1);
+      const lastVol = dayPriorCloses[latestDay] ? dayPriorCloses[latestDay].vol : (dailyVolRaw[dailyVolRaw.length - 1] || 20);
+      return {
+        times: dailyDates,
+        spotPct: dailySpotPct,
+        volPt: dailyVolPt,
+        spotRaw: dailySpotRaw,
+        volRaw: dailyVolRaw,
+        dailyResids: dailyResids,
+        dailyBetas: dailyBetas,
+        dailyIntercepts: dailyIntercepts,
+        isAnchored: true,
+        isDailyReset: true,
+        isLongDailyReset: true,
+        dayMap: dayMap,
+        days: dailyDates,
+        settlementMap: settlementMap,
+        settledDays: settledDays,
+        dayPriorCloses: dayPriorCloses,
+        anchorIdx: dailyDates.length > 0 ? dailyDates.length - 1 : 0,
+        anchorTime: dailyDates.length > 0 ? dailyDates[dailyDates.length - 1] : null,
+        s0: lastSpot,
+        v0: lastVol,
+        anchoredCorr: null,
+        latestAnchoredCorr: null,
+        returnCount: dailyDates.length
+      };
+    }
+
     const outTimes = [];
     const outSpotPct = [];
     const outVolPt = [];
@@ -2992,8 +3227,6 @@ function computeAnchoredSeries(c, isNdx) {
     const outVolRaw = [];
     const dayMap = {};
     const sessionStartTimes = [];
-    const settlementMap = {};
-    const settledDays = {};
 
     for (let k = 0; k < days.length; k++) {
       const d = days[k];
@@ -3018,39 +3251,6 @@ function computeAnchoredSeries(c, isNdx) {
         outVolPt.push(vPt);
         outSpotRaw.push(s);
         outVolRaw.push(v);
-      }
-
-      // Check if official settlement exists for day d and can be appended/harmonized at 16:00 (Cash RTH only, not GTH)
-      const lastRawTime = times[indices[indices.length - 1]];
-      const has1600 = (lastRawTime.slice(11, 16) >= '16:00');
-      const offSettle = officialCloses[d];
-      const isCompleted = isDaySessionCompleted(d, indices);
-      settledDays[d] = Boolean(isCompleted);
-
-      if (!isGthActive && isCompleted && offSettle && offSettle.spot && offSettle.vol) {
-        const s = offSettle.spot;
-        const v = offSettle.vol;
-        const sPct = (s0 > 0 && typeof s === 'number') ? Math.round(((s - s0) / s0 * 100.0) * 10000) / 10000 : 0;
-        const vPt = (typeof v === 'number') ? Math.round((v - v0) * 10000) / 10000 : 0;
-
-        if (!has1600) {
-          const settleTime = `${d} 16:00`;
-          dayIndices.push(outTimes.length);
-          outTimes.push(settleTime);
-          outSpotPct.push(sPct);
-          outVolPt.push(vPt);
-          outSpotRaw.push(s);
-          outVolRaw.push(v);
-          settlementMap[settleTime] = true;
-        } else {
-          // Harmonize existing 16:00 cash bell bar with the official exchange settlement close
-          const lastOutIdx = dayIndices[dayIndices.length - 1];
-          outSpotRaw[lastOutIdx] = s;
-          outVolRaw[lastOutIdx] = v;
-          outSpotPct[lastOutIdx] = sPct;
-          outVolPt[lastOutIdx] = vPt;
-          settlementMap[outTimes[lastOutIdx]] = true;
-        }
       }
 
       dayMap[d] = dayIndices;
@@ -3153,6 +3353,8 @@ function computeAnchoredSeries(c, isNdx) {
     volPt: anchoredVolPt,
     spotRaw: spotRaw,
     volRaw: volRaw,
+    settlementMap: h.settlementMap,
+    settledDays: h.settledDays,
     isAnchored: true,
     anchorIdx: idx,
     anchorTime: times[idx],
@@ -3171,6 +3373,45 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
 
   const { times, spotPct, volPt, spotRaw, volRaw, anchorIdx, s0, v0 } = anchoredSeries;
   const len = times.length;
+  const assetLabel = isNdx ? 'NDX' : 'SPX';
+  const volLabel = isNdx ? 'VXN' : 'VIX';
+  const thresh = isNdx ? currentNdxThreshold : currentThreshold;
+
+  if (anchoredSeries.isLongDailyReset && len > 0) {
+    const lastIdx = len - 1;
+    const spotNetPct = spotPct[lastIdx] || 0;
+    const volNetPt = volPt[lastIdx] || 0;
+    const spotNetPts = (typeof spotRaw[lastIdx] === 'number' && s0) ? (spotRaw[lastIdx] - s0) : 0;
+    const netResid = (Array.isArray(anchoredSeries.dailyResids) && typeof anchoredSeries.dailyResids[lastIdx] === 'number')
+      ? anchoredSeries.dailyResids[lastIdx]
+      : 0;
+    const settledDays = anchoredSeries.settledDays || {};
+    let alertCount = 0;
+    for (let i = 0; i < len; i++) {
+      if (settledDays[times[i]] && anchoredSeries.dailyResids[i] >= thresh) alertCount++;
+    }
+    const isAlert = netResid >= thresh;
+    const isCrush = netResid <= -thresh;
+    return {
+      isLatest: false,
+      elapsedStr: `${len}d Scanner`,
+      spotNetPct: spotNetPct,
+      spotNetPts: spotNetPts,
+      volNetPt: volNetPt,
+      netResid: netResid,
+      residSign: netResid >= 0 ? '+' : '',
+      residStatus: isAlert ? 'OVERVIX ALERT' : (isCrush ? 'VOL CRUSH' : 'NORMAL'),
+      residBadgeClass: isAlert
+        ? 'bg-rose-950 text-rose-300 border border-rose-800 animate-pulse'
+        : (isCrush ? 'bg-cyan-950 text-cyan-300 border border-cyan-800' : 'bg-emerald-950 text-emerald-300 border border-emerald-800'),
+      residColor: isAlert ? 'text-rose-400' : (isCrush ? 'text-cyan-400' : 'text-emerald-400'),
+      badgeClass: 'bg-cyan-950/80 text-cyan-300 border border-cyan-800',
+      tag: `${alertCount} ALERT CLOSE${alertCount === 1 ? '' : 'S'}`,
+      summary: `Causal rolling 60D β daily scanner across ${len} sessions (${alertCount} settled ${isNdx ? 'Over-VXN' : 'Overvix'} alert close${alertCount === 1 ? '' : 's'}).`,
+      anchorTime: times[lastIdx]
+    };
+  }
+
   if (anchorIdx >= len - 1) {
     return {
       isLatest: true,
@@ -3188,9 +3429,6 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
       summary: 'Anchor set at the latest bar. Monitoring incoming recovery ticks...'
     };
   }
-
-  const assetLabel = isNdx ? 'NDX' : 'SPX';
-  const volLabel = isNdx ? 'VXN' : 'VIX';
 
   const lastIdx = len - 1;
   const elapsedBars = lastIdx - anchorIdx;
@@ -3265,7 +3503,6 @@ function evaluateRecoveryLeader(anchoredSeries, isNdx) {
   // When anchored to Prior Close or Daily Reset, include the model intercept (alpha) to match the official session Overvix residual
   const alpha = (corrAnchor.mode === 'prior_close' || corrAnchor.mode === 'daily_reset') ? rawIntercept : 0;
   const netResid = volNetPt - alpha + beta * spotNetPct;
-  const thresh = isNdx ? currentNdxThreshold : currentThreshold;
   let residStatus = "NORMAL";
   let residBadgeClass = "bg-emerald-950 text-emerald-300 border border-emerald-800";
   let residColor = "text-emerald-400";
@@ -3318,32 +3555,21 @@ function updateAnchorUI() {
   const assetLabel = isNdx ? 'NDX' : 'SPX';
   const volLabel = isNdx ? 'VXN' : 'VIX';
 
-  const spotLowLabel = document.getElementById('anchor-spot-low-label');
-  if (spotLowLabel) spotLowLabel.textContent = `${assetLabel} Low`;
-  const volHighLabel = document.getElementById('anchor-vol-high-label');
-  if (volHighLabel) volHighLabel.textContent = `${volLabel} High`;
-
   const pill = document.getElementById('anchor-status-pill');
   const banner = document.getElementById('corr-recovery-banner');
   const btnOpen = document.getElementById('btn-anchor-open');
-  const btnPriorClose = document.getElementById('btn-anchor-prior-close');
   const btnDailyReset = document.getElementById('btn-anchor-daily-reset');
-  const btnSpotLow = document.getElementById('btn-anchor-spot-low');
-  const btnVolHigh = document.getElementById('btn-anchor-vol-high');
   const btnCustom = document.getElementById('btn-anchor-custom-toggle');
-  const isEligibleDailyReset = ['1D', '5D', '10D', '1M'].includes(currentCorrTf);
+  const isLongHorizon = ['3M', '6M', 'YTD', '1Y', 'MAX'].includes(currentCorrTf);
 
-  [btnOpen, btnPriorClose, btnDailyReset, btnSpotLow, btnVolHigh, btnCustom].forEach(btn => {
+  [btnOpen, btnDailyReset, btnCustom].forEach(btn => {
     if (btn) btn.className = "px-2.5 py-1 rounded text-slate-400 hover:text-white transition flex items-center space-x-1 font-semibold";
   });
 
   if (btnDailyReset) {
-    if (!isEligibleDailyReset) {
-      btnDailyReset.className = "px-2.5 py-1 rounded text-slate-500 bg-slate-900/60 border border-slate-800 cursor-not-allowed opacity-50 flex items-center space-x-1 font-semibold";
-      btnDailyReset.title = "Daily Reset is only available on intraday horizons up to 1M (1D, 5D, 10D, 1M)";
-    } else {
-      btnDailyReset.title = "Anchor each day to its prior official close (16:00 ET) so each day renders like a 1-day chart (1D, 5D, 10D, 1M)";
-    }
+    btnDailyReset.title = isLongHorizon
+      ? "Daily Reset Scanner (≥3M): plots SPX/VIX context above and color-coded settled 1-day Overvix Residuals (causal 60D β) below"
+      : "Anchor each day to its prior official close (16:00 ET) so each day renders like a 1-day chart";
   }
 
   if (!corrAnchor.active) {
@@ -3357,7 +3583,7 @@ function updateAnchorUI() {
     }
     const commentEl = document.getElementById('anchor-summary-comment');
     if (commentEl) {
-      commentEl.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from session open. Select <strong>[Daily Reset]</strong>, <strong>[Prior Close]</strong>, <strong>[${assetLabel} Low]</strong>, or <strong>[${volLabel} High]</strong>, or click chart to set anchor point.</span>`;
+      commentEl.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from session open. Select <strong>[Daily Reset]</strong> or <strong>[Custom]</strong>, or click chart to set an anchor point.</span>`;
     }
     return;
   }
@@ -3368,19 +3594,15 @@ function updateAnchorUI() {
   }
 
   if (corrAnchor.mode === 'daily_reset') {
-    if (btnDailyReset && isEligibleDailyReset) {
+    if (btnDailyReset) {
       btnDailyReset.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
     }
     const commentEl = document.getElementById('anchor-summary-comment');
     if (commentEl) {
-      commentEl.innerHTML = `<span class="text-cyan-400/90 text-[11px] font-sans">Each day anchored to its prior official close (16:00 ET). Traces display daily trajectories with overnight reset.</span>`;
+      commentEl.innerHTML = isLongHorizon
+        ? `<span class="text-cyan-400/90 text-[11px] font-sans">Daily Reset Scanner: Upper shows ${assetLabel} &amp; ${volLabel} regime; Lower shows settled 1-day Overvix Residuals using causal rolling 60D β.</span>`
+        : `<span class="text-cyan-400/90 text-[11px] font-sans">Each day anchored to its prior official close (16:00 ET). Traces display daily trajectories with overnight reset.</span>`;
     }
-  } else if (corrAnchor.mode === 'prior_close' && btnPriorClose) {
-    btnPriorClose.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
-  } else if (corrAnchor.mode === 'spot_low' && btnSpotLow) {
-    btnSpotLow.className = "px-2 py-1 rounded text-emerald-400 font-semibold bg-emerald-950/80 border border-emerald-800 shadow-sm transition flex items-center space-x-1";
-  } else if (corrAnchor.mode === 'vol_high' && btnVolHigh) {
-    btnVolHigh.className = "px-2 py-1 rounded text-amber-400 font-semibold bg-amber-950/80 border border-amber-800 shadow-sm transition flex items-center space-x-1";
   } else if ((corrAnchor.mode === 'custom' || corrAnchor.mode === 'date_close') && btnCustom) {
     btnCustom.className = "px-2 py-1 rounded text-cyan-400 font-semibold bg-cyan-950/80 border border-cyan-800 shadow-sm transition flex items-center space-x-1";
   }
@@ -3685,7 +3907,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   const gthChartOn = (!isNdx && isGthChartActive(targetTf));
   const c = getCorrDataset(isNdx, targetTf);
   // Compute Anchored Series (or baseline if anchor not active)
-  const anchoredSeries = computeAnchoredSeries(c, isNdx);
+  const anchoredSeries = computeAnchoredSeries(c, isNdx, targetTf);
   const times = (anchoredSeries && anchoredSeries.times) ? anchoredSeries.times : (c.times || []);
   const rollingCorr = c.rolling_corr || [];
 
@@ -3706,7 +3928,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       const volSign = diag.volNetPt >= 0 ? '+' : '';
       const spotColor = diag.spotNetPct >= 0 ? 'text-emerald-400' : 'text-rose-400';
       const volColor = diag.volNetPt <= 0 ? 'text-emerald-400' : 'text-amber-400';
-      const sessionLabel = (corrAnchor.mode === 'daily_reset') ? 'Today / Active Session' : '⏱️ Elapsed';
+      const sessionLabel = anchoredSeries.isLongDailyReset ? 'Daily Scanner' : ((corrAnchor.mode === 'daily_reset') ? 'Today / Active Session' : '⏱️ Elapsed');
 
       banner.innerHTML = `
         <div class="flex flex-wrap items-center gap-2">
@@ -3727,7 +3949,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
     } else {
       banner.innerHTML = '';
       if (commentEl) {
-        commentEl.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from session open. Select <strong>[Prior Close]</strong>, <strong>[${assetLabel} Low]</strong>, or <strong>[${volLabel} High]</strong>, or click chart to set anchor point and evaluate post-anchor Overvix residual.</span>`;
+        commentEl.innerHTML = `<span class="text-slate-500 text-[11px] font-sans">Baseline from session open. Select <strong>[Daily Reset]</strong> or <strong>[Custom]</strong>, or click chart to set an anchor point and evaluate post-anchor Overvix residual.</span>`;
       }
     }
   }
@@ -3736,6 +3958,257 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   const dEnd = times.length > 0 ? times[times.length - 1] : '';
 
   const conf = TF_CONFIG[targetTf] || TF_CONFIG['1D'];
+
+  // Option A: Daily Event Scanner for >=3M horizons in Daily Reset mode
+  if (anchoredSeries.isLongDailyReset && times.length > 0) {
+    const { beta: activeBeta } = getActiveBetaAndIntercept(isNdx);
+    if (corrScaleLabel && isBetaScaled) {
+      corrScaleLabel.textContent = `Beta Scale (1:${activeBeta.toFixed(2)})`;
+    }
+    const thresh = isNdx ? currentNdxThreshold : currentThreshold;
+    const resids = anchoredSeries.dailyResids || [];
+    const betas = anchoredSeries.dailyBetas || [];
+    const settledDays = anchoredSeries.settledDays || {};
+    const settlementMap = anchoredSeries.settlementMap || {};
+    const rawSpot = anchoredSeries.spotRaw || [];
+    const rawVol = anchoredSeries.volRaw || [];
+
+    const assetColor = isNdx ? '#C084FC' : '#10B981';
+    const volColor = '#F59E0B';
+    const residName = isNdx ? 'Over-VXN Residual (Daily)' : 'Overvix Residual (Daily)';
+
+    if (corrTfPill) {
+      corrTfPill.textContent = `${conf.pillText} • Daily Scanner`;
+    }
+
+    const customDaily = times.map((d, i) => {
+      const s = rawSpot[i];
+      const v = rawVol[i];
+      const sp = assetPct[i];
+      const vp = volPt[i];
+      const r = resids[i];
+      const b = betas[i];
+      const sRawStr = (typeof s === 'number' && !isNaN(s)) ? s.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
+      const vRawStr = (typeof v === 'number' && !isNaN(v)) ? v.toFixed(2) : '-';
+      const spStr = (typeof sp === 'number' && !isNaN(sp)) ? `${sp >= 0 ? '+' : ''}${sp.toFixed(2)}%` : '-';
+      const vpStr = (typeof vp === 'number' && !isNaN(vp)) ? `${vp >= 0 ? '+' : ''}${vp.toFixed(2)} pts` : '-';
+      const rStr = (typeof r === 'number' && !isNaN(r)) ? `${r >= 0 ? '+' : ''}${r.toFixed(2)} pts` : '-';
+      const bStr = (typeof b === 'number' && !isNaN(b)) ? b.toFixed(2) : '-';
+      const isSettle = Boolean(settledDays[d] || settlementMap[d] || settlementMap[`${d} 16:00`]);
+      const settleTag = isSettle ? "  <span style='color:#38BDF8;font-weight:bold'>🏛️ Official Close</span>" : "";
+      const alertTag = (isSettle && typeof r === 'number' && r >= thresh)
+        ? `  <span style='color:#FF5370;font-weight:bold'>🚨 ALERT</span>`
+        : ((isSettle && typeof r === 'number' && r <= -thresh) ? `  <span style='color:#06B6D4;font-weight:bold'>📉 CRUSH</span>` : '');
+      return [sRawStr, spStr, vRawStr, vpStr, rStr, bStr, settleTag + alertTag, assetLabel, volLabel];
+    });
+
+    const barColors = resids.map((r, i) => {
+      const d = times[i];
+      const isSettle = Boolean(settledDays[d]);
+      if (isSettle && r >= thresh) return '#FF1744';
+      if (isSettle && r <= -thresh) return '#06B6D4';
+      if (r >= 0) return 'rgba(16, 185, 129, 0.72)';
+      return 'rgba(148, 163, 184, 0.45)';
+    });
+
+    const alertTimes = [], alertVols = [], alertResids = [], alertCustom = [];
+    for (let i = 0; i < times.length; i++) {
+      if (settledDays[times[i]] && resids[i] >= thresh) {
+        alertTimes.push(times[i]);
+        alertVols.push(rawVol[i]);
+        alertResids.push(resids[i]);
+        alertCustom.push(customDaily[i]);
+      }
+    }
+
+    let maxAbsR = thresh;
+    for (let i = 0; i < resids.length; i++) {
+      if (typeof resids[i] === 'number' && Math.abs(resids[i]) > maxAbsR) maxAbsR = Math.abs(resids[i]);
+    }
+    const y3Limit = Math.ceil((maxAbsR * 1.18) * 10) / 10;
+
+    const longTraces = [
+      {
+        x: times,
+        y: rawSpot,
+        name: `${assetLabel} Close`,
+        mode: 'lines',
+        line: { color: assetColor, width: 1.8 },
+        xaxis: 'x',
+        yaxis: 'y',
+        hoverinfo: 'skip'
+      },
+      {
+        x: times,
+        y: rawVol,
+        customdata: customDaily,
+        name: `${volLabel} Close (Daily Reset${isVolInverted ? ' Inv ▼' : ''})`,
+        mode: 'lines',
+        line: { color: volColor, width: 1.8 },
+        xaxis: 'x',
+        yaxis: 'y2',
+        hovertemplate:
+          `<b>%{x|%b %d, %Y}</b>%{customdata[6]}<br>` +
+          `%{customdata[7]}: <b>%{customdata[0]}</b> (1D %{customdata[1]})<br>` +
+          `%{customdata[8]}: <b>%{customdata[2]}</b> (1D %{customdata[3]}) · Resid: <b>%{customdata[4]}</b> [60D β=%{customdata[5]}]<br>` +
+          `<span style="color:#00E5FF;font-size:10px">👉 Click bar/date to inspect Anchor Monitor</span><extra></extra>`
+      },
+      {
+        x: times,
+        y: resids,
+        customdata: customDaily,
+        type: 'bar',
+        width: 18 * 3600 * 1000,
+        name: residName,
+        marker: { color: barColors, line: { width: 0 } },
+        xaxis: 'x',
+        yaxis: 'y3',
+        hovertemplate:
+          `<b>%{x|%b %d, %Y}</b>%{customdata[6]}<br>` +
+          `${isNdx ? 'Over-VXN' : 'Overvix'} Daily Residual: <b>%{customdata[4]}</b> (60D β=%{customdata[5]})<br>` +
+          `%{customdata[7]}: %{customdata[0]} (%{customdata[1]}) | %{customdata[8]}: %{customdata[2]} (%{customdata[3]})<extra></extra>`
+      },
+      {
+        x: [dStart, dEnd],
+        y: [0, 0],
+        mode: 'lines',
+        line: { color: 'rgba(148, 163, 184, 0.5)', width: 1.2, dash: 'dash' },
+        xaxis: 'x',
+        yaxis: 'y3',
+        showlegend: false,
+        hoverinfo: 'skip'
+      },
+      {
+        x: [dStart, dEnd],
+        y: [thresh, thresh],
+        mode: 'lines',
+        line: { color: '#F43F5E', width: 1.4, dash: 'dash' },
+        xaxis: 'x',
+        yaxis: 'y3',
+        showlegend: false,
+        hoverinfo: 'skip'
+      },
+      {
+        x: [dStart, dEnd],
+        y: [-thresh, -thresh],
+        mode: 'lines',
+        line: { color: '#06B6D4', width: 1.2, dash: 'dot' },
+        xaxis: 'x',
+        yaxis: 'y3',
+        showlegend: false,
+        hoverinfo: 'skip'
+      }
+    ];
+
+    if (alertTimes.length > 0) {
+      longTraces.push(
+        {
+          x: alertTimes,
+          y: alertVols,
+          mode: 'markers',
+          name: `${isNdx ? 'Over-VXN' : 'Overvix'} Alert (${volLabel})`,
+          marker: { color: '#FF1744', size: 7, symbol: 'diamond', line: { color: '#FFFFFF', width: 1.2 } },
+          xaxis: 'x',
+          yaxis: 'y2',
+          showlegend: false,
+          hoverinfo: 'skip'
+        },
+        {
+          x: alertTimes,
+          y: alertResids,
+          customdata: alertCustom,
+          mode: 'markers',
+          cliponaxis: false,
+          name: isNdx ? 'Over-VXN Alert Close' : 'Overvix Alert Close',
+          marker: { color: '#FF1744', size: 9, symbol: 'diamond', line: { color: '#FFFFFF', width: 1.5 } },
+          xaxis: 'x',
+          yaxis: 'y3',
+          showlegend: true,
+          hoverinfo: 'skip'
+        }
+      );
+    }
+
+    const hasSpan = Boolean(dStart && dEnd && dStart !== dEnd);
+    const longLayout = {
+      paper_bgcolor: 'transparent',
+      plot_bgcolor: 'transparent',
+      autosize: true,
+      hovermode: 'x',
+      dragmode: false,
+      clickmode: 'event',
+      hoverdistance: 20,
+      hoverlabel: {
+        bgcolor: 'rgba(15, 23, 42, 0.95)',
+        bordercolor: '#00E5FF',
+        font: { family: 'monospace', size: 11, color: '#F8FAFC' },
+        align: 'left'
+      },
+      margin: { l: 55, r: 60, t: 25, b: 35 },
+      xaxis: {
+        anchor: 'y3',
+        type: 'date',
+        range: hasSpan ? [dStart, dEnd] : undefined,
+        autorange: !hasSpan,
+        rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }],
+        tickformat: (targetTf === '1Y' || targetTf === 'MAX') ? '%b %Y' : '%b %d',
+        title: { text: `${conf.label} Daily Reset Scanner — Causal Rolling 60D β`, font: { color: '#94A3B8', size: 10 } },
+        gridcolor: '#1e293b',
+        tickfont: { color: '#94A3B8', size: 10 },
+        showgrid: true,
+        nticks: 10,
+        fixedrange: true,
+        showspikes: true,
+        spikemode: 'across',
+        spikesnap: 'cursor',
+        spikecolor: '#00E5FF',
+        spikethickness: 1,
+        spikedash: 'dot'
+      },
+      yaxis: {
+        domain: [0.48, 1.0],
+        title: { text: `${assetLabel} Level`, font: { color: assetColor, size: 10 } },
+        tickformat: ',.0f',
+        gridcolor: '#1e293b',
+        tickfont: { color: assetColor, size: 10 },
+        autorange: true,
+        fixedrange: true
+      },
+      yaxis2: {
+        domain: [0.48, 1.0],
+        title: { text: `${volLabel} Level${isVolInverted ? ' (Inv ▼)' : ''}`, font: { color: volColor, size: 10 } },
+        overlaying: 'y',
+        side: 'right',
+        gridcolor: 'transparent',
+        tickfont: { color: volColor, size: 10 },
+        autorange: isVolInverted ? 'reversed' : true,
+        fixedrange: true
+      },
+      yaxis3: {
+        domain: [0.0, 0.40],
+        title: { text: isNdx ? 'Over-VXN Daily Resid (pts)' : 'Daily Residual (pts)', font: { color: isNdx ? '#C084FC' : '#00E5FF', size: 10 } },
+        gridcolor: '#1e293b',
+        tickfont: { color: isNdx ? '#C084FC' : '#00E5FF', size: 10 },
+        range: [-y3Limit, y3Limit],
+        zeroline: false,
+        fixedrange: true
+      },
+      legend: {
+        orientation: 'h',
+        x: 0,
+        y: 1.12,
+        font: { color: '#94A3B8', size: 10 }
+      },
+      bargap: 0.2,
+      showlegend: true
+    };
+
+    Plotly.react('correlation-chart', longTraces, longLayout, {
+      responsive: true,
+      displayModeBar: false
+    }).then(attachCorrelationChartClickListener);
+    return;
+  }
   const isMultiDayIntradayTf = (targetTf === '5D' || targetTf === '10D' || targetTf === '1M');
   const sessionSegs = isMultiDayIntradayTf ? buildSessionSegments(times) : [];
   const xTitle = gthChartOn
@@ -4920,9 +5393,9 @@ function renderFairVixMiniChart(fvLive, fvBoot) {
       x: cv.spot,
       y: cv.vix_quad,
       mode: 'lines',
-      name: '60D Quad',
+      name: 'EWM Quad',
       line: { color: '#A855F7', width: 2, shape: 'spline' },
-      hovertemplate: '60D Quad Fair: %{y:.2f}<extra></extra>'
+      hovertemplate: 'EWM Quad Fair: %{y:.2f}<extra></extra>'
     });
   }
 
@@ -5054,7 +5527,7 @@ function updateFairVixUI(data) {
   if (popM4Val) popM4Val.textContent = fv.fair_m4_quad.toFixed(2);
   if (popDesc) {
     const dir = fv.gap_pts > 0.5 ? 'above' : (fv.gap_pts < -0.5 ? 'below' : 'near');
-    popDesc.textContent = `${volLbl} (${fv.live_vol.toFixed(2)}) trades ${Math.abs(fv.gap_pts).toFixed(2)} pts ${dir} composite fair (${fv.combined.toFixed(2)}). Price-location (60D Quad) implies ${fv.fair_m4_quad.toFixed(2)} vs realized-vol anchor (HAR-RV) at ${fv.fair_m2_rv_vrp.toFixed(2)}.`;
+    popDesc.textContent = `${volLbl} (${fv.live_vol.toFixed(2)}) trades ${Math.abs(fv.gap_pts).toFixed(2)} pts ${dir} composite fair (${fv.combined.toFixed(2)}). Price-location (252D EWM Quad) implies ${fv.fair_m4_quad.toFixed(2)} vs realized-vol anchor (HAR-RV) at ${fv.fair_m2_rv_vrp.toFixed(2)}.`;
   }
 
   const popoverFv = document.getElementById('popover-fair-vix');
@@ -5075,13 +5548,13 @@ function renderFairVixScatterChart(bootstrap) {
   const cv = fvBoot.curve || {};
 
   const spTitle = document.getElementById('spotvol-title');
-  if (spTitle) spTitle.textContent = `${assetLbl} Fair ${volLbl} Curve (60D Quad + HAR-RV)`;
+  if (spTitle) spTitle.textContent = `${assetLbl} Fair ${volLbl} Curve (EWM Quad + HAR-RV)`;
   const spSub = document.getElementById('spotvol-sub');
   if (spSub && typeof fvLive.combined === 'number') {
     const rvSubTxt = (fvLive.vrp_mode === 'fixed')
       ? `${fvLive.rv_method || 'RV'} + ${fvLive.vrp_base || 4} VRP`
       : `Mean-Rev EWMA R²=${(fvLive.har_r2 || 0).toFixed(2)}`;
-    spSub.textContent = `60D Quad (R²=${(fvLive.quad_r2 || 0).toFixed(2)}) + HAR-RV (${rvSubTxt}) → Fair ${fvLive.combined.toFixed(2)}`;
+    spSub.textContent = `252D EWM Quad (60D DD, R²=${(fvLive.quad_r2 || 0).toFixed(2)}) + HAR-RV (${rvSubTxt}) → Fair ${fvLive.combined.toFixed(2)}`;
   }
 
   const targetData = (isNdx && bootstrap.ndx && bootstrap.ndx.overvix) ? bootstrap.ndx : bootstrap;
@@ -5140,16 +5613,16 @@ function renderFairVixScatterChart(bootstrap) {
       hoverinfo: 'skip',
       showlegend: false
     },
-    // 2: 60D Quadratic Drawdown Fit Curve
+    // 2: 252D EWM Quadratic Drawdown Fit Curve
     {
       x: cv.spot || [],
       y: cv.vix_quad || [],
       customdata: cv.dd_pct || [],
       mode: 'lines',
-      name: '60D Quad Curve',
+      name: '252D EWM Quad Curve',
       line: { color: '#A855F7', width: 2.2, shape: 'spline' },
       hoverlabel: darkHoverlabel,
-      hovertemplate: `60D Quad Fair @ ${assetLbl} %{x:,.2f} (-%{customdata:.2f}% DD): <b>%{y:.2f}</b><extra></extra>`
+      hovertemplate: `EWM Quad Fair @ ${assetLbl} %{x:,.2f} (-%{customdata:.2f}% DD): <b>%{y:.2f}</b><extra></extra>`
     },
     // 3: HAR-RV Realized Vol Mean-Reverting Anchor Line
     {
@@ -5295,7 +5768,7 @@ function updateFvSliderUI(tf) {
   }
 }
 
-function switchFairVixTf(tf, syncToCorr = true) {
+function switchFairVixTf(tf, propagate = true) {
   currentFvTf = tf;
   const conf = TF_CONFIG[tf] || TF_CONFIG['1D'];
   const sliderFv = document.getElementById('slider-fv-timeframe');
@@ -5305,9 +5778,8 @@ function switchFairVixTf(tf, syncToCorr = true) {
   updateFvSliderUI(tf);
   renderFairVixMonitorChart(tf);
 
-  const chkSyncFv = document.getElementById('chk-sync-fv');
-  if (syncToCorr && chkSyncFv && chkSyncFv.checked && currentCorrTf !== tf) {
-    switchCorrTf(tf, true);
+  if (propagate) {
+    propagateHorizonSync('fv', tf);
   }
 }
 
@@ -5322,7 +5794,9 @@ function setupFairVixMonitorControls() {
   if (sliderFv) {
     sliderFv.addEventListener('input', (e) => {
       const idx = parseInt(e.target.value, 10);
-      updateFvSliderUI(TF_STEPS[idx] || '1D');
+      const tf = TF_STEPS[idx] || '1D';
+      updateFvSliderUI(tf);
+      previewHorizonSync('fv', idx, tf);
     });
     sliderFv.addEventListener('change', (e) => {
       const idx = parseInt(e.target.value, 10);
@@ -5405,12 +5879,15 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     return;
   }
 
-  const times = c.times;
-  const raw = getRawSpotVolSeries(c, isNdx);
-  const spotRaw = raw.spot || [];
-  const volRaw = raw.vol || [];
-  const baseSpotPct = (isNdx ? (c.ndx_pct || c.spx_pct) : c.spx_pct) || [];
-  const baseVolPt = (isNdx ? (c.vxn_pt || c.vix_pt) : c.vix_pt) || [];
+  const h = harmonizeIntradayWithSettlements(c, isNdx, targetTf);
+  const times = h.times;
+  const spotRaw = h.spotRaw;
+  const volRaw = h.volRaw;
+  const baseSpotPct = h.baseSpotPct;
+  const baseVolPt = h.baseVolPt;
+  const officialCloses = h.officialCloses;
+  const dailyDatesList = h.dailyDatesList;
+  const settlementMap = h.settlementMap;
 
   const activeData = (currentViewMode === 'live' && lastLiveUpdatePayload) ? lastLiveUpdatePayload : ((currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap);
   const fvBoot = getActiveFairVixModelBoot();
@@ -5431,29 +5908,13 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
 
   const getParamsForDate = (dStr) => {
     if (dailyParams[dStr]) return dailyParams[dStr];
+    if (paramDates.length > 0 && dStr < paramDates[0]) return null;
     if (lastSettledDate && dStr > lastSettledDate) return fallbackParams;
     for (let j = paramDates.length - 1; j >= 0; j--) {
       if (paramDates[j] <= dStr) return dailyParams[paramDates[j]];
     }
     return fallbackParams;
   };
-
-  // Build daily prior closes to align intraday Overvix Residual cleanly per session
-  const officialCloses = {};
-  let dailyDatesList = [];
-  if (cachedBootstrap && cachedBootstrap.intraday_correlation) {
-    const dailyDs = cachedBootstrap.intraday_correlation['1Y'] || cachedBootstrap.intraday_correlation['YTD'];
-    if (dailyDs && dailyDs.dates && dailyDs.dates.length > 0) {
-      dailyDatesList = dailyDs.dates;
-      const dSpot = isNdx ? (dailyDs.ndx_raw || dailyDs.spot_raw) : (dailyDs.spx_raw || dailyDs.spot_raw);
-      const dVol = isNdx ? (dailyDs.vxn_raw || dailyDs.vol_raw) : (dailyDs.vix_raw || dailyDs.vol_raw);
-      for (let j = 0; j < dailyDatesList.length; j++) {
-        if (dSpot && dSpot[j] !== undefined && dVol && dVol[j] !== undefined) {
-          officialCloses[dailyDatesList[j]] = { spot: dSpot[j], vol: dVol[j] };
-        }
-      }
-    }
-  }
 
   const { beta, rawSlope, rawIntercept } = getActiveBetaAndIntercept(isNdx);
   const slope = rawSlope;
@@ -5510,16 +5971,22 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     }
 
     const p = getParamsForDate(dStr);
-    let fM2 = p.fair_m2;
-    let fM4 = p.fair_m2;
-    let cFair = p.fair_m2;
-    let cRes = 0;
+    let fM2 = null;
+    let fM4 = null;
+    let cFair = null;
+    let cRes = null;
 
-    if (sVal !== null && vVal !== null && p.peak_60d > 0) {
-      const dd = Math.max(0.0, (p.peak_60d - sVal) / p.peak_60d * 100.0);
-      fM4 = p.c0 + p.c1 * dd + p.c2 * (dd * dd);
-      cFair = p.w_m2 * fM2 + p.w_m4 * fM4;
-      cRes = vVal - cFair;
+    if (p) {
+      fM2 = p.fair_m2;
+      fM4 = p.fair_m2;
+      cFair = p.fair_m2;
+      cRes = 0;
+      if (sVal !== null && vVal !== null && p.peak_60d > 0) {
+        const dd = Math.max(0.0, (p.peak_60d - sVal) / p.peak_60d * 100.0);
+        fM4 = p.c0 + p.c1 * dd + p.c2 * (dd * dd);
+        cFair = p.w_m2 * fM2 + p.w_m4 * fM4;
+        cRes = vVal - cFair;
+      }
     }
 
     let sPct = (typeof baseSpotPct[i] === 'number') ? baseSpotPct[i] : 0;
@@ -5538,18 +6005,18 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     const ovRes = vPt - (intercept + slope * sPct);
 
     liveVolArr.push(vVal);
-    compFairArr.push(Number(cFair.toFixed(2)));
-    m2Arr.push(Number(fM2.toFixed(2)));
-    m4Arr.push(Number(fM4.toFixed(2)));
-    compResArr.push(Number(cRes.toFixed(2)));
+    compFairArr.push(cFair !== null ? Number(cFair.toFixed(2)) : null);
+    m2Arr.push(fM2 !== null ? Number(fM2.toFixed(2)) : null);
+    m4Arr.push(fM4 !== null ? Number(fM4.toFixed(2)) : null);
+    compResArr.push(cRes !== null ? Number(cRes.toFixed(2)) : null);
     ovResArr.push(Number(ovRes.toFixed(2)));
     spotPctDailyArr.push(typeof baseSpotPct[i] === 'number' ? baseSpotPct[i] : sPct);
     const vHorizonPt = (vVal !== null) ? (vVal - firstRefVol) : 0;
-    const fHorizonPt = cFair - firstRefVol;
+    const fHorizonPt = (cFair !== null) ? (cFair - firstRefVol) : null;
     volPtDailyArr.push(Number(vHorizonPt.toFixed(2)));
-    fairPtDailyArr.push(Number(fHorizonPt.toFixed(2)));
+    fairPtDailyArr.push(fHorizonPt !== null ? Number(fHorizonPt.toFixed(2)) : null);
 
-    if (cRes > 0 && ovRes > 0 && sPct > 0 && vVal !== null) {
+    if (cRes !== null && cRes > 0 && ovRes > 0 && sPct > 0 && vVal !== null) {
       stickyX.push(tStr);
       stickyY.push(Number(cRes.toFixed(2)));
       stickyCustom.push([sPct.toFixed(2), cRes.toFixed(2), ovRes.toFixed(2)]);
@@ -5617,7 +6084,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       sumEl.textContent = `${volLabel} trading ${Math.abs(latestCRes).toFixed(2)} pts below Composite Fair (${latestFair.toFixed(2)}) — realized/structural vol underpriced.`;
       sumEl.className = 'text-[11px] text-emerald-300 font-sans font-medium';
     } else {
-      sumEl.textContent = `${volLabel} near Composite Fair (${latestFair ? latestFair.toFixed(2) : '--'}) | HAR-RV=${latestM2 ? latestM2.toFixed(1) : '--'}, 60D Quad=${latestM4 ? latestM4.toFixed(1) : '--'}.`;
+      sumEl.textContent = `${volLabel} near Composite Fair (${latestFair ? latestFair.toFixed(2) : '--'}) | HAR-RV=${latestM2 ? latestM2.toFixed(1) : '--'}, EWM Quad=${latestM4 ? latestM4.toFixed(1) : '--'}.`;
       sumEl.className = 'text-[11px] text-slate-300 font-sans font-normal';
     }
   }
@@ -5629,13 +6096,14 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
   const useFvBreaks = (fvSessionSegs.length > 1);
   const fvSegs = useFvBreaks ? fvSessionSegs : [{ start: 0, end: n, day: '', startTime: times[0] }];
   const traces = [];
-  const customUpper = times.map((_, i) => [
+  const customUpper = times.map((t, i) => [
     liveVolArr[i] !== null ? liveVolArr[i].toFixed(2) : '-',
-    compFairArr[i].toFixed(2),
-    m2Arr[i].toFixed(2),
-    m4Arr[i].toFixed(2),
-    (compResArr[i] >= 0 ? '+' : '') + compResArr[i].toFixed(2),
-    (ovResArr[i] >= 0 ? '+' : '') + ovResArr[i].toFixed(2)
+    compFairArr[i] !== null ? compFairArr[i].toFixed(2) : '-',
+    m2Arr[i] !== null ? m2Arr[i].toFixed(2) : '-',
+    m4Arr[i] !== null ? m4Arr[i].toFixed(2) : '-',
+    compResArr[i] !== null ? ((compResArr[i] >= 0 ? '+' : '') + compResArr[i].toFixed(2)) : '-',
+    ovResArr[i] !== null ? ((ovResArr[i] >= 0 ? '+' : '') + ovResArr[i].toFixed(2)) : '-',
+    settlementMap[t] ? "  <span style='color:#38BDF8;font-weight:bold'>🏛️ Official Close</span>" : ""
   ]);
 
   if (currentFvDisplayMode === 'beta') {
@@ -5646,6 +6114,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
         {
           x: tSeg,
           y: spotPctDailyArr.slice(seg.start, seg.end),
+          customdata: cSeg,
           name: `${assetLabel} %`,
           legendgroup: 'fv_spot',
           showlegend: (sIdx === 0),
@@ -5653,7 +6122,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
           line: { color: '#10B981', width: 1.8 },
           xaxis: 'x',
           yaxis: 'y',
-          hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>${assetLabel}: <b>%{y:+.2f}%</b><extra></extra>`
+          hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>${assetLabel}: <b>%{y:+.2f}%</b><extra></extra>`
         },
         {
           x: tSeg,
@@ -5699,7 +6168,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
           line: { color: '#00E5FF', width: 2.0 },
           xaxis: 'x',
           yaxis: 'y',
-          hovertemplate: `<b>%{x|${timeHoverFmt}}</b><br>Live ${volLabel}: <b>%{y:.2f}</b><br>Comp Fair: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)<extra></extra>`
+          hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>Live ${volLabel}: <b>%{y:.2f}</b><br>Comp Fair: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)<extra></extra>`
         },
         {
           x: tSeg,
@@ -5714,7 +6183,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
           fillcolor: 'rgba(245, 158, 11, 0.10)',
           xaxis: 'x',
           yaxis: 'y',
-          hovertemplate: `Composite Fair: <b>%{y:.2f}</b> (HAR-RV: %{customdata[2]}, 60D Quad: %{customdata[3]})<extra></extra>`
+          hovertemplate: `Composite Fair: <b>%{y:.2f}</b> (HAR-RV: %{customdata[2]}, EWM Quad: %{customdata[3]})<extra></extra>`
         }
       );
       if (showFvComponents) {
@@ -5734,14 +6203,14 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
           {
             x: tSeg,
             y: m4Arr.slice(seg.start, seg.end),
-            name: '60D Quad',
+            name: 'EWM Quad',
             legendgroup: 'fv_quad',
             showlegend: (sIdx === 0),
             mode: 'lines',
             line: { color: '#A855F7', width: 1.4, dash: 'dot' },
             xaxis: 'x',
             yaxis: 'y',
-            hovertemplate: '60D Quad: <b>%{y:.2f}</b><extra></extra>'
+            hovertemplate: 'EWM Quad: <b>%{y:.2f}</b><extra></extra>'
           }
         );
       }
@@ -5834,11 +6303,12 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
   let rangeY = null;
   let rangeY2 = null;
   if (currentFvDisplayMode === 'beta') {
-    const sMin = Math.min(...spotPctDailyArr);
-    const sMax = Math.max(...spotPctDailyArr);
-    const vAll = volPtDailyArr.concat(fairPtDailyArr);
-    const vMin = Math.min(...vAll);
-    const vMax = Math.max(...vAll);
+    const validS = spotPctDailyArr.filter(v => typeof v === 'number' && !isNaN(v));
+    const vAll = volPtDailyArr.concat(fairPtDailyArr).filter(v => typeof v === 'number' && !isNaN(v));
+    const sMin = validS.length ? Math.min(...validS) : -1;
+    const sMax = validS.length ? Math.max(...validS) : 1;
+    const vMin = vAll.length ? Math.min(...vAll) : -2;
+    const vMax = vAll.length ? Math.max(...vAll) : 2;
     const halfS = Math.max(0.25, (sMax - sMin) / 2, (vMax - vMin) / (2 * absBeta)) * 1.15;
     const midS = (sMin + sMax) / 2;
     const midV = (vMin + vMax) / 2;
@@ -7747,7 +8217,7 @@ async function bootstrapData() {
     if (data.fair_vix && data.fair_vix.config) {
       currentVrpMode = data.fair_vix.config.vrp_mode || 'auto';
       currentVrpFixedPts = (typeof data.fair_vix.config.vrp_fixed_pts === 'number') ? data.fair_vix.config.vrp_fixed_pts : 4.0;
-      currentFvBlend = data.fair_vix.config.blend_mode || 'equal';
+      currentFvBlend = data.fair_vix.config.blend_mode || 'r2_weighted';
     }
 
     // Cache multi-timeframe datasets across all 9 horizons (1D, 5D, 10D, 1M, 3M, 6M, YTD, 1Y, MAX)
@@ -8118,7 +8588,11 @@ async function loadHistoricalSession(dateStr) {
     updateTsSliderUI('1D');
     updateCorrSliderUI('1D');
     updateFvSliderUI('1D');
-    resetCorrAnchor(false);
+    if (corrAnchor.mode !== 'daily_reset') {
+      resetCorrAnchor(false);
+    } else {
+      updateAnchorUI();
+    }
 
     if (tsLivePill) {
       tsLivePill.textContent = `${dateStr} 1m`;

@@ -1,8 +1,8 @@
 """
 fair_vix_engine.py
 Quantitative Fair VIX Estimation Engine combining:
-  - Method 2: Realized Volatility (Yang-Zhang OHLC / Close-to-Close 5D, 10D, 21D) + Variance Risk Premium (VRP)
-  - Method 4: Rolling 60-Day Constrained Quadratic Drawdown Regression (Sticky-Strike Convexity)
+  - Method 2: Realized Volatility (Yang-Zhang OHLC / Close-to-Close 5D, 10D, 21D) + Asymmetric EWMA HAR-RV
+  - Method 4: 252-Day Exponentially Weighted (30D HL) Constrained Quadratic Drawdown Regression on Rolling 60D Drawdowns
 
 Shared by both live streaming (dashboard.py) and historical replay (session_history.py).
 """
@@ -17,6 +17,8 @@ from scipy.optimize import lsq_linear
 DEFAULT_VRP_PTS = 4.0
 VRP_MIN_PTS = 2.5
 VRP_MAX_PTS = 6.5
+QUAD_FIT_WINDOW_DAYS = 252
+QUAD_EWM_HALF_LIFE_DAYS = 30.0
 
 
 def safe_to_ohlc_df(bars: Any, prefix: str) -> pd.DataFrame:
@@ -112,37 +114,71 @@ def calc_realized_vol_series(
     return combined, ("Yang-Zhang" if used_yz else "Close-to-Close")
 
 
-def fit_quadratic_drawdown(spot_vals: np.ndarray, vol_vals: np.ndarray) -> Dict[str, float]:
+def fit_quadratic_drawdown(
+    spot_vals: np.ndarray,
+    vol_vals: np.ndarray,
+    dd_vals: Optional[np.ndarray] = None,
+    half_life: Optional[float] = None,
+    peak_window: int = 60,
+) -> Dict[str, float]:
     """
     Fit constrained convex quadratic VIX(dd) = c0 + c1*dd + c2*dd^2
-    where dd = max(0, (peak - spot) / peak * 100) and c0 >= 5, c1 >= 0, c2 >= 0.
+    where dd is drawdown (%) from rolling peak and c0 >= 5, c1 >= 0, c2 >= 0.
+    Supports optional causal `dd_vals` (e.g., rolling 60D-peak drawdowns over 252D)
+    and exponential time-decay weighting (`half_life` in trading days).
     """
     if len(spot_vals) < 5 or len(vol_vals) < 5:
         mean_v = float(np.mean(vol_vals)) if len(vol_vals) > 0 else 20.0
-        peak_v = float(np.max(spot_vals)) if len(spot_vals) > 0 else 1.0
+        peak_v = float(np.max(spot_vals[-peak_window:])) if len(spot_vals) > 0 else 1.0
         return {"peak": peak_v, "c0": mean_v, "c1": 0.0, "c2": 0.0, "r2": 0.0, "std_err": 1.5}
 
-    peak = float(np.max(spot_vals))
+    peak = float(np.max(spot_vals[-peak_window:])) if peak_window > 0 else float(np.max(spot_vals))
     if peak <= 0:
         return {"peak": 1.0, "c0": float(np.mean(vol_vals)), "c1": 0.0, "c2": 0.0, "r2": 0.0, "std_err": 1.5}
 
-    dd = np.maximum(0.0, (peak - spot_vals) / peak * 100.0)
+    if dd_vals is not None and len(dd_vals) == len(vol_vals):
+        dd = np.maximum(0.0, np.asarray(dd_vals, dtype=float))
+    else:
+        full_peak = float(np.max(spot_vals))
+        dd = np.maximum(0.0, (full_peak - spot_vals) / full_peak * 100.0) if full_peak > 0 else np.zeros_like(spot_vals, dtype=float)
+
+    n = len(vol_vals)
+    use_ewm = half_life is not None and float(half_life) > 0.0
+    if use_ewm:
+        age = np.arange(n - 1, -1, -1, dtype=float)
+        w = 0.5 ** (age / float(half_life))
+        w_sum = max(float(np.sum(w)), 1e-9)
+    else:
+        w = np.ones(n, dtype=float)
+        w_sum = float(n)
+
     if float(np.max(dd)) < 1e-4:
-        return {"peak": peak, "c0": float(np.mean(vol_vals)), "c1": 0.0, "c2": 0.0, "r2": 0.0, "std_err": float(np.std(vol_vals)) if len(vol_vals) > 1 else 1.0}
+        w_mean = float(np.sum(w * vol_vals) / w_sum)
+        w_std = float(np.sqrt(np.sum(w * (vol_vals - w_mean) ** 2) / w_sum)) if n > 1 else 1.0
+        return {"peak": peak, "c0": w_mean, "c1": 0.0, "c2": 0.0, "r2": 0.0, "std_err": w_std}
 
     X = np.column_stack([np.ones_like(dd), dd, dd ** 2])
     try:
-        res = lsq_linear(X, vol_vals, bounds=([5.0, 0.0, 0.0], [np.inf, np.inf, np.inf]))
+        if use_ewm:
+            sw = np.sqrt(w)
+            res = lsq_linear(X * sw[:, None], vol_vals * sw, bounds=([5.0, 0.0, 0.0], [50.0, 10.0, 5.0]))
+        else:
+            res = lsq_linear(X, vol_vals, bounds=([5.0, 0.0, 0.0], [np.inf, np.inf, np.inf]))
         c0, c1, c2 = float(res.x[0]), float(res.x[1]), float(res.x[2])
         pred = X @ res.x
     except Exception:
-        c0, c1, c2 = float(np.mean(vol_vals)), 0.0, 0.0
+        c0 = float(np.sum(w * vol_vals) / w_sum)
+        c1, c2 = 0.0, 0.0
         pred = np.full_like(vol_vals, c0, dtype=float)
 
-    ss_res = float(np.sum((vol_vals - pred) ** 2))
-    ss_tot = float(np.sum((vol_vals - np.mean(vol_vals)) ** 2))
+    w_mean = float(np.sum(w * vol_vals) / w_sum)
+    ss_res = float(np.sum(w * (vol_vals - pred) ** 2))
+    ss_tot = float(np.sum(w * (vol_vals - w_mean) ** 2))
     r2 = max(0.0, min(1.0, 1.0 - ss_res / ss_tot)) if ss_tot > 1e-9 else 0.0
-    std_err = float(np.std(vol_vals - pred, ddof=1)) if len(vol_vals) > 3 else 1.5
+    if use_ewm:
+        std_err = float(np.sqrt(ss_res / w_sum)) if n > 3 else 1.5
+    else:
+        std_err = float(np.std(vol_vals - pred, ddof=1)) if n > 3 else 1.5
     return {
         "peak": peak,
         "c0": c0,
@@ -255,7 +291,7 @@ def compute_fair_vix_asset_model(
     window_days: int = 60,
     vrp_mode: str = "auto",
     vrp_fixed_pts: float = DEFAULT_VRP_PTS,
-    blend_mode: str = "equal",
+    blend_mode: str = "r2_weighted",
     as_of_date: Optional[str] = None,
     inclusive_as_of: bool = False,
 ) -> Dict[str, Any]:
@@ -340,13 +376,28 @@ def compute_fair_vix_asset_model(
             vrp_base_now = DEFAULT_VRP_PTS
             fair_m2_now = exp_rv_now + vrp_base_now
 
-    # Current 60D quadratic fit (strictly on trailing window_days of df_fit)
+    # Causal rolling 60D-peak drawdowns across df_fit, fitted over 252D with 30D EWM decay
+    dates_all = list(df_fit.index)
+    spots_all = df_fit["spot"].values.astype(float)
+    vols_all = df_fit["vol"].values.astype(float)
+    roll_peak_all = pd.Series(spots_all).rolling(window_days, min_periods=1).max().values.astype(float)
+    dd_all = np.maximum(0.0, (roll_peak_all - spots_all) / np.where(roll_peak_all > 0, roll_peak_all, 1.0) * 100.0)
+    quad_fit_win = max(window_days, QUAD_FIT_WINDOW_DAYS)
+
+    # Current quadratic fit on trailing 252D of rolling 60D drawdowns (30D EWM half-life)
+    quad = fit_quadratic_drawdown(
+        spots_all[-quad_fit_win:],
+        vols_all[-quad_fit_win:],
+        dd_vals=dd_all[-quad_fit_win:],
+        half_life=QUAD_EWM_HALF_LIFE_DAYS,
+        peak_window=window_days,
+    )
+    w_m2_now, w_m4_now = _resolve_blend_weights(quad["r2"], blend_mode)
+
+    # Scatter dots remain the recent window_days (60D) sessions anchored against current 60D peak
     w_df = df_fit.iloc[-window_days:] if len(df_fit) >= window_days else df_fit
     spot_arr = w_df["spot"].values.astype(float)
     vol_arr = w_df["vol"].values.astype(float)
-    quad = fit_quadratic_drawdown(spot_arr, vol_arr)
-    w_m2_now, w_m4_now = _resolve_blend_weights(quad["r2"], blend_mode)
-
     peak_60d = quad["peak"]
     dd_scatter = np.maximum(0.0, (peak_60d - spot_arr) / peak_60d * 100.0) if peak_60d > 0 else np.zeros_like(spot_arr)
 
@@ -374,17 +425,20 @@ def compute_fair_vix_asset_model(
     }
 
     # Precompute point-in-time daily parameters (entering day d_i, strictly using dates < d_i)
-    dates_all = list(df_fit.index)
-    spots_all = df_fit["spot"].values.astype(float)
-    vols_all = df_fit["vol"].values.astype(float)
     daily_params: Dict[str, Dict[str, Any]] = {}
 
     for i, d_str in enumerate(dates_all):
         if i < 6:
             continue
-        start_idx = max(0, i - window_days)
+        q_start = max(0, i - quad_fit_win)
         prior_d = dates_all[i - 1]
-        q_i = fit_quadratic_drawdown(spots_all[start_idx:i], vols_all[start_idx:i])
+        q_i = fit_quadratic_drawdown(
+            spots_all[q_start:i],
+            vols_all[q_start:i],
+            dd_vals=dd_all[q_start:i],
+            half_life=QUAD_EWM_HALF_LIFE_DAYS,
+            peak_window=window_days,
+        )
         wm2_i, wm4_i = _resolve_blend_weights(q_i["r2"], blend_mode)
 
         e_rv_i = float(exp_rv_all.loc[prior_d]) if pd.notna(exp_rv_all.loc[prior_d]) else exp_rv_now
@@ -435,6 +489,8 @@ def compute_fair_vix_asset_model(
         "vol_col": vol_col,
         "last_settled_date": last_fit_date,
         "window_days": window_days,
+        "quad_fit_window": quad_fit_win,
+        "quad_half_life": QUAD_EWM_HALF_LIFE_DAYS,
         "rv_method": rv_method,
         "rv_5d": round(rv5_now, 2),
         "rv_10d": round(rv10_now, 2),
@@ -545,7 +601,7 @@ def evaluate_live_fair_vix(
         "quad_std": round(float(model_pack.get("quad_std", 1.5)), 2),
         "w_m2": round(w_m2, 2),
         "w_m4": round(w_m4, 2),
-        "blend_mode": model_pack.get("blend_mode", "equal"),
+        "blend_mode": model_pack.get("blend_mode", "r2_weighted"),
         "implied_daily_move_pct": round(imp_daily_move_pct, 2),
         "realized_daily_move_pct": round(real_daily_move_pct, 2),
         "is_dual_sticky": is_dual_sticky,
