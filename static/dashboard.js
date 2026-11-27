@@ -1332,6 +1332,92 @@ function setupCorrHoverTracking() {
   });
 }
 
+function attachDualPaneCrosshair(chartId, verticalColor = 'rgba(148, 163, 184, 0.35)') {
+  const chartEl = document.getElementById(chartId);
+  if (!chartEl) return;
+
+  if (!chartEl._crosshairV || !chartEl._crosshairV.isConnected) {
+    const vLine = document.createElement('div');
+    vLine.className = 'chart-crosshair-v';
+    chartEl.appendChild(vLine);
+    chartEl._crosshairV = vLine;
+  }
+  if (!chartEl._crosshairH || !chartEl._crosshairH.isConnected) {
+    const hLine = document.createElement('div');
+    hLine.className = 'chart-crosshair-h';
+    chartEl.appendChild(hLine);
+    chartEl._crosshairH = hLine;
+  }
+
+  chartEl._crosshairV.style.borderLeftColor = verticalColor;
+
+  if (chartEl._hasDualCrosshair) return;
+  chartEl._hasDualCrosshair = true;
+
+  const hideCrosshair = () => {
+    if (chartEl._crosshairV) chartEl._crosshairV.style.display = 'none';
+    if (chartEl._crosshairH) chartEl._crosshairH.style.display = 'none';
+  };
+
+  chartEl.addEventListener('mousemove', (e) => {
+    const fl = chartEl._fullLayout;
+    if (!fl || !fl.xaxis || !fl.yaxis) {
+      hideCrosshair();
+      return;
+    }
+
+    const rect = chartEl.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const xLeft = fl.xaxis._offset;
+    const xWidth = fl.xaxis._length;
+    const xRight = xLeft + xWidth;
+
+    const y1Top = fl.yaxis._offset;
+    const y1Bot = y1Top + fl.yaxis._length;
+
+    const lowerAxis = (fl.yaxis3 && typeof fl.yaxis3._offset === 'number' && typeof fl.yaxis3._length === 'number')
+      ? fl.yaxis3
+      : ((fl.yaxis2 && !fl.yaxis2.overlaying && typeof fl.yaxis2._offset === 'number' && typeof fl.yaxis2._length === 'number')
+          ? fl.yaxis2
+          : null);
+    let y3Top = null;
+    let y3Bot = null;
+    if (lowerAxis) {
+      y3Top = lowerAxis._offset;
+      y3Bot = y3Top + lowerAxis._length;
+    }
+
+    const fullTop = (y3Top !== null) ? Math.min(y1Top, y3Top) : y1Top;
+    const fullBot = (y3Bot !== null) ? Math.max(y1Bot, y3Bot) : y1Bot;
+
+    if (mx >= xLeft && mx <= xRight && my >= fullTop && my <= fullBot) {
+      const vLine = chartEl._crosshairV;
+      vLine.style.left = `${Math.round(mx)}px`;
+      vLine.style.top = `${Math.round(fullTop)}px`;
+      vLine.style.height = `${Math.round(fullBot - fullTop)}px`;
+      vLine.style.display = 'block';
+
+      const inUpper = (my >= y1Top && my <= y1Bot);
+      const inLower = (y3Top !== null && my >= y3Top && my <= y3Bot);
+      const hLine = chartEl._crosshairH;
+      if (inUpper || inLower) {
+        hLine.style.left = `${Math.round(xLeft)}px`;
+        hLine.style.width = `${Math.round(xWidth)}px`;
+        hLine.style.top = `${Math.round(my)}px`;
+        hLine.style.display = 'block';
+      } else {
+        hLine.style.display = 'none';
+      }
+    } else {
+      hideCrosshair();
+    }
+  });
+
+  chartEl.addEventListener('mouseleave', hideCrosshair);
+}
+
 function toggleCorrVolInvert() {
   isVolInverted = !isVolInverted;
   if (btnCorrInvert) {
@@ -2203,6 +2289,7 @@ function renderTechVolChart(tf = currentTimeframe) {
     plot_bgcolor: 'transparent',
     autosize: true,
     hovermode: 'x',
+    dragmode: false,
     hoverdistance: 50,
     hoverlabel: {
       bgcolor: 'rgba(15, 23, 42, 0.95)',
@@ -2221,24 +2308,22 @@ function renderTechVolChart(tf = currentTimeframe) {
       tickfont: { color: '#94A3B8', size: 10 },
       showgrid: true,
       nticks: 10,
-      showspikes: true,
-      spikemode: 'across',
-      spikesnap: 'cursor',
-      spikecolor: '#C084FC',
-      spikethickness: 1,
-      spikedash: 'dot'
+      fixedrange: true,
+      showspikes: false
     },
     yaxis: {
       domain: [0.48, 1.0],
       title: { text: 'Vol Level (VXN & VIX)', font: { color: '#94A3B8', size: 10 } },
       gridcolor: '#1e293b',
-      tickfont: { color: '#94A3B8', size: 10 }
+      tickfont: { color: '#94A3B8', size: 10 },
+      fixedrange: true
     },
     yaxis2: {
       domain: [0.0, 0.40],
       title: { text: 'Tech Spread (pts)', font: { color: '#F59E0B', size: 10 } },
       gridcolor: '#1e293b',
-      tickfont: { color: '#94A3B8', size: 10 }
+      tickfont: { color: '#94A3B8', size: 10 },
+      fixedrange: true
     },
     legend: {
       orientation: 'h',
@@ -2252,6 +2337,8 @@ function renderTechVolChart(tf = currentTimeframe) {
   Plotly.newPlot('term-structure-chart', [traceVXN, traceVIX, traceSpread, traceEquilibrium, tracePanic], layout, {
     responsive: true,
     displayModeBar: false
+  }).then(() => {
+    attachDualPaneCrosshair('term-structure-chart', 'rgba(192, 132, 252, 0.35)');
   });
 }
 
@@ -2341,6 +2428,7 @@ function renderTermStructureChart(tf = '1D') {
     plot_bgcolor: 'transparent',
     autosize: true,
     hovermode: 'x',
+    dragmode: false,
     hoverdistance: 50,
     hoverlabel: {
       bgcolor: 'rgba(15, 23, 42, 0.95)',
@@ -2359,24 +2447,22 @@ function renderTermStructureChart(tf = '1D') {
       tickfont: { color: '#94A3B8', size: 10 },
       showgrid: true,
       nticks: 10,
-      showspikes: true,
-      spikemode: 'across',
-      spikesnap: 'cursor',
-      spikecolor: '#00E5FF',
-      spikethickness: 1,
-      spikedash: 'dot'
+      fixedrange: true,
+      showspikes: false
     },
     yaxis: {
       domain: [0.48, 1.0],
       title: { text: 'Index Level', font: { color: '#94A3B8', size: 10 } },
       gridcolor: '#1e293b',
-      tickfont: { color: '#94A3B8', size: 10 }
+      tickfont: { color: '#94A3B8', size: 10 },
+      fixedrange: true
     },
     yaxis2: {
       domain: [0.0, 0.40],
       title: { text: 'Ratio', font: { color: '#94A3B8', size: 10 } },
       gridcolor: '#1e293b',
-      tickfont: { color: '#94A3B8', size: 10 }
+      tickfont: { color: '#94A3B8', size: 10 },
+      fixedrange: true
     },
     legend: {
       orientation: 'h',
@@ -2390,6 +2476,8 @@ function renderTermStructureChart(tf = '1D') {
   Plotly.newPlot('term-structure-chart', [traceVIX, traceVIX3M, traceRatio, traceFlattening, traceInversion], layout, {
     responsive: true,
     displayModeBar: false
+  }).then(() => {
+    attachDualPaneCrosshair('term-structure-chart', 'rgba(0, 229, 255, 0.35)');
   });
 }
 
@@ -4282,12 +4370,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         showgrid: true,
         nticks: 10,
         fixedrange: true,
-        showspikes: true,
-        spikemode: 'across',
-        spikesnap: 'cursor',
-        spikecolor: '#00E5FF',
-        spikethickness: 1,
-        spikedash: 'dot'
+        showspikes: false
       },
       yaxis: {
         domain: [0.48, 1.0],
@@ -5213,12 +5296,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         showgrid: true,
         nticks: 10,
         fixedrange: true,
-        showspikes: true,
-        spikemode: 'across',
-        spikesnap: 'cursor',
-        spikecolor: '#00E5FF',
-        spikethickness: 1,
-        spikedash: 'dot'
+        showspikes: false
       },
       yaxis: {
         domain: [0.48, 1.0],
@@ -5289,6 +5367,7 @@ function attachCorrelationChartClickListener() {
   const chartEl = document.getElementById('correlation-chart');
   if (!chartEl) return;
   setupCorrHoverTracking();
+  attachDualPaneCrosshair('correlation-chart', 'rgba(0, 229, 255, 0.35)');
 
   // Re-bind plotly_click on the chart element (Plotly.newPlot clears internal events on gd)
   if (typeof chartEl.removeAllListeners === 'function') {
@@ -6165,18 +6244,22 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     m4Arr[i] !== null ? m4Arr[i].toFixed(2) : '-',
     compResArr[i] !== null ? ((compResArr[i] >= 0 ? '+' : '') + compResArr[i].toFixed(2)) : '-',
     ovResArr[i] !== null ? ((ovResArr[i] >= 0 ? '+' : '') + ovResArr[i].toFixed(2)) : '-',
-    settlementMap[t] ? "  <span style='color:#38BDF8;font-weight:bold'>🏛️ Official Close</span>" : ""
+    settlementMap[t] ? "  <span style='color:#38BDF8;font-weight:bold'>🏛️ Official Close</span>" : "",
+    (typeof spotPctDailyArr[i] === 'number' && !isNaN(spotPctDailyArr[i]))
+      ? ((spotPctDailyArr[i] >= 0 ? '+' : '') + spotPctDailyArr[i].toFixed(2) + '%')
+      : '-',
+    (typeof volPtDailyArr[i] === 'number' && !isNaN(volPtDailyArr[i]))
+      ? ((volPtDailyArr[i] >= 0 ? '+' : '') + volPtDailyArr[i].toFixed(2))
+      : '-'
   ]);
 
   if (currentFvDisplayMode === 'beta') {
     fvSegs.forEach((seg, sIdx) => {
       const tSeg = times.slice(seg.start, seg.end);
-      const cSeg = customUpper.slice(seg.start, seg.end);
       traces.push(
         {
           x: tSeg,
           y: spotPctDailyArr.slice(seg.start, seg.end),
-          customdata: cSeg,
           name: `${assetLabel} %`,
           legendgroup: 'fv_spot',
           showlegend: (sIdx === 0),
@@ -6184,12 +6267,11 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
           line: { color: '#10B981', width: 1.8 },
           xaxis: 'x',
           yaxis: 'y',
-          hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>${assetLabel}: <b>%{y:+.2f}%</b><extra></extra>`
+          hoverinfo: 'skip'
         },
         {
           x: tSeg,
           y: volPtDailyArr.slice(seg.start, seg.end),
-          customdata: cSeg,
           name: `${volLabel} Pt (Inv ▼)`,
           legendgroup: 'fv_vpt',
           showlegend: (sIdx === 0),
@@ -6197,12 +6279,11 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
           line: { color: '#00E5FF', width: 2.0 },
           xaxis: 'x',
           yaxis: 'y2',
-          hovertemplate: `${volLabel}: <b>%{customdata[0]}</b> (%{y:+.2f} pts)<extra></extra>`
+          hoverinfo: 'skip'
         },
         {
           x: tSeg,
           y: fairPtDailyArr.slice(seg.start, seg.end),
-          customdata: cSeg,
           name: `Composite Fair ${volLabel} (Inv ▼)`,
           legendgroup: 'fv_fpt',
           showlegend: (sIdx === 0),
@@ -6210,19 +6291,29 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
           line: { color: '#F59E0B', width: 2.2, dash: 'dash' },
           xaxis: 'x',
           yaxis: 'y2',
-          hovertemplate: `Composite Fair: <b>%{customdata[1]}</b> | Gap: <b>%{customdata[4]} pts</b><extra></extra>`
+          hoverinfo: 'skip'
         }
       );
+    });
+    traces.push({
+      x: times,
+      y: volPtDailyArr,
+      customdata: customUpper,
+      name: `${volLabel} Pt (Inv ▼)`,
+      mode: 'lines',
+      line: { color: 'transparent', width: 0 },
+      xaxis: 'x',
+      yaxis: 'y2',
+      showlegend: false,
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>${assetLabel}: <b>%{customdata[7]}</b> · ${volLabel}: <b>%{customdata[0]}</b> (%{customdata[8]} pts)<br>Comp Fair: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)<extra></extra>`
     });
   } else {
     fvSegs.forEach((seg, sIdx) => {
       const tSeg = times.slice(seg.start, seg.end);
-      const cSeg = customUpper.slice(seg.start, seg.end);
       traces.push(
         {
           x: tSeg,
           y: liveVolArr.slice(seg.start, seg.end),
-          customdata: cSeg,
           name: `Live ${volLabel}`,
           legendgroup: 'fv_live',
           showlegend: (sIdx === 0),
@@ -6230,12 +6321,11 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
           line: { color: '#00E5FF', width: 2.0 },
           xaxis: 'x',
           yaxis: 'y',
-          hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>Live ${volLabel}: <b>%{y:.2f}</b><br>Comp Fair: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)<extra></extra>`
+          hoverinfo: 'skip'
         },
         {
           x: tSeg,
           y: compFairArr.slice(seg.start, seg.end),
-          customdata: cSeg,
           name: `Composite Fair ${volLabel}`,
           legendgroup: 'fv_fair',
           showlegend: (sIdx === 0),
@@ -6245,7 +6335,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
           fillcolor: 'rgba(245, 158, 11, 0.10)',
           xaxis: 'x',
           yaxis: 'y',
-          hovertemplate: `Composite Fair: <b>%{y:.2f}</b> (HAR-RV: %{customdata[2]}, EWM Quad: %{customdata[3]})<extra></extra>`
+          hoverinfo: 'skip'
         }
       );
       if (showFvComponents) {
@@ -6260,7 +6350,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
             line: { color: '#10B981', width: 1.4, dash: 'dot' },
             xaxis: 'x',
             yaxis: 'y',
-            hovertemplate: 'HAR-RV: <b>%{y:.2f}</b><extra></extra>'
+            hoverinfo: 'skip'
           },
           {
             x: tSeg,
@@ -6272,21 +6362,31 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
             line: { color: '#A855F7', width: 1.4, dash: 'dot' },
             xaxis: 'x',
             yaxis: 'y',
-            hovertemplate: 'EWM Quad: <b>%{y:.2f}</b><extra></extra>'
+            hoverinfo: 'skip'
           }
         );
       }
+    });
+    traces.push({
+      x: times,
+      y: liveVolArr,
+      customdata: customUpper,
+      name: `Live ${volLabel}`,
+      mode: 'lines',
+      line: { color: 'transparent', width: 0 },
+      xaxis: 'x',
+      yaxis: 'y',
+      showlegend: false,
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>Live ${volLabel}: <b>%{customdata[0]}</b> · Comp Fair: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)<br>HAR-RV: <b>%{customdata[2]}</b> · EWM Quad: <b>%{customdata[3]}</b><extra></extra>`
     });
   }
 
   // Lower Panel Traces (yaxis3): Composite Residual + Intraday Overvix Residual + Reference Lines
   fvSegs.forEach((seg, sIdx) => {
     const tSeg = times.slice(seg.start, seg.end);
-    const cSeg = customUpper.slice(seg.start, seg.end);
     traces.push({
       x: tSeg,
       y: compResArr.slice(seg.start, seg.end),
-      customdata: cSeg,
       name: `Composite Resid (${volLabel} − Fair)`,
       legendgroup: 'fv_compres',
       showlegend: (sIdx === 0),
@@ -6296,13 +6396,12 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       fillcolor: 'rgba(245, 158, 11, 0.14)',
       xaxis: 'x',
       yaxis: 'y3',
-      hovertemplate: `Comp Residual: <b>%{customdata[4]} pts</b><extra></extra>`
+      hoverinfo: 'skip'
     });
     if (showFvOvervixFlow) {
       traces.push({
         x: tSeg,
         y: ovResArr.slice(seg.start, seg.end),
-        customdata: cSeg,
         name: `${ovLabel} Residual (Flow)`,
         legendgroup: 'fv_ovres',
         showlegend: (sIdx === 0),
@@ -6310,9 +6409,21 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
         line: { color: '#00E5FF', width: 1.5 },
         xaxis: 'x',
         yaxis: 'y3',
-        hovertemplate: `${ovLabel} Residual: <b>%{customdata[5]} pts</b><extra></extra>`
+        hoverinfo: 'skip'
       });
     }
+  });
+  traces.push({
+    x: times,
+    y: compResArr,
+    customdata: customUpper,
+    name: `Composite Resid (${volLabel} − Fair)`,
+    mode: 'lines',
+    line: { color: 'transparent', width: 0 },
+    xaxis: 'x',
+    yaxis: 'y3',
+    showlegend: false,
+    hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>Comp Residual: <b>%{customdata[4]} pts</b> · ${ovLabel}: <b>%{customdata[5]} pts</b><br>Live ${volLabel}: <b>%{customdata[0]}</b> · Fair: <b>%{customdata[1]}</b><extra></extra>`
   });
 
   traces.push({
@@ -6397,11 +6508,14 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     plot_bgcolor: 'transparent',
     autosize: true,
     height: 510,
-    hovermode: 'x unified',
+    hovermode: 'x',
+    dragmode: false,
+    hoverdistance: 20,
     hoverlabel: {
       bgcolor: 'rgba(15, 23, 42, 0.95)',
       bordercolor: '#F59E0B',
-      font: { family: 'monospace', size: 11, color: '#F8FAFC' }
+      font: { family: 'monospace', size: 11, color: '#F8FAFC' },
+      align: 'left'
     },
     margin: { l: 55, r: 58, t: 28, b: 36 },
     legend: {
@@ -6418,10 +6532,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       gridcolor: '#1e293b',
       tickfont: { color: '#94A3B8', size: 10 },
       fixedrange: true,
-      showspikes: true,
-      spikecolor: '#475569',
-      spikethickness: 1,
-      spikedash: 'dot'
+      showspikes: false
     },
     shapes: fvShapes,
     annotations: fvAnnotations,
@@ -6431,7 +6542,8 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       gridcolor: '#1e293b',
       tickfont: { color: '#94A3B8', size: 10 },
       range: rangeY || undefined,
-      autorange: rangeY ? false : true
+      autorange: rangeY ? false : true,
+      fixedrange: true
     },
     yaxis3: {
       domain: [0.0, 0.34],
@@ -6439,7 +6551,8 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       gridcolor: '#1e293b',
       zeroline: true,
       zerolinecolor: '#334155',
-      tickfont: { color: '#94A3B8', size: 10 }
+      tickfont: { color: '#94A3B8', size: 10 },
+      fixedrange: true
     }
   };
 
@@ -6452,11 +6565,14 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       tickfont: { color: '#F59E0B', size: 10 },
       showgrid: false,
       range: rangeY2,
-      autorange: false
+      autorange: false,
+      fixedrange: true
     };
   }
 
-  Plotly.react(chartEl, traces, layout, { displayModeBar: false, responsive: true });
+  Plotly.react(chartEl, traces, layout, { displayModeBar: false, responsive: true }).then(() => {
+    attachDualPaneCrosshair('fair-vix-chart', 'rgba(245, 158, 11, 0.35)');
+  });
 }
 
 function renderVixFuturesCurveChart(vf, spotVix) {

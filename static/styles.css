@@ -79,19 +79,43 @@ body {
 
 /* Plotly container sizing */
 .chart-container {
+  position: relative;
   min-height: 460px;
   width: 100%;
 }
 
-/* Correlation Chart Interactive Crosshair Cursor for 1-Click Anchoring */
-#correlation-chart {
+/* Interactive Crosshair Cursor & 1px Dual-Pane Crosshair Overlay */
+#correlation-chart,
+#correlation-chart .drag,
+#correlation-chart .nsewdrag,
+#fair-vix-chart,
+#fair-vix-chart .drag,
+#fair-vix-chart .nsewdrag,
+#term-structure-chart,
+#term-structure-chart .drag,
+#term-structure-chart .nsewdrag {
   cursor: crosshair !important;
 }
-#correlation-chart .drag {
-  cursor: crosshair !important;
+#correlation-chart .plot-container,
+#fair-vix-chart .plot-container,
+#term-structure-chart .plot-container {
+  position: relative;
+  z-index: 1;
 }
-#correlation-chart .nsewdrag {
-  cursor: crosshair !important;
+.chart-crosshair-v,
+.chart-crosshair-h {
+  position: absolute;
+  pointer-events: none;
+  display: none;
+  z-index: 0;
+}
+.chart-crosshair-v {
+  width: 0;
+  border-left: 2px dashed rgba(148, 163, 184, 0.35);
+}
+.chart-crosshair-h {
+  height: 0;
+  border-top: 2px dashed rgba(148, 163, 184, 0.28);
 }
 
 /* Interactive Timeframe Stepped Slider Styling */
