@@ -460,6 +460,32 @@ const PDV_A_R1S = 1.0 - Math.exp(-1.0 / 35.0);
 const PDV_A_R2F = 1.0 - Math.exp(-1.0 / 5.0);
 const PDV_A_R2S = 1.0 - Math.exp(-1.0 / 45.0);
 
+// Live WebSocket Chart Throttling & Dirty-Checking (prevents 1 Hz SVG rebuild CPU spikes)
+const LIVE_HEAVY_CHART_INTERVAL_MS = 3000;
+const LIVE_LIGHT_CHART_INTERVAL_MS = 1500;
+let pendingVisibleChartSync = false;
+let lastOvervixRestyleSig = '';
+let lastTsRestyleSig = '';
+let lastTsRestyleAt = 0;
+let lastCorrLiveSig = '';
+let lastCorrLiveAt = 0;
+let lastFvLiveSig = '';
+let lastFvLiveAt = 0;
+let lastFvMiniSig = '';
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && pendingVisibleChartSync) {
+    pendingVisibleChartSync = false;
+    lastOvervixRestyleSig = '';
+    lastTsRestyleAt = 0;
+    lastCorrLiveAt = 0;
+    lastFvLiveAt = 0;
+    if (lastLiveUpdatePayload && currentViewMode === 'live') {
+      updateUI(lastLiveUpdatePayload);
+    }
+  }
+});
+
 // Recovery Anchor State for Dynamic Correlation & Divergence Monitor
 let corrAnchor = {
   active: true,
@@ -948,7 +974,8 @@ function setupGthToggle() {
     }
     renderCorrelationChart(currentCorrMode, currentCorrTf);
     updateCorrMetricDisplay();
-    renderFairVixMonitorChart(currentFvTf);
+    lastFvLiveSig = '';
+  renderFairVixMonitorChart(currentFvTf);
     if (activeData) {
       updateUI(activeData);
     }
@@ -1023,7 +1050,8 @@ function switchAssetPair(pair) {
     renderTermStructureChart(currentTimeframe);
     renderCorrelationChart(currentCorrMode, currentCorrTf);
     updateCorrMetricDisplay();
-    renderFairVixMonitorChart(currentFvTf);
+    lastFvLiveSig = '';
+  renderFairVixMonitorChart(currentFvTf);
     updateUI(liveOrActive);
   }
 }
@@ -1976,6 +2004,7 @@ function renderOvervixChart(bootstrap) {
     showlegend: true
   };
 
+  lastOvervixRestyleSig = '';
   Plotly.newPlot('overvix-chart', traces, layout, { responsive: true, displayModeBar: false }).then(attachOvervixChartClickListener);
 }
 
@@ -5383,6 +5412,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       showlegend: true
     };
 
+  lastCorrLiveAt = Date.now();
   Plotly.react('correlation-chart', plotTraces, layout, {
     responsive: true,
     displayModeBar: false
@@ -5616,6 +5646,7 @@ function setFairVixBasis(basis, syncBackend = true) {
     const bootSrc = (currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap;
     if (bootSrc) renderFairVixScatterChart(bootSrc);
   }
+  lastFvLiveSig = '';
   renderFairVixMonitorChart(currentFvTf);
 
   if (syncBackend && currentViewMode === 'live') {
@@ -5644,6 +5675,10 @@ function renderFairVixMiniChart(fvLive, fvBoot) {
   const liveVol = fvLive.live_vol;
   const headlineFair = getBasisFairFromPayload(fvLive);
   const basisInfo = getBasisLabelInfo(currentFvBasis);
+
+  const miniSig = `${currentAssetPair}|${currentFvBasis}|${liveSpot}|${liveVol}|${headlineFair}|${sc.spot.length}`;
+  if (miniSig === lastFvMiniSig && chartEl.data && chartEl.data.length > 0) return;
+  lastFvMiniSig = miniSig;
 
   const traces = [
     {
@@ -5818,6 +5853,32 @@ function updateFairVixUI(data) {
     const dir = gapPts > 0.5 ? 'above' : (gapPts < -0.5 ? 'below' : 'near');
     const harNote = (typeof fHar === 'number') ? ` Standalone HAR-RV signal: ${fHar.toFixed(2)} (unblended).` : '';
     popDesc.textContent = `${volLbl} (${fv.live_vol.toFixed(2)}) trades ${Math.abs(gapPts).toFixed(2)} pts ${dir} ${basisInfo.titleName} (${fairVal.toFixed(2)}). PDV-4 implies ${typeof fPdv === 'number' ? fPdv.toFixed(2) : '--'} vs 252D EWM Quad at ${typeof fQuad === 'number' ? fQuad.toFixed(2) : '--'}.${harNote}`;
+  }
+
+  // Keep Row 3 live HUD numbers & regime pill fresh at 1 Hz even between throttled chart redraws
+  const setHudTxt = (id, txt, cls) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.textContent = txt;
+      if (cls) el.className = cls;
+    }
+  };
+  setHudTxt('fv-hud-fair-lbl', basisInfo.shortName);
+  setHudTxt('fv-hud-res-lbl', currentFvBasis === 'pdv' ? 'PDV Res' : (currentFvBasis === 'quad' ? 'Quad Res' : 'Comp Res'));
+  setHudTxt('fv-hud-live', fv.live_vol.toFixed(2));
+  setHudTxt('fv-hud-fair', fairVal.toFixed(2));
+  if (typeof fPdv === 'number') setHudTxt('fv-hud-pdv', fPdv.toFixed(2));
+  if (typeof fQuad === 'number') setHudTxt('fv-hud-m4', fQuad.toFixed(2));
+  if (typeof fHar === 'number') setHudTxt('fv-hud-m2', fHar.toFixed(2));
+  setHudTxt('fv-hud-comp-res', `${gSign}${gapPts.toFixed(2)} pts`, gapPts >= thr ? 'text-rose-400 font-bold' : (gapPts <= -thr ? 'text-emerald-400 font-bold' : 'text-amber-300 font-bold'));
+  const fvRegPill = document.getElementById('fv-regime-pill');
+  if (fvRegPill) {
+    fvRegPill.textContent = `${regime} (${gSign}${gapPts.toFixed(2)} pts)`;
+    fvRegPill.className = regime === 'RICH'
+      ? 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-rose-950/90 text-rose-300 border border-rose-700'
+      : (regime === 'CHEAP'
+        ? 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-700'
+        : 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-700');
   }
 
   const popoverFv = document.getElementById('popover-fair-vix');
@@ -6025,6 +6086,7 @@ function renderFairVixScatterChart(bootstrap) {
     showlegend: true
   };
 
+  lastOvervixRestyleSig = '';
   Plotly.newPlot('overvix-chart', traces, layout, { responsive: true, displayModeBar: false }).then(attachOvervixChartClickListener);
 }
 
@@ -6144,7 +6206,8 @@ function setupFairVixMonitorControls() {
       currentFvDisplayMode = 'levels';
       btnLevels.className = activeAmber;
       if (btnBeta) btnBeta.className = idleMode;
-      renderFairVixMonitorChart(currentFvTf);
+      lastFvLiveSig = '';
+  renderFairVixMonitorChart(currentFvTf);
     });
   }
   if (btnBeta) {
@@ -6152,7 +6215,8 @@ function setupFairVixMonitorControls() {
       currentFvDisplayMode = 'beta';
       btnBeta.className = activeAmber;
       if (btnLevels) btnLevels.className = idleMode;
-      renderFairVixMonitorChart(currentFvTf);
+      lastFvLiveSig = '';
+  renderFairVixMonitorChart(currentFvTf);
     });
   }
   if (btnComp) {
@@ -6164,7 +6228,8 @@ function setupFairVixMonitorControls() {
       btnComp.className = showFvComponents
         ? "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-purple-500 text-white shadow-sm transition whitespace-nowrap"
         : idleMode;
-      renderFairVixMonitorChart(currentFvTf);
+      lastFvLiveSig = '';
+  renderFairVixMonitorChart(currentFvTf);
     });
   }
   if (btnHar) {
@@ -6176,7 +6241,8 @@ function setupFairVixMonitorControls() {
       btnHar.className = showFvHarSignal
         ? "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-lime-500 text-black shadow-sm transition whitespace-nowrap"
         : idleMode;
-      renderFairVixMonitorChart(currentFvTf);
+      lastFvLiveSig = '';
+  renderFairVixMonitorChart(currentFvTf);
     });
   }
   if (btnOvervix) {
@@ -6185,7 +6251,8 @@ function setupFairVixMonitorControls() {
       btnOvervix.className = showFvOvervixFlow
         ? "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-cyan-500 text-black shadow-sm transition whitespace-nowrap"
         : idleMode;
-      renderFairVixMonitorChart(currentFvTf);
+      lastFvLiveSig = '';
+  renderFairVixMonitorChart(currentFvTf);
     });
   }
 
@@ -6197,7 +6264,8 @@ function setupFairVixMonitorControls() {
       isMouseHoveringFvChart = false;
       if (pendingLiveFvRender) {
         pendingLiveFvRender = false;
-        renderFairVixMonitorChart(currentFvTf);
+        lastFvLiveSig = '';
+  renderFairVixMonitorChart(currentFvTf);
       }
     });
   }
@@ -6825,6 +6893,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     };
   }
 
+  lastFvLiveAt = Date.now();
   Plotly.react(chartEl, traces, layout, { displayModeBar: false, responsive: true }).then(() => {
     attachDualPaneCrosshair('fair-vix-chart', 'rgba(245, 158, 11, 0.35)');
   });
@@ -8108,27 +8177,37 @@ function updateUI(data) {
     ? ndx.overvix.is_overvixed
     : (isSpxGthLive && data.gth.overvix ? data.gth.overvix.is_overvixed : ov.is_overvixed);
 
+  const isTabHidden = (typeof document !== 'undefined' && document.hidden);
+  const nowMs = Date.now();
   const ovChartEl = document.getElementById('overvix-chart');
 
   if (currentOvervixChartMode === 'fair') {
-    const fvLive = getActiveFairVixPayload(data);
-    if (fvLive && typeof fvLive.live_spot === 'number' && typeof fvLive.live_vol === 'number' && ovChartEl && ovChartEl.data && ovChartEl.data[5]) {
-      Plotly.restyle('overvix-chart', {
-        x: [[fvLive.live_spot]],
-        y: [[fvLive.live_vol]]
-      }, [5]);
-      if (ovChartEl.data[6]) {
+    if (isTabHidden) {
+      pendingVisibleChartSync = true;
+    } else {
+      const fvLive = getActiveFairVixPayload(data);
+      if (fvLive && typeof fvLive.live_spot === 'number' && typeof fvLive.live_vol === 'number' && ovChartEl && ovChartEl.data && ovChartEl.data[5]) {
         const basisFair = getBasisFairFromPayload(fvLive);
-        if (typeof basisFair === 'number') {
-          Plotly.restyle('overvix-chart', {
-            x: [[fvLive.live_spot]],
-            y: [[basisFair]]
-          }, [6]);
+        const ovSig = `fair|${currentAssetPair}|${currentFvBasis}|${fvLive.live_spot}|${fvLive.live_vol}|${basisFair}`;
+        if (ovSig !== lastOvervixRestyleSig) {
+          lastOvervixRestyleSig = ovSig;
+          if (ovChartEl.data[6] && typeof basisFair === 'number') {
+            Plotly.restyle('overvix-chart', {
+              x: [[fvLive.live_spot], [fvLive.live_spot]],
+              y: [[fvLive.live_vol], [basisFair]]
+            }, [5, 6]);
+          } else {
+            Plotly.restyle('overvix-chart', {
+              x: [[fvLive.live_spot]],
+              y: [[fvLive.live_vol]]
+            }, [5]);
+          }
         }
       }
     }
   } else if (!hasLiveSessionStarted) {
-    if (ovChartEl && ovChartEl.data && ovChartEl.data[5] && ovChartEl.data[5].x && ovChartEl.data[5].x.length > 0) {
+    if (!isTabHidden && ovChartEl && ovChartEl.data && ovChartEl.data[5] && ovChartEl.data[5].x && ovChartEl.data[5].x.length > 0) {
+      lastOvervixRestyleSig = 'inactive';
       Plotly.restyle('overvix-chart', {
         x: [[]],
         y: [[]],
@@ -8142,7 +8221,7 @@ function updateUI(data) {
     const overlay = buildOvernightEsOverlay(data.gth);
     const nextAnn = overlay.annotations[0];
     const curAnn = ovChartEl && ovChartEl.layout && ovChartEl.layout.annotations ? ovChartEl.layout.annotations[0] : null;
-    if (!curAnn || curAnn.x !== nextAnn.x || curAnn.text !== nextAnn.text) {
+    if (!isTabHidden && (!curAnn || curAnn.x !== nextAnn.x || curAnn.text !== nextAnn.text)) {
       Plotly.relayout('overvix-chart', {
         shapes: overlay.shapes,
         annotations: overlay.annotations
@@ -8154,7 +8233,9 @@ function updateUI(data) {
       ? data.overvix.intraday_trail_gth
       : ((cachedTrailGth && cachedTrailGth.x && cachedTrailGth.x.length > 0) ? cachedTrailGth : cachedTrail);
 
-    if (trailGth && trailGth.x && trailGth.x.length > 0 && ovChartEl && ovChartEl.data && ovChartEl.data[5]) {
+    if (isTabHidden) {
+      pendingVisibleChartSync = true;
+    } else if (trailGth && trailGth.x && trailGth.x.length > 0 && ovChartEl && ovChartEl.data && ovChartEl.data[5]) {
       const lastIdx = trailGth.x.length - 1;
       const lastX = trailGth.x[lastIdx];
       const lastY = trailGth.y[lastIdx];
@@ -8182,20 +8263,24 @@ function updateUI(data) {
         ? "  <span style='color:#FF5370;font-weight:bold'>🚨 ALERT</span>"
         : (residVal <= -thresh ? "  <span style='color:#06B6D4;font-weight:bold'>📉 CRUSH</span>" : "");
 
-      Plotly.restyle('overvix-chart', {
-        x: [[lastX]],
-        y: [[lastY]],
-        name: ['Session Close Point'],
-        customdata: [[[residStr, tagStr, liveSpotStr, liveVolStr]]],
-        'marker.color': ['#00E5FF'],
-        'marker.size': [14],
-        'marker.line': [{ color: '#FFFFFF', width: 2 }],
-        visible: [true],
-        showlegend: [true]
-      }, [5]);
+      const ovSig = `gth_es|${lastX}|${lastY}|${rawSpot}|${rawVol}|${trailGth.x.length}`;
+      if (ovSig !== lastOvervixRestyleSig) {
+        lastOvervixRestyleSig = ovSig;
+        Plotly.restyle('overvix-chart', {
+          x: [[lastX]],
+          y: [[lastY]],
+          name: ['Session Close Point'],
+          customdata: [[[residStr, tagStr, liveSpotStr, liveVolStr]]],
+          'marker.color': ['#00E5FF'],
+          'marker.size': [14],
+          'marker.line': [{ color: '#FFFFFF', width: 2 }],
+          visible: [true],
+          showlegend: [true]
+        }, [5]);
+      }
     }
   } else if (activePt && activePt.y !== null) {
-    if (ovChartEl && ovChartEl.layout && ((ovChartEl.layout.shapes && ovChartEl.layout.shapes.length > 0) || (ovChartEl.layout.annotations && ovChartEl.layout.annotations.length > 0))) {
+    if (!isTabHidden && ovChartEl && ovChartEl.layout && ((ovChartEl.layout.shapes && ovChartEl.layout.shapes.length > 0) || (ovChartEl.layout.annotations && ovChartEl.layout.annotations.length > 0))) {
       Plotly.relayout('overvix-chart', { shapes: [], annotations: [] });
     }
     const isLivePoint = (data.is_rth_active === true) || isSpxGthLive;
@@ -8215,17 +8300,8 @@ function updateUI(data) {
     const liveSpotStr = (typeof liveSpot === 'number' && !isNaN(liveSpot)) ? liveSpot.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (liveSpot || '-');
     const liveVolStr = (typeof liveVol === 'number' && !isNaN(liveVol)) ? liveVol.toFixed(2) : (liveVol || '-');
 
-    Plotly.restyle('overvix-chart', {
-      x: [[activePt.x]],
-      y: [[activePt.y]],
-      name: [pointLabel],
-      customdata: [[[liveResStr, liveTag, liveSpotStr, liveVolStr]]],
-      'marker.color': [isTargetOvervixed ? '#FF1744' : (isSpxGthLive ? '#818CF8' : '#00E5FF')],
-      visible: [true],
-      showlegend: [true]
-    }, [5]);
-
-    // Dynamically append live point to intraday trail during RTH or GTH_ACTIVE
+    // Dynamically append live point to intraday trail during RTH or GTH_ACTIVE (always keep data buffer updated)
+    let trailUpdated = false;
     if (isLivePoint && cachedTrail && data.datetime) {
       if (!cachedTrail.x) cachedTrail.x = [];
       if (!cachedTrail.y) cachedTrail.y = [];
@@ -8245,21 +8321,45 @@ function updateUI(data) {
       const liveDt = data.datetime;
       const n = cachedTrail.times.length;
       if (n > 0 && (cachedTrail.times[n - 1] === liveDt || cachedTrail.times[n - 1].slice(11, 16) === liveDt.slice(11, 16))) {
-        cachedTrail.x[n - 1] = activePt.x;
-        cachedTrail.y[n - 1] = activePt.y;
-        cachedTrail.customdata[n - 1] = [ptResStr, ptTag, liveSpotStr, liveVolStr];
+        if (cachedTrail.x[n - 1] !== activePt.x || cachedTrail.y[n - 1] !== activePt.y) {
+          cachedTrail.x[n - 1] = activePt.x;
+          cachedTrail.y[n - 1] = activePt.y;
+          cachedTrail.customdata[n - 1] = [ptResStr, ptTag, liveSpotStr, liveVolStr];
+          trailUpdated = true;
+        }
       } else {
         cachedTrail.x.push(activePt.x);
         cachedTrail.y.push(activePt.y);
         cachedTrail.times.push(liveDt);
         cachedTrail.customdata.push([ptResStr, ptTag, liveSpotStr, liveVolStr]);
+        trailUpdated = true;
       }
-      Plotly.restyle('overvix-chart', {
-        x: [cachedTrail.x],
-        y: [cachedTrail.y],
-        text: [cachedTrail.times],
-        customdata: [cachedTrail.customdata]
-      }, [4]);
+    }
+
+    if (isTabHidden) {
+      pendingVisibleChartSync = true;
+    } else {
+      const ovSig = `lin|${currentAssetPair}|${isSpxGthLive}|${activePt.x}|${activePt.y}|${isTargetOvervixed}|${cachedTrail ? cachedTrail.times.length : 0}`;
+      if (ovSig !== lastOvervixRestyleSig || trailUpdated) {
+        lastOvervixRestyleSig = ovSig;
+        Plotly.restyle('overvix-chart', {
+          x: [[activePt.x]],
+          y: [[activePt.y]],
+          name: [pointLabel],
+          customdata: [[[liveResStr, liveTag, liveSpotStr, liveVolStr]]],
+          'marker.color': [isTargetOvervixed ? '#FF1744' : (isSpxGthLive ? '#818CF8' : '#00E5FF')],
+          visible: [true],
+          showlegend: [true]
+        }, [5]);
+        if (trailUpdated && cachedTrail) {
+          Plotly.restyle('overvix-chart', {
+            x: [cachedTrail.x],
+            y: [cachedTrail.y],
+            text: [cachedTrail.times],
+            customdata: [cachedTrail.customdata]
+          }, [4]);
+        }
+      }
     }
   }
 
@@ -8308,17 +8408,25 @@ function updateUI(data) {
           dt.spread.push(techVol.spread);
           dt.ratio.push(techVol.ratio);
         }
-        Plotly.restyle('term-structure-chart', {
-          x: [dt.times, dt.times, dt.times],
-          y: [dt.vxn, dt.vix, dt.spread]
-        }, [0, 1, 2]);
-        Plotly.restyle('term-structure-chart', {
-          customdata: [buildTechVolCustomdata(dt.times, dt.vxn, dt.vix, dt.spread, dt.ratio)]
-        }, [0]);
-        if (dt.times.length > 0) {
+        const tsSig = `NDX|${liveDt.slice(0, 16)}|${vxnVal}|${mkt.vix.current}|${techVol.spread}|${dt.times.length}`;
+        const tsMinuteChanged = lastTsRestyleSig.split('|')[1] !== liveDt.slice(0, 16);
+        if (isTabHidden) {
+          pendingVisibleChartSync = true;
+        } else if (tsSig !== lastTsRestyleSig && (tsMinuteChanged || (nowMs - lastTsRestyleAt) >= LIVE_LIGHT_CHART_INTERVAL_MS)) {
+          lastTsRestyleSig = tsSig;
+          lastTsRestyleAt = nowMs;
           Plotly.restyle('term-structure-chart', {
-            x: [[dt.times[0], liveDt], [dt.times[0], liveDt]]
-          }, [3, 4]);
+            x: [dt.times, dt.times, dt.times],
+            y: [dt.vxn, dt.vix, dt.spread]
+          }, [0, 1, 2]);
+          Plotly.restyle('term-structure-chart', {
+            customdata: [buildTechVolCustomdata(dt.times, dt.vxn, dt.vix, dt.spread, dt.ratio)]
+          }, [0]);
+          if (dt.times.length > 0) {
+            Plotly.restyle('term-structure-chart', {
+              x: [[dt.times[0], liveDt], [dt.times[0], liveDt]]
+            }, [3, 4]);
+          }
         }
       } else {
         let d1 = cachedTs['1D'];
@@ -8353,17 +8461,25 @@ function updateUI(data) {
           d1.vix3m.push(mkt.vix3m.current);
           d1.ratio.push(ts.ratio);
         }
-        Plotly.restyle('term-structure-chart', {
-          x: [d1.times, d1.times, d1.times],
-          y: [d1.vix, d1.vix3m, d1.ratio]
-        }, [0, 1, 2]);
-        Plotly.restyle('term-structure-chart', {
-          customdata: [buildTsCustomdata(d1.times, d1.vix, d1.vix3m, d1.ratio)]
-        }, [0]);
-        if (d1.times.length > 0) {
+        const tsSig = `SPX|${liveDt.slice(0, 16)}|${mkt.vix.current}|${mkt.vix3m.current}|${ts.ratio}|${d1.times.length}`;
+        const tsMinuteChanged = lastTsRestyleSig.split('|')[1] !== liveDt.slice(0, 16);
+        if (isTabHidden) {
+          pendingVisibleChartSync = true;
+        } else if (tsSig !== lastTsRestyleSig && (tsMinuteChanged || (nowMs - lastTsRestyleAt) >= LIVE_LIGHT_CHART_INTERVAL_MS)) {
+          lastTsRestyleSig = tsSig;
+          lastTsRestyleAt = nowMs;
           Plotly.restyle('term-structure-chart', {
-            x: [[d1.times[0], liveDt], [d1.times[0], liveDt]]
-          }, [3, 4]);
+            x: [d1.times, d1.times, d1.times],
+            y: [d1.vix, d1.vix3m, d1.ratio]
+          }, [0, 1, 2]);
+          Plotly.restyle('term-structure-chart', {
+            customdata: [buildTsCustomdata(d1.times, d1.vix, d1.vix3m, d1.ratio)]
+          }, [0]);
+          if (d1.times.length > 0) {
+            Plotly.restyle('term-structure-chart', {
+              x: [[d1.times[0], liveDt], [d1.times[0], liveDt]]
+            }, [3, 4]);
+          }
         }
       }
     }
@@ -8448,6 +8564,36 @@ function updateUI(data) {
         if (crObj.spot_raw) crObj.spot_raw.push(spotRawVal);
         if (crObj.vol_raw) crObj.vol_raw.push(volRawVal);
         if (crObj.is_gth && gthFlag !== undefined) crObj.is_gth.push(gthFlag);
+      }
+    };
+
+    const maybeLiveRenderDualCharts = (spotVal, volVal, dtStr) => {
+      if (isTabHidden) {
+        if (activeCorrTfs.includes(currentCorrTf) || activeCorrTfs.includes(currentFvTf)) {
+          pendingVisibleChartSync = true;
+        }
+        return;
+      }
+      const minuteKey = (dtStr || '').slice(0, 16);
+      if (activeCorrTfs.includes(currentCorrTf)) {
+        const corrSig = `${currentAssetPair}|${currentCorrTf}|${minuteKey}|${spotVal}|${volVal}`;
+        const corrMinChanged = lastCorrLiveSig.split('|')[2] !== minuteKey;
+        if (isMouseHoveringCorrChart) {
+          if (corrSig !== lastCorrLiveSig) pendingLiveCorrRender = true;
+        } else if (corrSig !== lastCorrLiveSig && (corrMinChanged || (nowMs - lastCorrLiveAt) >= LIVE_HEAVY_CHART_INTERVAL_MS)) {
+          lastCorrLiveSig = corrSig;
+          renderCorrelationChart('dual', currentCorrTf);
+        }
+      }
+      if (activeCorrTfs.includes(currentFvTf)) {
+        const fvSig = `${currentAssetPair}|${currentFvTf}|${currentFvBasis}|${minuteKey}|${spotVal}|${volVal}`;
+        const fvMinChanged = lastFvLiveSig.split('|')[3] !== minuteKey;
+        if (isMouseHoveringFvChart) {
+          if (fvSig !== lastFvLiveSig) pendingLiveFvRender = true;
+        } else if (fvSig !== lastFvLiveSig && (fvMinChanged || (nowMs - lastFvLiveAt) >= LIVE_HEAVY_CHART_INTERVAL_MS)) {
+          lastFvLiveSig = fvSig;
+          renderFairVixMonitorChart(currentFvTf);
+        }
       }
     };
 
@@ -8552,20 +8698,7 @@ function updateUI(data) {
         }
       });
 
-      if (activeCorrTfs.includes(currentCorrTf)) {
-        if (isMouseHoveringCorrChart) {
-          pendingLiveCorrRender = true;
-        } else {
-          renderCorrelationChart('dual', currentCorrTf);
-        }
-      }
-      if (activeCorrTfs.includes(currentFvTf)) {
-        if (isMouseHoveringFvChart) {
-          pendingLiveFvRender = true;
-        } else {
-          renderFairVixMonitorChart(currentFvTf);
-        }
-      }
+      maybeLiveRenderDualCharts(ndxCurrVal, vxnCurrVal, liveDt);
     } else if (!isNdx) {
       if (data.is_rth_active) {
         if (!cachedCorr['1D']) cachedCorr['1D'] = { times: [], spx_pct: [], vix_pt: [], rolling_corr: [], spot_raw: [], vol_raw: [] };
@@ -8585,20 +8718,9 @@ function updateUI(data) {
           }
         }
       });
-      if (activeCorrTfs.includes(currentCorrTf)) {
-        if (isMouseHoveringCorrChart) {
-          pendingLiveCorrRender = true;
-        } else {
-          renderCorrelationChart('dual', currentCorrTf);
-        }
-      }
-      if (activeCorrTfs.includes(currentFvTf)) {
-        if (isMouseHoveringFvChart) {
-          pendingLiveFvRender = true;
-        } else {
-          renderFairVixMonitorChart(currentFvTf);
-        }
-      }
+      const spxLiveSpot = isSpxGthLiveCorr ? data.gth.synthetic_spx : (mkt && mkt.spx ? mkt.spx.current : null);
+      const spxLiveVol = isSpxGthLiveCorr ? data.gth.vix : (mkt && mkt.vix ? mkt.vix.current : null);
+      maybeLiveRenderDualCharts(spxLiveSpot, spxLiveVol, liveDt);
     }
   }
 }
@@ -8699,7 +8821,8 @@ async function bootstrapData() {
     renderTermStructureChart(currentTimeframe);
     renderCorrelationChart(currentCorrMode, currentCorrTf);
     updateCorrMetricDisplay();
-    renderFairVixMonitorChart(currentFvTf);
+    lastFvLiveSig = '';
+  renderFairVixMonitorChart(currentFvTf);
     updateUI(data);
 
     connectWebSocket();
@@ -9116,7 +9239,8 @@ function returnToLiveMode() {
     renderTermStructureChart(currentTimeframe);
     renderCorrelationChart(currentCorrMode, currentCorrTf);
     updateCorrMetricDisplay();
-    renderFairVixMonitorChart(currentFvTf);
+    lastFvLiveSig = '';
+  renderFairVixMonitorChart(currentFvTf);
   }
 
   if (lastLiveUpdatePayload) {

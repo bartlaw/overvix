@@ -34,6 +34,9 @@ PDV_EWM_HALF_LIFE_DAYS = 30.0
 PDV_RIDGE = 5.0
 VALID_BLEND_MODES = ("r2_weighted", "equal", "pdv_only", "quad_only")
 
+_DAILY_PARAMS_CACHE: Dict[Tuple[Any, ...], Dict[str, Dict[str, Any]]] = {}
+_DAILY_PARAMS_CACHE_MAX = 16
+
 
 def safe_to_ohlc_df(bars: Any, prefix: str) -> pd.DataFrame:
     """Parse IBKR daily bars into an OHLC DataFrame indexed by 'YYYY-MM-DD'."""
@@ -695,124 +698,145 @@ def compute_fair_vix_asset_model(
     }
 
     # Precompute point-in-time daily parameters (entering day d_i, strictly using dates < d_i)
-    daily_params: Dict[str, Dict[str, Any]] = {}
-
-    for i, d_str in enumerate(dates_all):
-        if i < 6:
-            continue
-        q_start = max(0, i - quad_fit_win)
-        prior_d = dates_all[i - 1]
-        q_i = fit_quadratic_drawdown(
-            spots_all[q_start:i],
-            vols_all[q_start:i],
-            dd_vals=dd_all[q_start:i],
-            half_life=QUAD_EWM_HALF_LIFE_DAYS,
-            peak_window=window_days,
-        )
-        p_start = max(0, i - 252)
-        pdv_i = fit_pdv_model(
-            r1f_all[p_start:i],
-            r1s_all[p_start:i],
-            s2f_all[p_start:i],
-            s2s_all[p_start:i],
-            vols_all[p_start:i],
-        )
-        w_pdv_i, w_quad_i = _resolve_blend_weights(q_i["r2"], blend_mode, pdv_i["r2"])
-        wm2_i, wm4_i = w_pdv_i, w_quad_i
-
-        e_rv_i = float(exp_rv_all.loc[prior_d]) if pd.notna(exp_rv_all.loc[prior_d]) else exp_rv_now
-        rv21_prior = float(rv21_fit_arr[i - 1]) if np.isfinite(rv21_fit_arr[i - 1]) else e_rv_i
-        if vrp_mode == "fixed":
-            vrp_i = float(vrp_fixed_pts)
-            fair_har_i = e_rv_i + vrp_i
-        else:
-            h_start = max(0, i - 252)
-            har_i = fit_har_rv(
-                ew5_fit_arr[h_start:i],
-                ew21_fit_arr[h_start:i],
-                ew_dn10_fit_arr[h_start:i],
-                vols_all[h_start:i],
+    dp_cache_key = (
+        spot_col,
+        vol_col,
+        int(window_days),
+        str(vrp_mode),
+        round(float(vrp_fixed_pts), 4),
+        str(blend_mode),
+        dates_all[0],
+        dates_all[-1],
+        len(dates_all),
+        round(float(np.sum(spots_all)), 2),
+        round(float(np.sum(vols_all)), 2),
+        round(float(exp_rv_now), 4),
+    )
+    cached_dp = _DAILY_PARAMS_CACHE.get(dp_cache_key)
+    if cached_dp is not None:
+        daily_params = cached_dp
+    else:
+        daily_params = {}
+        for i, d_str in enumerate(dates_all):
+            if i < 6:
+                continue
+            q_start = max(0, i - quad_fit_win)
+            prior_d = dates_all[i - 1]
+            q_i = fit_quadratic_drawdown(
+                spots_all[q_start:i],
+                vols_all[q_start:i],
+                dd_vals=dd_all[q_start:i],
+                half_life=QUAD_EWM_HALF_LIFE_DAYS,
+                peak_window=window_days,
             )
-            if not har_i["is_fallback"]:
-                ew5_p = float(ew5_fit_arr[i - 1]) if np.isfinite(ew5_fit_arr[i - 1]) else e_rv_i
-                ew21_p = float(ew21_fit_arr[i - 1]) if np.isfinite(ew21_fit_arr[i - 1]) else e_rv_i
-                ew_dn10_p = float(ew_dn10_fit_arr[i - 1]) if np.isfinite(ew_dn10_fit_arr[i - 1]) else e_rv_i
-                fair_har_i = max(
-                    8.0,
-                    har_i["a"] + har_i["b_ew5"] * ew5_p + har_i["b_ew21"] * ew21_p + har_i["b_dn10"] * ew_dn10_p,
-                )
-                vrp_i = fair_har_i - rv21_prior
-            else:
-                vrp_i = DEFAULT_VRP_PTS
+            p_start = max(0, i - 252)
+            pdv_i = fit_pdv_model(
+                r1f_all[p_start:i],
+                r1s_all[p_start:i],
+                s2f_all[p_start:i],
+                s2s_all[p_start:i],
+                vols_all[p_start:i],
+            )
+            w_pdv_i, w_quad_i = _resolve_blend_weights(q_i["r2"], blend_mode, pdv_i["r2"])
+            wm2_i, wm4_i = w_pdv_i, w_quad_i
+
+            e_rv_i = float(exp_rv_all.loc[prior_d]) if pd.notna(exp_rv_all.loc[prior_d]) else exp_rv_now
+            rv21_prior = float(rv21_fit_arr[i - 1]) if np.isfinite(rv21_fit_arr[i - 1]) else e_rv_i
+            if vrp_mode == "fixed":
+                vrp_i = float(vrp_fixed_pts)
                 fair_har_i = e_rv_i + vrp_i
+            else:
+                h_start = max(0, i - 252)
+                har_i = fit_har_rv(
+                    ew5_fit_arr[h_start:i],
+                    ew21_fit_arr[h_start:i],
+                    ew_dn10_fit_arr[h_start:i],
+                    vols_all[h_start:i],
+                )
+                if not har_i["is_fallback"]:
+                    ew5_p = float(ew5_fit_arr[i - 1]) if np.isfinite(ew5_fit_arr[i - 1]) else e_rv_i
+                    ew21_p = float(ew21_fit_arr[i - 1]) if np.isfinite(ew21_fit_arr[i - 1]) else e_rv_i
+                    ew_dn10_p = float(ew_dn10_fit_arr[i - 1]) if np.isfinite(ew_dn10_fit_arr[i - 1]) else e_rv_i
+                    fair_har_i = max(
+                        8.0,
+                        har_i["a"] + har_i["b_ew5"] * ew5_p + har_i["b_ew21"] * ew21_p + har_i["b_dn10"] * ew_dn10_p,
+                    )
+                    vrp_i = fair_har_i - rv21_prior
+                else:
+                    vrp_i = DEFAULT_VRP_PTS
+                    fair_har_i = e_rv_i + vrp_i
 
-        fair_pdv_prior_i = float(
-            evaluate_pdv_at_spot(
-                spots_all[i - 1],
-                spots_all[i - 1],
-                r1f_raw_all[i - 1],
-                r1s_raw_all[i - 1],
-                v2f_raw_all[i - 1],
-                v2s_raw_all[i - 1],
-                pdv_i["b0"],
-                pdv_i["b1f"],
-                pdv_i["b1s"],
-                pdv_i["b2f"],
-                pdv_i["b2s"],
+            fair_pdv_prior_i = float(
+                evaluate_pdv_at_spot(
+                    spots_all[i - 1],
+                    spots_all[i - 1],
+                    r1f_raw_all[i - 1],
+                    r1s_raw_all[i - 1],
+                    v2f_raw_all[i - 1],
+                    v2s_raw_all[i - 1],
+                    pdv_i["b0"],
+                    pdv_i["b1f"],
+                    pdv_i["b1s"],
+                    pdv_i["b2f"],
+                    pdv_i["b2s"],
+                )
             )
-        )
 
-        beta_slope = None
-        beta_intercept = None
-        b_start = max(1, i - window_days)
-        xb = dx_all[b_start:i]
-        yb = dy_all[b_start:i]
-        b_mask = np.isfinite(xb) & np.isfinite(yb)
-        if int(np.sum(b_mask)) >= 15:
-            xb_v = xb[b_mask]
-            yb_v = yb[b_mask]
-            mean_x = float(np.mean(xb_v))
-            mean_y = float(np.mean(yb_v))
-            var_x = float(np.sum((xb_v - mean_x) ** 2))
-            if var_x > 1e-6:
-                raw_sl = float(np.sum((xb_v - mean_x) * (yb_v - mean_y)) / var_x)
-                beta_slope = max(-5.0, min(-0.3, raw_sl))
-                beta_intercept = float(mean_y - beta_slope * mean_x)
+            beta_slope = None
+            beta_intercept = None
+            b_start = max(1, i - window_days)
+            xb = dx_all[b_start:i]
+            yb = dy_all[b_start:i]
+            b_mask = np.isfinite(xb) & np.isfinite(yb)
+            if int(np.sum(b_mask)) >= 15:
+                xb_v = xb[b_mask]
+                yb_v = yb[b_mask]
+                mean_x = float(np.mean(xb_v))
+                mean_y = float(np.mean(yb_v))
+                var_x = float(np.sum((xb_v - mean_x) ** 2))
+                if var_x > 1e-6:
+                    raw_sl = float(np.sum((xb_v - mean_x) * (yb_v - mean_y)) / var_x)
+                    beta_slope = max(-5.0, min(-0.3, raw_sl))
+                    beta_intercept = float(mean_y - beta_slope * mean_x)
 
-        entry = {
-            "peak_60d": round(q_i["peak"], 2),
-            "c0": round(q_i["c0"], 4),
-            "c1": round(q_i["c1"], 4),
-            "c2": round(q_i["c2"], 5),
-            "quad_r2": round(q_i["r2"], 4),
-            "prev_spot": round(float(spots_all[i - 1]), 2),
-            "pdv_r1f": round(float(r1f_raw_all[i - 1]), 7),
-            "pdv_r1s": round(float(r1s_raw_all[i - 1]), 7),
-            "pdv_v2f": round(float(v2f_raw_all[i - 1]), 9),
-            "pdv_v2s": round(float(v2s_raw_all[i - 1]), 9),
-            "pdv_b0": round(pdv_i["b0"], 4),
-            "pdv_b1f": round(pdv_i["b1f"], 6),
-            "pdv_b1s": round(pdv_i["b1s"], 6),
-            "pdv_b2f": round(pdv_i["b2f"], 5),
-            "pdv_b2s": round(pdv_i["b2s"], 5),
-            "pdv_r2": round(pdv_i["r2"], 4),
-            "fair_pdv": round(fair_pdv_prior_i, 2),
-            "fair_har": round(fair_har_i, 2),
-            "fair_m2": round(fair_har_i, 2),
-            "w_pdv": round(w_pdv_i, 4),
-            "w_quad": round(w_quad_i, 4),
-            "w_m2": round(wm2_i, 4),
-            "w_m4": round(wm4_i, 4),
-            "rv_5d": round(float(rv5_all.loc[prior_d]) if pd.notna(rv5_all.loc[prior_d]) else e_rv_i, 2),
-            "rv_10d": round(float(rv10_all.loc[prior_d]) if pd.notna(rv10_all.loc[prior_d]) else e_rv_i, 2),
-            "rv_21d": round(rv21_prior, 2),
-            "expected_rv": round(e_rv_i, 2),
-            "vrp_base": round(vrp_i, 2),
-        }
-        if beta_slope is not None and beta_intercept is not None:
-            entry["beta_slope"] = round(beta_slope, 4)
-            entry["beta_intercept"] = round(beta_intercept, 4)
-        daily_params[d_str] = entry
+            entry = {
+                "peak_60d": round(q_i["peak"], 2),
+                "c0": round(q_i["c0"], 4),
+                "c1": round(q_i["c1"], 4),
+                "c2": round(q_i["c2"], 5),
+                "quad_r2": round(q_i["r2"], 4),
+                "prev_spot": round(float(spots_all[i - 1]), 2),
+                "pdv_r1f": round(float(r1f_raw_all[i - 1]), 7),
+                "pdv_r1s": round(float(r1s_raw_all[i - 1]), 7),
+                "pdv_v2f": round(float(v2f_raw_all[i - 1]), 9),
+                "pdv_v2s": round(float(v2s_raw_all[i - 1]), 9),
+                "pdv_b0": round(pdv_i["b0"], 4),
+                "pdv_b1f": round(pdv_i["b1f"], 6),
+                "pdv_b1s": round(pdv_i["b1s"], 6),
+                "pdv_b2f": round(pdv_i["b2f"], 5),
+                "pdv_b2s": round(pdv_i["b2s"], 5),
+                "pdv_r2": round(pdv_i["r2"], 4),
+                "fair_pdv": round(fair_pdv_prior_i, 2),
+                "fair_har": round(fair_har_i, 2),
+                "fair_m2": round(fair_har_i, 2),
+                "w_pdv": round(w_pdv_i, 4),
+                "w_quad": round(w_quad_i, 4),
+                "w_m2": round(wm2_i, 4),
+                "w_m4": round(wm4_i, 4),
+                "rv_5d": round(float(rv5_all.loc[prior_d]) if pd.notna(rv5_all.loc[prior_d]) else e_rv_i, 2),
+                "rv_10d": round(float(rv10_all.loc[prior_d]) if pd.notna(rv10_all.loc[prior_d]) else e_rv_i, 2),
+                "rv_21d": round(rv21_prior, 2),
+                "expected_rv": round(e_rv_i, 2),
+                "vrp_base": round(vrp_i, 2),
+            }
+            if beta_slope is not None and beta_intercept is not None:
+                entry["beta_slope"] = round(beta_slope, 4)
+                entry["beta_intercept"] = round(beta_intercept, 4)
+            daily_params[d_str] = entry
+
+        if len(_DAILY_PARAMS_CACHE) >= _DAILY_PARAMS_CACHE_MAX:
+            _DAILY_PARAMS_CACHE.pop(next(iter(_DAILY_PARAMS_CACHE)))
+        _DAILY_PARAMS_CACHE[dp_cache_key] = daily_params
 
     return {
         "spot_col": spot_col,
