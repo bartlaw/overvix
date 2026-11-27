@@ -191,6 +191,187 @@ const TF_CONFIG = {
   }
 };
 
+function parseNaiveIsoMs(ts) {
+  if (typeof ts !== 'string' || ts.length < 10) return null;
+  const y = Number(ts.slice(0, 4));
+  const m = Number(ts.slice(5, 7));
+  const d = Number(ts.slice(8, 10));
+  if (!y || !m || !d || ts[4] !== '-' || ts[7] !== '-') return null;
+  let hh = 0, mm = 0, ss = 0;
+  if (ts.length >= 16) {
+    hh = Number(ts.slice(11, 13)) || 0;
+    mm = Number(ts.slice(14, 16)) || 0;
+    if (ts.length >= 19) ss = Number(ts.slice(17, 19)) || 0;
+  }
+  return Date.UTC(y, m - 1, d, hh, mm, ss);
+}
+
+function formatNaiveIsoMs(ms) {
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function buildRangebreaksWithHolidays(times, baseRangebreaks = []) {
+  const base = Array.isArray(baseRangebreaks) ? baseRangebreaks : [];
+  if (!Array.isArray(times) || times.length < 2) return base;
+
+  const isIntraday = times.some(t => typeof t === 'string' && t.length > 10);
+  if (isIntraday) {
+    const msList = [];
+    for (let i = 0; i < times.length; i++) {
+      const ms = parseNaiveIsoMs(times[i]);
+      if (ms !== null) msList.push(ms);
+    }
+    if (msList.length < 2) return base;
+    msList.sort((a, b) => a - b);
+
+    const deltas = [];
+    for (let i = 1; i < msList.length; i++) {
+      const d = msList[i] - msList[i - 1];
+      if (d > 0) deltas.push(d);
+    }
+    if (deltas.length === 0) return base;
+    deltas.sort((a, b) => a - b);
+    const rawStep = deltas[Math.floor(deltas.length * 0.25)];
+    const stepMs = Math.max(60000, Math.min(1800000, rawStep));
+    const gapThresh = stepMs * 2.5;
+    const padMs = Math.round(stepMs * 0.5);
+
+    const breaks = [];
+    for (let i = 1; i < msList.length; i++) {
+      const t0 = msList[i - 1];
+      const t1 = msList[i];
+      if (t1 - t0 > gapThresh && (t1 - padMs) > (t0 + padMs)) {
+        breaks.push({ bounds: [formatNaiveIsoMs(t0 + padMs), formatNaiveIsoMs(t1 - padMs)] });
+      }
+    }
+    return breaks;
+  }
+
+  // Daily horizons (YTD, 1Y, MAX): weekdays missing from times are disjoint from sat-mon weekend break
+  const presentDates = new Set();
+  let minIso = null;
+  let maxIso = null;
+  for (let i = 0; i < times.length; i++) {
+    const t = times[i];
+    if (typeof t !== 'string' || t.length < 10) continue;
+    const iso = t.slice(0, 10);
+    if (iso[4] !== '-' || iso[7] !== '-') continue;
+    presentDates.add(iso);
+    if (minIso === null || iso < minIso) minIso = iso;
+    if (maxIso === null || iso > maxIso) maxIso = iso;
+  }
+  if (presentDates.size < 2 || !minIso || !maxIso || minIso >= maxIso) return base;
+
+  const [y0, m0, d0] = minIso.split('-').map(Number);
+  const [y1, m1, d1] = maxIso.split('-').map(Number);
+  const cur = new Date(Date.UTC(y0, m0 - 1, d0));
+  const endMs = Date.UTC(y1, m1 - 1, d1);
+  const missingWeekdays = [];
+  let guard = 0;
+  cur.setUTCDate(cur.getUTCDate() + 1);
+  while (cur.getTime() < endMs && guard < 1500) {
+    guard++;
+    const dow = cur.getUTCDay();
+    if (dow >= 1 && dow <= 5) {
+      const iso = cur.toISOString().slice(0, 10);
+      if (!presentDates.has(iso)) missingWeekdays.push(iso);
+    }
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  if (missingWeekdays.length === 0) return base;
+  return [...base, { values: missingWeekdays, dvalue: 86400000 }];
+}
+
+function buildGthShadingOverlay(times, targetTf) {
+  const shapes = [];
+  const annotations = [];
+  if (!Array.isArray(times) || times.length === 0) {
+    return { shapes, annotations };
+  }
+
+  const byDate = {};
+  for (let i = 0; i < times.length; i++) {
+    const t = times[i];
+    if (typeof t !== 'string' || t.length < 16) continue;
+    const d = t.slice(0, 10);
+    const hhmm = t.slice(11, 16);
+    if (!byDate[d]) {
+      byDate[d] = { firstPre: null, lastPre: null, firstRth: null, firstCurb: null, lastCurb: null };
+    }
+    const entry = byDate[d];
+    if (hhmm < '09:30') {
+      if (!entry.firstPre) entry.firstPre = t;
+      entry.lastPre = t;
+    } else if (hhmm < '16:00') {
+      if (!entry.firstRth) entry.firstRth = t;
+    } else {
+      if (!entry.firstCurb) entry.firstCurb = t;
+      entry.lastCurb = t;
+    }
+  }
+
+  const datesList = Object.keys(byDate).sort();
+  datesList.forEach(d => {
+    const e = byDate[d];
+    if (e.firstPre) {
+      const preEnd = e.firstRth || e.lastPre;
+      shapes.push({
+        type: 'rect',
+        xref: 'x',
+        yref: 'paper',
+        x0: e.firstPre,
+        x1: preEnd,
+        y0: 0,
+        y1: 1,
+        fillcolor: 'rgba(99, 102, 241, 0.08)',
+        line: { width: 0 },
+        layer: 'below'
+      });
+      if (e.firstRth) {
+        shapes.push({
+          type: 'line',
+          xref: 'x',
+          yref: 'paper',
+          x0: e.firstRth,
+          x1: e.firstRth,
+          y0: 0,
+          y1: 1,
+          line: { color: 'rgba(148, 163, 184, 0.42)', width: 1, dash: 'dot' }
+        });
+        if (targetTf === '1D') {
+          annotations.push({
+            xref: 'x',
+            yref: 'paper',
+            x: e.firstRth,
+            y: 1.01,
+            text: 'RTH Open (Cash)',
+            showarrow: false,
+            xanchor: 'left',
+            font: { color: '#94A3B8', size: 9, family: 'monospace' },
+            bgcolor: 'rgba(15, 23, 42, 0.8)'
+          });
+        }
+      }
+    }
+    if (e.firstCurb && e.lastCurb) {
+      shapes.push({
+        type: 'rect',
+        xref: 'x',
+        yref: 'paper',
+        x0: e.firstCurb,
+        x1: e.lastCurb,
+        y0: 0,
+        y1: 1,
+        fillcolor: 'rgba(99, 102, 241, 0.08)',
+        line: { width: 0 },
+        layer: 'below'
+      });
+    }
+  });
+
+  return { shapes, annotations };
+}
+
 // Cached Datasets (SPX & Term Structure)
 let cachedBootstrap = null;
 let cachedTs = {
@@ -2015,7 +2196,7 @@ function renderTechVolChart(tf = currentTimeframe) {
   };
 
   const xTitle = conf.xTitle;
-  const rangebreaks = conf.rangebreaks || [];
+  const rangebreaks = buildRangebreaksWithHolidays(times, conf.rangebreaks || []);
 
   const layout = {
     paper_bgcolor: 'transparent',
@@ -2153,7 +2334,7 @@ function renderTermStructureChart(tf = '1D') {
   };
 
   const xTitle = conf.xTitle;
-  const rangebreaks = conf.rangebreaks || [];
+  const rangebreaks = buildRangebreaksWithHolidays(times, conf.rangebreaks || []);
 
   const layout = {
     paper_bgcolor: 'transparent',
@@ -4076,6 +4257,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       paper_bgcolor: 'transparent',
       plot_bgcolor: 'transparent',
       autosize: true,
+      height: 510,
       hovermode: 'x',
       dragmode: false,
       clickmode: 'event',
@@ -4092,7 +4274,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
         type: 'date',
         range: hasSpan ? [dStart, dEnd] : undefined,
         autorange: !hasSpan,
-        rangebreaks: [{ pattern: 'day of week', bounds: ['sat', 'mon'] }],
+        rangebreaks: buildRangebreaksWithHolidays(times, [{ pattern: 'day of week', bounds: ['sat', 'mon'] }]),
         tickformat: (targetTf === '1Y' || targetTf === 'MAX') ? '%b %Y' : '%b %d',
         title: { text: `${conf.label} Daily Reset Scanner — Causal Rolling 60D β`, font: { color: '#94A3B8', size: 10 } },
         gridcolor: '#1e293b',
@@ -4163,6 +4345,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       ? [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 3.25] }, { pattern: 'hour', bounds: [9.25, 9.5] }]
       : [{ pattern: 'hour', bounds: [16.25, 3.25] }, { pattern: 'hour', bounds: [9.25, 9.5] }];
   }
+  rangebreaks = buildRangebreaksWithHolidays(times, rangebreaks);
   if (corrTfPill) {
     corrTfPill.textContent = gthChartOn ? `${conf.pillText} • ES+VIX` : conf.pillText;
   }
@@ -4179,84 +4362,9 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
   const anchorAnnotations = [];
 
   if (gthChartOn && times.length > 0) {
-    const byDate = {};
-    for (let i = 0; i < times.length; i++) {
-      const t = times[i];
-      const d = t.slice(0, 10);
-      const hhmm = t.slice(11, 16);
-      if (!byDate[d]) {
-        byDate[d] = { firstPre: null, lastPre: null, firstRth: null, firstCurb: null, lastCurb: null };
-      }
-      const entry = byDate[d];
-      if (hhmm < '09:30') {
-        if (!entry.firstPre) entry.firstPre = t;
-        entry.lastPre = t;
-      } else if (hhmm < '16:00') {
-        if (!entry.firstRth) entry.firstRth = t;
-      } else {
-        if (!entry.firstCurb) entry.firstCurb = t;
-        entry.lastCurb = t;
-      }
-    }
-
-    const datesList = Object.keys(byDate).sort();
-    datesList.forEach(d => {
-      const e = byDate[d];
-      if (e.firstPre) {
-        const preEnd = e.firstRth || e.lastPre;
-        anchorShapes.push({
-          type: 'rect',
-          xref: 'x',
-          yref: 'paper',
-          x0: e.firstPre,
-          x1: preEnd,
-          y0: 0,
-          y1: 1,
-          fillcolor: 'rgba(99, 102, 241, 0.08)',
-          line: { width: 0 },
-          layer: 'below'
-        });
-        if (e.firstRth) {
-          anchorShapes.push({
-            type: 'line',
-            xref: 'x',
-            yref: 'paper',
-            x0: e.firstRth,
-            x1: e.firstRth,
-            y0: 0,
-            y1: 1,
-            line: { color: 'rgba(148, 163, 184, 0.42)', width: 1, dash: 'dot' }
-          });
-          if (targetTf === '1D') {
-            anchorAnnotations.push({
-              xref: 'x',
-              yref: 'paper',
-              x: e.firstRth,
-              y: 1.01,
-              text: 'RTH Open (Cash)',
-              showarrow: false,
-              xanchor: 'left',
-              font: { color: '#94A3B8', size: 9, family: 'monospace' },
-              bgcolor: 'rgba(15, 23, 42, 0.8)'
-            });
-          }
-        }
-      }
-      if (e.firstCurb && e.lastCurb) {
-        anchorShapes.push({
-          type: 'rect',
-          xref: 'x',
-          yref: 'paper',
-          x0: e.firstCurb,
-          x1: e.lastCurb,
-          y0: 0,
-          y1: 1,
-          fillcolor: 'rgba(99, 102, 241, 0.08)',
-          line: { width: 0 },
-          layer: 'below'
-        });
-      }
-    });
+    const gthOverlay = buildGthShadingOverlay(times, targetTf);
+    anchorShapes.push(...gthOverlay.shapes);
+    anchorAnnotations.push(...gthOverlay.annotations);
   }
 
   if (isAnchored && anchoredSeries.anchorTime && corrAnchor.mode !== 'daily_reset') {
@@ -5079,6 +5187,7 @@ function renderCorrelationChart(modeOrTf = 'dual', tf = null) {
       paper_bgcolor: 'transparent',
       plot_bgcolor: 'transparent',
       autosize: true,
+      height: 510,
       hovermode: 'x',
       dragmode: false,
       clickmode: 'event',
@@ -6248,6 +6357,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
   }
 
   const fvShapes = [];
+  const fvAnnotations = [];
   if (useFvBreaks) {
     fvSessionSegs.slice(1).forEach(seg => {
       fvShapes.push({
@@ -6267,6 +6377,11 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       });
     });
   }
+  if (isGth && times.length > 0) {
+    const gthOverlay = buildGthShadingOverlay(times, targetTf);
+    fvShapes.push(...gthOverlay.shapes);
+    fvAnnotations.push(...gthOverlay.annotations);
+  }
 
   let fvRangebreaks = tfConf.rangebreaks || [];
   if (isGth) {
@@ -6274,13 +6389,14 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       ? [{ pattern: 'day of week', bounds: ['sat', 'mon'] }, { pattern: 'hour', bounds: [16.25, 3.25] }, { pattern: 'hour', bounds: [9.25, 9.5] }]
       : [{ pattern: 'hour', bounds: [16.25, 3.25] }, { pattern: 'hour', bounds: [9.25, 9.5] }];
   }
+  fvRangebreaks = buildRangebreaksWithHolidays(times, fvRangebreaks);
   const hasFvSpan = Boolean(n > 1 && times[0] && times[n - 1] && times[0] !== times[n - 1]);
 
   const layout = {
     paper_bgcolor: 'transparent',
     plot_bgcolor: 'transparent',
     autosize: true,
-    height: 410,
+    height: 510,
     hovermode: 'x unified',
     hoverlabel: {
       bgcolor: 'rgba(15, 23, 42, 0.95)',
@@ -6308,6 +6424,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       spikedash: 'dot'
     },
     shapes: fvShapes,
+    annotations: fvAnnotations,
     yaxis: {
       domain: [0.43, 1.0],
       title: { text: currentFvDisplayMode === 'beta' ? `${assetLabel} %` : `${volLabel} Level`, font: { color: '#94A3B8', size: 11 } },
