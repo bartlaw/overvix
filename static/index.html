@@ -237,7 +237,7 @@
   <main class="flex-1 max-w-[1720px] w-full mx-auto p-4 space-y-4">
     
     <!-- KPI METRIC CARDS -->
-    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+    <div id="kpi-cards-grid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
       
       <!-- Card 1: Primary Asset (SPX or NDX) -->
       <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
@@ -495,31 +495,31 @@
         </div>
       </div>
 
-      <!-- Card 7: 25Δ Risk Reversal (Put Skew) -->
+      <!-- Card 7: SPX Constant-30D 25Δ Volatility Smile -->
       <div id="card-rr25" class="relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none">
         <div class="flex items-center justify-between">
-          <span id="lbl-kpi-rr" class="text-[11px] font-semibold tracking-wider text-amber-400 uppercase">25Δ Skew (RR)</span>
+          <span id="lbl-kpi-rr" class="text-[11px] font-semibold tracking-wider text-amber-400 uppercase">SPX 30D 25Δ Skew</span>
           <div class="flex items-center space-x-1">
             <span id="tag-rr-regime" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50 uppercase font-semibold">---</span>
             <span id="btn-rr25-info" class="text-[11px] text-slate-400 hover:text-amber-400 transition cursor-pointer">ⓘ</span>
           </div>
         </div>
         <div class="mt-2">
-          <div id="kpi-rr-val" class="text-xl font-bold font-mono tracking-tight text-amber-300">--.-- pts</div>
-          <div id="lbl-rr-mat" class="text-[10px] font-mono text-slate-300 mt-0.5">Exp: -- --- '-- (--)</div>
-          <div id="lbl-rr-sub" class="text-[10px] font-mono text-slate-300 mt-0.5 truncate">Put IV &minus; Call IV</div>
+          <div id="kpi-rr-val" class="text-xl font-bold font-mono tracking-tight text-amber-300">-.-- <span class="text-xs font-normal text-slate-400">(--.-pt)</span></div>
+          <div id="lbl-rr-mat" class="text-[10px] font-mono text-slate-300 mt-0.5">Const 30D (--d / --d)</div>
+          <div id="lbl-rr-sub" class="text-[10px] font-mono text-slate-300 mt-0.5 truncate">Put +-- · Call +-- · BF +--</div>
         </div>
 
-        <!-- Floating Popover Card for 25Δ Risk Reversal -->
-        <div id="popover-rr25" class="hidden absolute top-full right-0 mt-2 z-50 w-80 bg-slate-900/95 border border-slate-700/90 rounded-xl shadow-2xl p-3 space-y-2.5 backdrop-blur-md text-left transition">
+        <!-- Floating Popover Card for SPX Constant-30D 25Δ Smile -->
+        <div id="popover-rr25" class="hidden absolute top-full right-0 mt-2 z-50 w-96 md:w-[440px] bg-slate-900/95 border border-slate-700/90 rounded-xl shadow-2xl p-3 space-y-2.5 backdrop-blur-md text-left transition">
           <!-- Header -->
           <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
             <div>
               <div id="pop-rr25-title" class="text-xs font-bold text-white flex items-center space-x-1">
                 <span>⚖️</span>
-                <span>SPX 25Δ Risk Reversal</span>
+                <span>SPX Constant-30D 25Δ Skew</span>
               </div>
-              <div class="text-[10px] text-slate-400 font-medium">~30-Day 25-Delta Put Skew (Front-Month)</div>
+              <div class="text-[10px] text-slate-400 font-medium">ATM-Normalized Smile &bull; 2-Expiry Variance Interpolated</div>
             </div>
             <div class="flex items-center space-x-1.5">
               <span id="pop-rr25-badge" class="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-amber-950/70 text-amber-300 border border-amber-800/60">
@@ -540,7 +540,7 @@
               <div id="pop-rr25-ref-sub" class="text-[9px] text-slate-500 font-mono mt-0.5">Session close baseline (strikes fixed)</div>
             </div>
             <div class="flex items-center space-x-1">
-              <button id="btn-recalibrate-25-spot" class="px-2 py-1 bg-cyan-950 hover:bg-cyan-900 text-cyan-300 hover:text-cyan-200 border border-cyan-700/60 rounded text-[10px] font-semibold flex items-center space-x-1 transition disabled:opacity-50 cursor-pointer shadow-sm" title="Recalibrate strikes (~25-delta) to current live spot price">
+              <button id="btn-recalibrate-25-spot" class="px-2 py-1 bg-cyan-950 hover:bg-cyan-900 text-cyan-300 hover:text-cyan-200 border border-cyan-700/60 rounded text-[10px] font-semibold flex items-center space-x-1 transition disabled:opacity-50 cursor-pointer shadow-sm" title="Recalibrate 30D Near/Far 25Δ + ATM strikes to live spot &amp; VIX">
                 <span id="spinner-recalibrate-25" class="hidden animate-spin text-[10px]">⟳</span>
                 <span id="icon-recalibrate-25">↺</span>
                 <span>Spot</span>
@@ -551,63 +551,80 @@
             </div>
           </div>
 
-          <!-- Key Metrics Grid -->
-          <div class="grid grid-cols-2 gap-2 bg-slate-950/70 rounded-lg p-2 border border-slate-800/80">
+          <!-- 3-Column Key Metrics Strip -->
+          <div class="grid grid-cols-3 gap-2 bg-slate-950/70 rounded-lg p-2 border border-slate-800/80 text-center">
             <div>
-              <div class="text-[10px] text-slate-400 uppercase font-semibold">25Δ IV Skew</div>
-              <div id="pop-rr25-skew" class="text-sm font-bold font-mono text-amber-300">+--.-- pts</div>
-              <div id="pop-rr25-status" class="text-[10px] font-mono text-slate-400">Put IV &minus; Call IV</div>
+              <div class="text-[9px] text-slate-400 uppercase font-semibold">Norm RR (RR/ATM)</div>
+              <div id="pop-rr25-norm" class="text-sm font-bold font-mono text-amber-300">-.--</div>
+              <div id="pop-rr25-ratio" class="text-[9px] font-mono text-slate-400">Ratio -.--x</div>
             </div>
             <div>
-              <div class="text-[10px] text-slate-400 uppercase font-semibold">Maturity / DTE</div>
-              <div id="pop-rr25-mat" class="text-sm font-bold font-mono text-white">-- --- '--</div>
-              <div id="pop-rr25-dte" class="text-[10px] font-mono text-cyan-400">-- DTE (~30d)</div>
+              <div class="text-[9px] text-slate-400 uppercase font-semibold">Raw 30D RR</div>
+              <div id="pop-rr25-skew" class="text-sm font-bold font-mono text-white">+--.-- pts</div>
+              <div id="pop-rr25-slope" class="text-[9px] font-mono text-slate-400">Slope -.--/1%</div>
+            </div>
+            <div>
+              <div class="text-[9px] text-slate-400 uppercase font-semibold">25Δ Butterfly</div>
+              <div id="pop-rr25-bf" class="text-sm font-bold font-mono text-cyan-300">+--.-- pts</div>
+              <div id="pop-rr25-bf-norm" class="text-[9px] font-mono text-slate-400">-.--- / ATM</div>
             </div>
           </div>
 
-          <!-- Option Legs Breakdown Table -->
+          <!-- Put Wing vs Call Wing Decomposition -->
+          <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800/80 space-y-1.5">
+            <div class="flex items-center justify-between text-[10px]">
+              <span class="font-semibold text-slate-400 uppercase">Wing Decomposition</span>
+              <div class="flex items-center space-x-1">
+                <span id="pop-rr25-driver" class="px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700 text-[9px]">BALANCED SMILE</span>
+                <span id="pop-rr25-convexity" class="px-1.5 py-0.5 rounded font-semibold uppercase bg-slate-800/70 text-cyan-300 border border-slate-700/70 text-[9px]">NORMAL CURVATURE</span>
+              </div>
+            </div>
+            <div class="w-full h-2 bg-slate-900 rounded-full overflow-hidden flex border border-slate-800">
+              <div id="pop-rr25-put-bar" class="bg-rose-500 h-full transition-all duration-300" style="width: 50%"></div>
+              <div id="pop-rr25-call-bar" class="bg-cyan-400 h-full transition-all duration-300" style="width: 50%"></div>
+            </div>
+            <div class="flex items-center justify-between text-[10px] font-mono">
+              <span id="pop-rr25-put-wing" class="text-rose-300">Put Wing: +--.- pts (--%)</span>
+              <span id="pop-rr25-call-wing" class="text-cyan-300">Call Wing: +--.- pts (--%)</span>
+            </div>
+          </div>
+
+          <!-- Bracketing Expiries & 3-Leg Smile Table -->
           <div>
             <div class="text-[10px] font-semibold text-slate-400 uppercase mb-1 flex items-center justify-between">
-              <span>Option Legs Breakdown</span>
-              <span id="pop-rr25-spread" class="text-slate-300 font-mono">Net: --.-- pts</span>
+              <span id="pop-rr25-weights">T1 --d (--%) + T2 --d (--%) &rarr; 30D</span>
+              <span id="pop-rr25-atm-iv" class="text-emerald-300 font-mono">30D ATM: --.-%</span>
             </div>
-            <div class="overflow-hidden rounded border border-slate-800 text-[11px] font-mono">
+            <div class="overflow-hidden rounded border border-slate-800 text-[10px] font-mono">
               <table class="w-full text-left">
-                <thead class="bg-slate-950 text-[10px] text-slate-400 uppercase border-b border-slate-800">
+                <thead class="bg-slate-950 text-[9px] text-slate-400 uppercase border-b border-slate-800">
                   <tr>
-                    <th class="py-1 px-1.5">Leg</th>
+                    <th class="py-1 px-1.5">Tenor &amp; Leg</th>
                     <th class="py-1 px-1.5">Strike</th>
                     <th class="py-1 px-1.5 text-right">Mid</th>
                     <th class="py-1 px-1.5 text-right">IV</th>
                     <th class="py-1 px-1.5 text-right">Delta</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-800/60 bg-slate-900/80">
-                  <!-- Long Call -->
+                <tbody id="pop-rr25-legs-body" class="divide-y divide-slate-800/60 bg-slate-900/80">
                   <tr>
-                    <td class="py-1 px-1.5 text-emerald-400 font-medium">+Call (25Δ)</td>
-                    <td id="pop-rr25-call-strike" class="py-1 px-1.5 text-white font-bold">----</td>
-                    <td id="pop-rr25-call-mid" class="py-1 px-1.5 text-right text-slate-300">$0.00</td>
-                    <td id="pop-rr25-call-iv" class="py-1 px-1.5 text-right text-cyan-300">--.-%</td>
-                    <td id="pop-rr25-call-delta" class="py-1 px-1.5 text-right text-slate-300">+0.25</td>
-                  </tr>
-                  <!-- Short Put -->
-                  <tr>
-                    <td class="py-1 px-1.5 text-rose-400 font-medium">-Put (25Δ)</td>
-                    <td id="pop-rr25-put-strike" class="py-1 px-1.5 text-white font-bold">----</td>
-                    <td id="pop-rr25-put-mid" class="py-1 px-1.5 text-right text-slate-300">$0.00</td>
-                    <td id="pop-rr25-put-iv" class="py-1 px-1.5 text-right text-amber-300">--.-%</td>
-                    <td id="pop-rr25-put-delta" class="py-1 px-1.5 text-right text-slate-300">-0.25</td>
+                    <td colspan="5" class="py-2 px-1.5 text-center text-slate-500">Waiting for IBKR option chain Greeks...</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
 
-          <!-- Strategy Rationale / Footer -->
-          <div class="text-[10px] text-slate-400 bg-slate-950/50 rounded p-1.5 border border-slate-800/60 leading-tight">
-            <span class="text-slate-300 font-semibold">Skew Dynamics:</span>
-            <span id="pop-rr25-desc">Standard 25Δ put-to-call volatility premium measuring downside institutional hedging demand.</span>
+          <!-- Strategy Rationale & History Footer -->
+          <div class="text-[10px] text-slate-400 bg-slate-950/50 rounded p-1.5 border border-slate-800/60 leading-tight flex flex-col space-y-1">
+            <div>
+              <span class="text-slate-300 font-semibold">Smile Readout:</span>
+              <span id="pop-rr25-desc">ATM-normalized 30D 25Δ skew removes VIX level distortion and separates downside crash demand from upside call overwriting.</span>
+            </div>
+            <div class="flex items-center justify-between text-[9px] font-mono text-slate-400 pt-0.5 border-t border-slate-800/60">
+              <span id="pop-rr25-mat">Const 30D Maturity</span>
+              <span id="pop-rr25-pct" class="text-amber-300">History: 0/20d</span>
+            </div>
           </div>
         </div>
       </div>
@@ -1389,8 +1406,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v10.49 - CPU Optimization: Visibility Pause, 3s Throttling & Dirty-Checking) -->
-  <script src="/static/dashboard.js?v=10.49"></script>
+  <!-- DASHBOARD SCRIPT (v10.51 - Fix triggerRecalibration25 & Card 8 NDX Hiding) -->
+  <script src="/static/dashboard.js?v=10.53"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>

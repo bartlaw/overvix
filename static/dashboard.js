@@ -982,6 +982,43 @@ function setupGthToggle() {
   });
 }
 
+function updateSkewCardVisibilityForAsset(isNdx) {
+  const gridEl = document.getElementById('kpi-cards-grid');
+  const cardCor1m = document.getElementById('card-cor1m');
+  const cardRr25 = document.getElementById('card-rr25');
+  const cardRr4m = document.getElementById('card-rr4m');
+  const popRr25 = document.getElementById('popover-rr25');
+  const popRr4m = document.getElementById('popover-rr4m');
+  const cardTs = document.getElementById('card-term-structure');
+  const popTs = document.getElementById('popover-vix-futures');
+  const btnTsInfo = document.getElementById('btn-ts-info');
+
+  if (isNdx) {
+    if (cardCor1m) cardCor1m.classList.add('hidden');
+    if (cardRr25) cardRr25.classList.add('hidden');
+    if (cardRr4m) cardRr4m.classList.add('hidden');
+    if (popRr25) popRr25.classList.add('hidden');
+    if (popRr4m) popRr4m.classList.add('hidden');
+    if (popTs) popTs.classList.add('hidden');
+    if (btnTsInfo) btnTsInfo.classList.add('hidden');
+    if (cardTs) cardTs.classList.remove('cursor-pointer');
+    if (gridEl) {
+      gridEl.classList.remove('lg:grid-cols-8', 'lg:grid-cols-6');
+      gridEl.classList.add('lg:grid-cols-5');
+    }
+  } else {
+    if (cardCor1m) cardCor1m.classList.remove('hidden');
+    if (cardRr25) cardRr25.classList.remove('hidden');
+    if (cardRr4m) cardRr4m.classList.remove('hidden');
+    if (btnTsInfo) btnTsInfo.classList.remove('hidden');
+    if (cardTs) cardTs.classList.add('cursor-pointer');
+    if (gridEl) {
+      gridEl.classList.remove('lg:grid-cols-5', 'lg:grid-cols-6');
+      gridEl.classList.add('lg:grid-cols-8');
+    }
+  }
+}
+
 function setupAssetSwitcher() {
   if (btnAssetSpx) btnAssetSpx.addEventListener('click', () => switchAssetPair('SPX'));
   if (btnAssetNdx) btnAssetNdx.addEventListener('click', () => switchAssetPair('NDX'));
@@ -990,6 +1027,7 @@ function setupAssetSwitcher() {
 function switchAssetPair(pair) {
   if (currentAssetPair === pair) return;
   currentAssetPair = pair;
+  updateSkewCardVisibilityForAsset(pair === 'NDX');
 
   if (pair === 'SPX') {
     currentThreshold = currentSpxThreshold;
@@ -7591,45 +7629,47 @@ function updateUI(data) {
     document.getElementById('param-intercept').textContent = fmtNum(activeMod.intercept, 4);
   }
 
-  // Card 5: COR1M (1-Month Implied Correlation)
-  const cor1mData = data.cor1m;
-  const cardCor1m = document.getElementById('card-cor1m');
-  const cor1mValEl = document.getElementById('kpi-cor1m-val');
-  const tagCor1m = document.getElementById('tag-cor1m-regime');
-  const subCor1m = document.getElementById('lbl-cor1m-sub');
+  // Card 5: COR1M (1-Month Implied Correlation; SPX only)
+  if (!isNdx) {
+    const cor1mData = data.cor1m;
+    const cardCor1m = document.getElementById('card-cor1m');
+    const cor1mValEl = document.getElementById('kpi-cor1m-val');
+    const tagCor1m = document.getElementById('tag-cor1m-regime');
+    const subCor1m = document.getElementById('lbl-cor1m-sub');
 
-  if (cor1mValEl && tagCor1m) {
-    if (cor1mData && cor1mData.current !== null && cor1mData.current !== undefined) {
-      cor1mValEl.textContent = fmtNum(cor1mData.current, 2);
-      tagCor1m.textContent = cor1mData.badge || cor1mData.regime || 'NORMAL';
+    if (cor1mValEl && tagCor1m) {
+      if (cor1mData && cor1mData.current !== null && cor1mData.current !== undefined) {
+        cor1mValEl.textContent = fmtNum(cor1mData.current, 2);
+        tagCor1m.textContent = cor1mData.badge || cor1mData.regime || 'NORMAL';
 
-      if (cor1mData.is_coiled || cor1mData.current < 8.0) {
-        if (cardCor1m) cardCor1m.className = 'bg-purple-950/30 border border-purple-500 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition animate-pulse';
-        tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-purple-900 text-purple-200 border border-purple-400 font-bold uppercase animate-pulse';
-        cor1mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
-        if (subCor1m) subCor1m.textContent = 'Coiled Dispersion (< 8.0)';
-      } else if (cor1mData.current < 15.0) {
-        if (cardCor1m) cardCor1m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
-        tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-purple-950/70 text-purple-300 border border-purple-800/60 font-semibold uppercase';
-        cor1mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
-        if (subCor1m) subCor1m.textContent = 'Low Correlation (< 15.0)';
-      } else if (cor1mData.current > 45.0) {
-        if (cardCor1m) cardCor1m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
-        tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-blue-950/70 text-blue-300 border border-blue-800/60 font-semibold uppercase';
-        cor1mValEl.className = 'text-xl font-bold font-mono tracking-tight text-blue-300';
-        if (subCor1m) subCor1m.textContent = 'Macro Sync (> 45.0)';
+        if (cor1mData.is_coiled || cor1mData.current < 8.0) {
+          if (cardCor1m) cardCor1m.className = 'bg-purple-950/30 border border-purple-500 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition animate-pulse';
+          tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-purple-900 text-purple-200 border border-purple-400 font-bold uppercase animate-pulse';
+          cor1mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
+          if (subCor1m) subCor1m.textContent = 'Coiled Dispersion (< 8.0)';
+        } else if (cor1mData.current < 15.0) {
+          if (cardCor1m) cardCor1m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+          tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-purple-950/70 text-purple-300 border border-purple-800/60 font-semibold uppercase';
+          cor1mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
+          if (subCor1m) subCor1m.textContent = 'Low Correlation (< 15.0)';
+        } else if (cor1mData.current > 45.0) {
+          if (cardCor1m) cardCor1m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+          tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-blue-950/70 text-blue-300 border border-blue-800/60 font-semibold uppercase';
+          cor1mValEl.className = 'text-xl font-bold font-mono tracking-tight text-blue-300';
+          if (subCor1m) subCor1m.textContent = 'Macro Sync (> 45.0)';
+        } else {
+          if (cardCor1m) cardCor1m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
+          tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-semibold';
+          cor1mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
+          if (subCor1m) subCor1m.textContent = 'Dispersion @ < 8.0';
+        }
       } else {
+        cor1mValEl.textContent = '--.--';
+        tagCor1m.textContent = '---';
+        tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-semibold';
         if (cardCor1m) cardCor1m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
-        tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-semibold';
-        cor1mValEl.className = 'text-xl font-bold font-mono tracking-tight text-purple-300';
         if (subCor1m) subCor1m.textContent = 'Dispersion @ < 8.0';
       }
-    } else {
-      cor1mValEl.textContent = '--.--';
-      tagCor1m.textContent = '---';
-      tagCor1m.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-semibold';
-      if (cardCor1m) cardCor1m.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition';
-      if (subCor1m) subCor1m.textContent = 'Dispersion @ < 8.0';
     }
   }
 
@@ -7646,184 +7686,258 @@ function updateUI(data) {
   // Update Card 2 Fair VIX sub-line & Fair VIX Popover
   updateFairVixUI(data);
 
-  // Card 7: 25Δ Risk Reversal (Put Skew)
-  const rrData = (isNdx && ndx && ndx.risk_reversal) ? ndx.risk_reversal : data.risk_reversal;
-  const cardRr = document.getElementById('card-rr25');
-  const lblRr = document.getElementById('lbl-kpi-rr');
-  const rrValEl = document.getElementById('kpi-rr-val');
-  const tagRr = document.getElementById('tag-rr-regime');
-  const matRr = document.getElementById('lbl-rr-mat');
-  const subRr = document.getElementById('lbl-rr-sub');
+  // Toggle Skew Cards visibility cleanly (NDX skew measures intentionally disabled)
+  updateSkewCardVisibilityForAsset(isNdx);
 
-  if (lblRr) lblRr.textContent = isNdx ? "QQQ 25Δ Skew (RR)" : "SPX 25Δ Skew (RR)";
+  // Card 7: SPX Constant-30D 25Δ Volatility Smile (Put / ATM / Call across Near & Far bracketing tenors)
+  if (!isNdx) {
+    const rrData = data.risk_reversal;
+    const cardRr = document.getElementById('card-rr25');
+    const lblRr = document.getElementById('lbl-kpi-rr');
+    const rrValEl = document.getElementById('kpi-rr-val');
+    const tagRr = document.getElementById('tag-rr-regime');
+    const matRr = document.getElementById('lbl-rr-mat');
+    const subRr = document.getElementById('lbl-rr-sub');
 
-  if (matRr) {
-    if (rrData && rrData.expiration) {
-      matRr.textContent = `Exp: ${fmtMaturity(rrData.expiration, rrData.dte)}`;
-    } else if (rrData && rrData.dte) {
-      matRr.textContent = `Exp: ~${rrData.dte}d`;
-    } else {
-      matRr.textContent = `Exp: ~30d`;
-    }
-  }
+    if (lblRr) lblRr.textContent = "SPX 30D 25Δ Skew";
 
-  if (rrValEl && tagRr) {
-    if (rrData && rrData.current !== null && rrData.current !== undefined) {
-      const rrVal = rrData.current;
-      rrValEl.textContent = `${fmtPts(rrVal)} pts`;
-      tagRr.textContent = rrData.badge || rrData.regime || '---';
-
-      // Subtitle: Strike Selection & Volatility Info (or P / C IVs)
-      if (rrData.call_strike && rrData.put_strike && rrData.call_iv && rrData.put_iv) {
-        subRr.textContent = `C${rrData.call_strike}: ${fmtNum(rrData.call_iv, 1)}% · P${rrData.put_strike}: ${fmtNum(rrData.put_iv, 1)}%`;
-      } else if (rrData.put_iv !== null && rrData.call_iv !== null && rrData.put_iv !== undefined && rrData.call_iv !== undefined) {
-        subRr.textContent = `P: ${fmtNum(rrData.put_iv, 1)}% · C: ${fmtNum(rrData.call_iv, 1)}%`;
-      } else if (subRr) {
-        subRr.textContent = 'Put IV − Call IV';
-      }
-
-      // Detailed readable popup formatting (both for title tooltip and floating popover card)
-      const assetName = isNdx ? "QQQ" : "SPX";
-      const matStr = rrData.expiration ? fmtMaturity(rrData.expiration, null) : '-- --- \'--';
-      const dteStr = `${rrData.dte || 30} DTE`;
-      const cStr = rrData.call_strike ? `${rrData.call_strike}C` : 'Call';
-      const pStr = rrData.put_strike ? `${rrData.put_strike}P` : 'Put';
-      const cMidStr = (rrData.call_mid !== undefined && rrData.call_mid !== null) ? `$${fmtNum(rrData.call_mid, 2)}` : '$--.--';
-      const pMidStr = (rrData.put_mid !== undefined && rrData.put_mid !== null) ? `$${fmtNum(rrData.put_mid, 2)}` : '$--.--';
-      const cIvStr = (rrData.call_iv !== null && rrData.call_iv !== undefined) ? `${fmtNum(rrData.call_iv, 1)}%` : '--.-%';
-      const pIvStr = (rrData.put_iv !== null && rrData.put_iv !== undefined) ? `${fmtNum(rrData.put_iv, 1)}%` : '--.-%';
-      const cDeltaStr = (rrData.call_delta !== null && rrData.call_delta !== undefined) ? (rrData.call_delta >= 0 ? `+${fmtNum(rrData.call_delta, 3)}` : fmtNum(rrData.call_delta, 3)) : '+0.250';
-      const pDeltaStr = (rrData.put_delta !== null && rrData.put_delta !== undefined) ? (rrData.put_delta >= 0 ? `+${fmtNum(rrData.put_delta, 3)}` : fmtNum(rrData.put_delta, 3)) : '-0.250';
-      const skewValStr = `${fmtPts(rrVal)} pts`;
-
-      if (cardRr) {
-        cardRr.removeAttribute('title');
-      }
-
-      // Populate interactive Floating Popover Card
-      const popTitle = document.getElementById('pop-rr25-title');
-      const popBadge = document.getElementById('pop-rr25-badge');
-      const popSkew = document.getElementById('pop-rr25-skew');
-      const popStatus = document.getElementById('pop-rr25-status');
-      const popMat = document.getElementById('pop-rr25-mat');
-      const popDte = document.getElementById('pop-rr25-dte');
-      const popSpread = document.getElementById('pop-rr25-spread');
-      const popCallStrike = document.getElementById('pop-rr25-call-strike');
-      const popCallMid = document.getElementById('pop-rr25-call-mid');
-      const popCallIv = document.getElementById('pop-rr25-call-iv');
-      const popCallDelta = document.getElementById('pop-rr25-call-delta');
-      const popPutStrike = document.getElementById('pop-rr25-put-strike');
-      const popPutMid = document.getElementById('pop-rr25-put-mid');
-      const popPutIv = document.getElementById('pop-rr25-put-iv');
-      const popPutDelta = document.getElementById('pop-rr25-put-delta');
-      const popDesc = document.getElementById('pop-rr25-desc');
-
-      if (popTitle) popTitle.innerHTML = `<span>⚖️</span><span>${assetName} 25Δ Risk Reversal</span>`;
-      if (popBadge) {
-        popBadge.textContent = rrData.badge || rrData.regime || '---';
-        if (rrVal >= 8.0 || rrData.badge === 'EXTREME') {
-          popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-red-900 text-red-200 border border-red-500 animate-pulse';
-        } else if (rrVal >= 6.0 || rrData.badge === 'STEEP') {
-          popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-amber-950/70 text-amber-300 border border-amber-800/60';
-        } else {
-          popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700';
-        }
-      }
-
-      // Populate Reference Spot Bar inside #popover-rr25
-      const pop25RefLabel = document.getElementById('pop-rr25-ref-label');
-      const pop25RefPrice = document.getElementById('pop-rr25-ref-price');
-      const pop25RefBadge = document.getElementById('pop-rr25-ref-mode-badge');
-      const pop25RefSub = document.getElementById('pop-rr25-ref-sub');
-
-      if (pop25RefLabel) pop25RefLabel.textContent = isNdx ? "QQQ Ref" : "SPX Ref";
-      if (pop25RefPrice) {
-        if (rrData && rrData.ref_spot) {
-          pop25RefPrice.textContent = fmtNum(rrData.ref_spot, 2);
-        } else {
-          pop25RefPrice.textContent = isNdx ? (data.ndx && data.ndx.market ? fmtNum(data.ndx.market.ndx_close / 41.0, 2) : '---.--')
-                                            : (data.reference_closes && data.reference_closes.spx ? fmtNum(data.reference_closes.spx, 2) : '-,---.--');
-        }
-      }
-      if (pop25RefBadge && pop25RefSub) {
-        const mode = (rrData && rrData.ref_mode) || 'session_close';
-        const timeStr = (rrData && rrData.ref_time) ? ` @ ${rrData.ref_time}` : '';
-        if (mode === 'live_spot' || mode === 'spot') {
-          pop25RefBadge.textContent = 'Live Spot';
-          pop25RefBadge.className = 'text-[9px] px-1 py-0.2 rounded font-semibold bg-cyan-950 text-cyan-300 border border-cyan-700';
-          pop25RefSub.textContent = `Recalibrated to live spot${timeStr}`;
-          pop25RefSub.className = 'text-[9px] text-cyan-400 font-mono mt-0.5';
-        } else {
-          pop25RefBadge.textContent = 'Close';
-          pop25RefBadge.className = 'text-[9px] px-1 py-0.2 rounded font-semibold bg-slate-800 text-slate-300 border border-slate-700';
-          pop25RefSub.textContent = `Session close baseline${timeStr} (strikes fixed)`;
-          pop25RefSub.className = 'text-[9px] text-slate-500 font-mono mt-0.5';
-        }
-      }
-
-      if (popSkew) popSkew.textContent = `${fmtPts(rrVal)} pts`;
-      if (popStatus) {
-        popStatus.textContent = rrVal >= 7.5 ? 'ELEVATED SKEW (Fear)' : (rrVal < 3.5 ? 'COMPLACENT (Low Skew)' : 'NORMAL SKEW');
-      }
-      if (popMat) popMat.textContent = matStr;
-      if (popDte) popDte.textContent = `${dteStr} (~30d)`;
-      if (popSpread) {
-        if (rrData.net_credit !== undefined && rrData.net_credit !== null) {
-          const sign = rrData.net_credit >= 0 ? '+' : '';
-          popSpread.textContent = `Combo Mid: ${sign}$${fmtNum(rrData.net_credit, 2)}`;
-        } else {
-          popSpread.textContent = `Skew: ${fmtPts(rrVal)} pts`;
-        }
-      }
-
-      if (popCallStrike) popCallStrike.textContent = cStr;
-      if (popCallMid) popCallMid.textContent = cMidStr;
-      if (popCallIv) popCallIv.textContent = cIvStr;
-      if (popCallDelta) popCallDelta.textContent = cDeltaStr;
-
-      if (popPutStrike) popPutStrike.textContent = pStr;
-      if (popPutMid) popPutMid.textContent = pMidStr;
-      if (popPutIv) popPutIv.textContent = pIvStr;
-      if (popPutDelta) popPutDelta.textContent = pDeltaStr;
-
-      if (popDesc) {
-        if (rrVal >= 7.5) {
-          popDesc.textContent = `25Δ Put IV exceeds Call IV by ${fmtNum(rrVal, 1)} pts. Elevated institutional downside tail hedging demand detected.`;
-        } else if (rrVal < 3.5) {
-          popDesc.textContent = `25Δ Put IV is compressed relative to Call IV (+${fmtNum(rrVal, 1)} pts). Market exhibits low hedging demand / complacency.`;
-        } else {
-          popDesc.textContent = `Standard 25Δ downside skew (+${fmtNum(rrVal, 1)} pts). Healthy baseline pricing for 30-day index options.`;
-        }
-      }
-
-      // Card styling preserving relative group cursor-pointer select-none
-      if (rrVal >= 8.0 || rrData.badge === 'EXTREME') {
-        if (cardRr) cardRr.className = 'relative group bg-red-950/30 border border-red-700 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
-        tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-900 text-red-200 border border-red-500 font-bold uppercase animate-pulse';
-        rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-red-400';
-      } else if (rrVal >= 6.0 || rrData.badge === 'STEEP') {
-        if (cardRr) cardRr.className = 'relative group bg-amber-950/20 border border-amber-800/80 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
-        tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-semibold uppercase';
-        rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-amber-300';
+    if (matRr) {
+      if (rrData && rrData.is_constant_maturity && rrData.tenors && rrData.tenors.near && rrData.tenors.far) {
+        matRr.textContent = `Const 30D (${rrData.tenors.near.dte}d / ${rrData.tenors.far.dte}d)`;
+      } else if (rrData && rrData.expiration) {
+        matRr.textContent = `Exp: ${fmtMaturity(rrData.expiration, rrData.dte)}`;
+      } else if (rrData && rrData.dte) {
+        matRr.textContent = `Exp: ~${rrData.dte}d`;
       } else {
-        if (cardRr) cardRr.className = 'relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
-        tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase';
-        rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-emerald-400';
+        matRr.textContent = `Const 30D (--d / --d)`;
       }
-    } else {
-      rrValEl.textContent = '--.-- pts';
-      tagRr.textContent = '---';
-      tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-semibold';
-      if (cardRr) {
-        cardRr.className = 'relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
-        cardRr.removeAttribute('title');
+    }
+
+    const normRr = (rrData && typeof rrData.norm_rr === 'number') ? rrData.norm_rr : null;
+    const rawRr = (rrData && typeof rrData.raw_rr === 'number') ? rrData.raw_rr : (rrData ? rrData.current : null);
+    const atmIv = (rrData && typeof rrData.atm_iv === 'number') ? rrData.atm_iv : null;
+    const putWing = (rrData && typeof rrData.put_wing === 'number') ? rrData.put_wing : null;
+    const callWing = (rrData && typeof rrData.call_wing === 'number') ? rrData.call_wing : null;
+    const butterfly = (rrData && typeof rrData.butterfly === 'number') ? rrData.butterfly : null;
+    const bfNorm = (rrData && typeof rrData.butterfly_norm === 'number') ? rrData.butterfly_norm : null;
+    const skewRatio = (rrData && typeof rrData.skew_ratio === 'number') ? rrData.skew_ratio : null;
+    const normSlope = (rrData && typeof rrData.norm_slope === 'number') ? rrData.norm_slope : null;
+    const putShare = (rrData && typeof rrData.put_share === 'number') ? rrData.put_share : 0.5;
+    const driver = (rrData && rrData.driver) ? rrData.driver : 'BALANCED SMILE';
+    const convexity = (rrData && rrData.convexity) ? rrData.convexity : 'NORMAL CURVATURE';
+    const rrRegime = (rrData && rrData.regime) ? rrData.regime : 'NORMAL';
+
+    if (rrValEl && tagRr) {
+      if (normRr !== null || (rawRr !== null && rawRr !== undefined)) {
+        if (normRr !== null && rawRr !== null && rawRr !== undefined) {
+          rrValEl.innerHTML = `${fmtNum(normRr, 2)} <span class="text-xs font-normal text-slate-400">(${fmtPts(rawRr, 1)}pt)</span>`;
+        } else {
+          rrValEl.textContent = `${fmtPts(rawRr)} pts`;
+        }
+        tagRr.textContent = (rrData && rrData.badge) ? rrData.badge : rrRegime;
+
+        if (subRr) {
+          if (putWing !== null && callWing !== null && butterfly !== null) {
+            const ps = putWing >= 0 ? '+' : '';
+            const cs = callWing >= 0 ? '+' : '';
+            const bs = butterfly >= 0 ? '+' : '';
+            subRr.textContent = `P:${ps}${fmtNum(putWing, 1)} · C:${cs}${fmtNum(callWing, 1)} · BF:${bs}${fmtNum(butterfly, 1)}`;
+          } else {
+            subRr.textContent = 'ATM-Normalized 30D Smile';
+          }
+        }
+        if (cardRr) cardRr.removeAttribute('title');
+
+        // Populate Constant-30D Smile Popover (#popover-rr25)
+        const setEl = (id, txt, cls) => {
+          const el = document.getElementById(id);
+          if (el) {
+            el.textContent = txt;
+            if (cls) el.className = cls;
+          }
+        };
+
+        const popTitle = document.getElementById('pop-rr25-title');
+        if (popTitle) popTitle.innerHTML = `<span>⚖️</span><span>SPX Constant-30D 25Δ Skew</span>`;
+
+        const popBadge = document.getElementById('pop-rr25-badge');
+        if (popBadge) {
+          popBadge.textContent = (rrData && rrData.badge) ? rrData.badge : rrRegime;
+          if (rrRegime === 'EXTREME') {
+            popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-red-900 text-red-200 border border-red-500 animate-pulse';
+          } else if (rrRegime === 'ELEVATED') {
+            popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-amber-950/70 text-amber-300 border border-amber-800/60';
+          } else if (rrRegime === 'COMPLACENT') {
+            popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-cyan-950/70 text-cyan-300 border border-cyan-800/60';
+          } else {
+            popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700';
+          }
+        }
+
+        // Reference Spot Bar
+        setEl('pop-rr25-ref-label', 'SPX Ref');
+        const pop25RefPrice = document.getElementById('pop-rr25-ref-price');
+        if (pop25RefPrice) {
+          if (rrData && rrData.ref_spot) {
+            pop25RefPrice.textContent = fmtNum(rrData.ref_spot, 2);
+          } else if (data.reference_closes && data.reference_closes.spx) {
+            pop25RefPrice.textContent = fmtNum(data.reference_closes.spx, 2);
+          }
+        }
+        const pop25RefBadge = document.getElementById('pop-rr25-ref-mode-badge');
+        const pop25RefSub = document.getElementById('pop-rr25-ref-sub');
+        if (pop25RefBadge && pop25RefSub) {
+          const mode = (rrData && rrData.ref_mode) || 'session_close';
+          const timeStr = (rrData && rrData.ref_time) ? ` @ ${rrData.ref_time}` : '';
+          if (mode === 'live_spot' || mode === 'spot') {
+            pop25RefBadge.textContent = 'Live Spot';
+            pop25RefBadge.className = 'text-[9px] px-1 py-0.2 rounded font-semibold bg-cyan-950 text-cyan-300 border border-cyan-700';
+            pop25RefSub.textContent = `Recalibrated to live spot & VIX${timeStr}`;
+            pop25RefSub.className = 'text-[9px] text-cyan-400 font-mono mt-0.5';
+          } else {
+            pop25RefBadge.textContent = 'Close';
+            pop25RefBadge.className = 'text-[9px] px-1 py-0.2 rounded font-semibold bg-slate-800 text-slate-300 border border-slate-700';
+            pop25RefSub.textContent = `Session close baseline${timeStr} (strikes fixed)`;
+            pop25RefSub.className = 'text-[9px] text-slate-500 font-mono mt-0.5';
+          }
+        }
+
+        // 3-Column Metrics Strip
+        setEl('pop-rr25-norm', normRr !== null ? fmtNum(normRr, 2) : '-.--');
+        setEl('pop-rr25-ratio', skewRatio !== null ? `Ratio ${fmtNum(skewRatio, 2)}x` : 'Ratio -.--x');
+        setEl('pop-rr25-skew', rawRr !== null && rawRr !== undefined ? `${fmtPts(rawRr)} pts` : '+--.-- pts');
+        setEl('pop-rr25-slope', normSlope !== null ? `Slope ${fmtNum(normSlope * 100, 2)}%/1%` : 'Slope -.--/1%');
+        setEl('pop-rr25-bf', butterfly !== null ? `${butterfly >= 0 ? '+' : ''}${fmtNum(butterfly, 2)} pts` : '+--.-- pts');
+        setEl('pop-rr25-bf-norm', bfNorm !== null ? `${bfNorm >= 0 ? '+' : ''}${fmtNum(bfNorm, 3)} / ATM` : '-.--- / ATM');
+
+        // Put Wing vs Call Wing Split
+        const driverCls = driver.includes('PUT')
+          ? 'px-1.5 py-0.5 rounded font-bold uppercase bg-rose-950/80 text-rose-300 border border-rose-700/70 text-[9px]'
+          : (driver.includes('CALL')
+            ? 'px-1.5 py-0.5 rounded font-bold uppercase bg-cyan-950/80 text-cyan-300 border border-cyan-700/70 text-[9px]'
+            : 'px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700 text-[9px]');
+        setEl('pop-rr25-driver', driver, driverCls);
+        setEl('pop-rr25-convexity', convexity);
+
+        const putPct = Math.max(5, Math.min(95, Math.round(putShare * 100)));
+        const callPct = 100 - putPct;
+        const putBarEl = document.getElementById('pop-rr25-put-bar');
+        const callBarEl = document.getElementById('pop-rr25-call-bar');
+        if (putBarEl) putBarEl.style.width = `${putPct}%`;
+        if (callBarEl) callBarEl.style.width = `${callPct}%`;
+
+        setEl('pop-rr25-put-wing', putWing !== null ? `Put: ${putWing >= 0 ? '+' : ''}${fmtNum(putWing, 1)} pts (${putPct}%)` : 'Put: +--.- pts');
+        setEl('pop-rr25-call-wing', callWing !== null ? `Call: ${callWing >= 0 ? '+' : ''}${fmtNum(callWing, 1)} pts (${callPct}%)` : 'Call: +--.- pts');
+
+        // Tenor Weights & 30D ATM
+        if (rrData && rrData.tenors && rrData.tenors.near && rrData.tenors.far && rrData.weights) {
+          const nDte = rrData.tenors.near.dte;
+          const fDte = rrData.tenors.far.dte;
+          const nw = Math.round((rrData.weights.near || 0) * 100);
+          const fw = Math.round((rrData.weights.far || 0) * 100);
+          setEl('pop-rr25-weights', `T1 ${nDte}d (${nw}%) + T2 ${fDte}d (${fw}%) → 30D`);
+        } else if (rrData && rrData.dte) {
+          setEl('pop-rr25-weights', `Single Tenor: ${rrData.dte} DTE`);
+        }
+        setEl('pop-rr25-atm-iv', `30D ATM: ${atmIv !== null ? fmtNum(atmIv, 1) + '%' : '--.-%'}${rrData && rrData.atm_estimated ? ' (est)' : ''}`);
+
+        // Dynamically render 3-leg smile rows (T1 Near + T2 Far)
+        const legsBody = document.getElementById('pop-rr25-legs-body');
+        if (legsBody && rrData && rrData.tenors) {
+          const rowsHtml = [];
+          const buildTenorRows = (tag, tObj) => {
+            if (!tObj) return;
+            const dStr = tObj.dte ? `${tObj.dte}d` : '--d';
+            const fmtD = (v, fallback) => (typeof v === 'number') ? `${v >= 0 ? '+' : ''}${fmtNum(v, 3)}` : fallback;
+            const fmtM = (v) => (typeof v === 'number') ? `$${fmtNum(v, 2)}` : '$--.--';
+            const fmtI = (v, est) => (typeof v === 'number') ? `${fmtNum(v, 1)}%${est ? '*' : ''}` : '--.-%';
+            rowsHtml.push(`
+              <tr class="bg-slate-950/60 text-slate-400">
+                <td colspan="5" class="py-0.5 px-1.5 text-[9px] font-bold tracking-wider uppercase">${tag} &bull; ${tObj.expiration ? fmtMaturity(tObj.expiration, null) : '--'} (${dStr}) &bull; Norm ${typeof tObj.norm_rr === 'number' ? fmtNum(tObj.norm_rr, 2) : '--'}</td>
+              </tr>
+              <tr>
+                <td class="py-0.5 px-1.5 text-emerald-400">+25Δ Call</td>
+                <td class="py-0.5 px-1.5 text-white">${tObj.call_strike ? tObj.call_strike + 'C' : '--'}</td>
+                <td class="py-0.5 px-1.5 text-right text-slate-300">${fmtM(tObj.call_mid)}</td>
+                <td class="py-0.5 px-1.5 text-right text-cyan-300">${fmtI(tObj.call_iv, false)}</td>
+                <td class="py-0.5 px-1.5 text-right text-slate-300">${fmtD(tObj.call_delta, '+0.250')}</td>
+              </tr>
+              <tr>
+                <td class="py-0.5 px-1.5 text-emerald-300">ATM Call</td>
+                <td class="py-0.5 px-1.5 text-white">${tObj.atm_strike ? tObj.atm_strike + 'C' : '--'}</td>
+                <td class="py-0.5 px-1.5 text-right text-slate-300">${fmtM(tObj.atm_mid)}</td>
+                <td class="py-0.5 px-1.5 text-right text-emerald-300">${fmtI(tObj.atm_iv, tObj.atm_estimated)}</td>
+                <td class="py-0.5 px-1.5 text-right text-slate-300">${fmtD(tObj.atm_delta, '+0.500')}</td>
+              </tr>
+              <tr>
+                <td class="py-0.5 px-1.5 text-rose-400">-25Δ Put</td>
+                <td class="py-0.5 px-1.5 text-white">${tObj.put_strike ? tObj.put_strike + 'P' : '--'}</td>
+                <td class="py-0.5 px-1.5 text-right text-slate-300">${fmtM(tObj.put_mid)}</td>
+                <td class="py-0.5 px-1.5 text-right text-amber-300">${fmtI(tObj.put_iv, false)}</td>
+                <td class="py-0.5 px-1.5 text-right text-slate-300">${fmtD(tObj.put_delta, '-0.250')}</td>
+              </tr>
+            `);
+          };
+          buildTenorRows('T1 Near', rrData.tenors.near);
+          buildTenorRows('T2 Far', rrData.tenors.far);
+          if (rowsHtml.length > 0) legsBody.innerHTML = rowsHtml.join('');
+        }
+
+        const popDesc = document.getElementById('pop-rr25-desc');
+        if (popDesc) {
+          const driverNote = driver.includes('PUT')
+            ? 'Put wing leads (downside hedging bid).'
+            : (driver.includes('CALL') ? 'Call wing leads (call overwriting/supply).' : 'Both wings balanced around ATM.');
+          if (rrRegime === 'EXTREME') {
+            popDesc.textContent = `Extreme normalized 30D skew (${fmtNum(normRr, 2)}x ATM IV). ${driverNote} ${convexity === 'FAT TAILS' ? 'Fat-tail wing convexity bid up.' : ''}`;
+          } else if (rrRegime === 'ELEVATED') {
+            popDesc.textContent = `Elevated normalized 30D skew (${fmtNum(normRr, 2)}x ATM IV). ${driverNote}`;
+          } else if (rrRegime === 'COMPLACENT') {
+            popDesc.textContent = `Compressed normalized 30D skew (${fmtNum(normRr, 2)}x ATM IV). Low crash-protection premium.`;
+          } else {
+            popDesc.textContent = `Normal 30D skew regime (${normRr !== null ? fmtNum(normRr, 2) : '--'}x ATM IV). ${driverNote}`;
+          }
+        }
+
+        setEl('pop-rr25-mat', rrData && rrData.is_constant_maturity ? 'Constant 30D Maturity' : `Single Expiry (${rrData && rrData.dte ? rrData.dte + 'D' : '--'})`);
+        const histDays = (rrData && typeof rrData.history_days === 'number') ? rrData.history_days : 0;
+        const pctRank = (rrData && typeof rrData.percentile === 'number') ? rrData.percentile : null;
+        setEl('pop-rr25-pct', pctRank !== null ? `1Y Pct: ${fmtNum(pctRank, 0)}th (${histDays}d)` : `History: ${histDays}/20d`);
+
+        // Card 7 regime styling strictly based on ATM-normalized regime
+        if (rrRegime === 'EXTREME') {
+          if (cardRr) cardRr.className = 'relative group bg-red-950/30 border border-red-700 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
+          tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-900 text-red-200 border border-red-500 font-bold uppercase animate-pulse';
+          rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-red-400';
+        } else if (rrRegime === 'ELEVATED') {
+          if (cardRr) cardRr.className = 'relative group bg-amber-950/20 border border-amber-800/80 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
+          tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/60 font-semibold uppercase';
+          rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-amber-300';
+        } else if (rrRegime === 'COMPLACENT') {
+          if (cardRr) cardRr.className = 'relative group bg-cyan-950/15 border border-cyan-800/60 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
+          tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-cyan-950/70 text-cyan-300 border border-cyan-800/60 font-semibold uppercase';
+          rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-cyan-300';
+        } else {
+          if (cardRr) cardRr.className = 'relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
+          tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold uppercase';
+          rrValEl.className = 'text-xl font-bold font-mono tracking-tight text-emerald-400';
+        }
+      } else {
+        rrValEl.innerHTML = '-.-- <span class="text-xs font-normal text-slate-400">(--.-pt)</span>';
+        tagRr.textContent = '---';
+        tagRr.className = 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase font-semibold';
+        if (cardRr) {
+          cardRr.className = 'relative group bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm transition cursor-pointer select-none';
+          cardRr.removeAttribute('title');
+        }
+        if (subRr) subRr.textContent = 'Put +-- · Call +-- · BF +--';
       }
-      if (subRr) subRr.textContent = 'Put IV − Call IV';
     }
   }
 
-  // Card 8: 4M Wing Skew / OTM Risk Reversal (10% C vs 15% P)
-  const rr4mData = (isNdx && ndx && ndx.rr_4m) ? ndx.rr_4m : data.rr_4m;
+  // Card 8: SPX 4M Wing Skew / OTM Risk Reversal (10% C vs 15% P; hidden when NDX active)
+  if (!isNdx) {
+  const rr4mData = data.rr_4m;
   const cardRr4m = document.getElementById('card-rr4m');
   const lblRr4m = document.getElementById('lbl-kpi-rr4m');
   const rr4mValEl = document.getElementById('kpi-rr4m-val');
@@ -7831,7 +7945,7 @@ function updateUI(data) {
   const matRr4m = document.getElementById('lbl-rr4m-mat');
   const subRr4m = document.getElementById('lbl-rr4m-sub');
 
-  if (lblRr4m) lblRr4m.textContent = isNdx ? "QQQ 4M Skew (RR)" : "SPX 4M Skew (RR)";
+  if (lblRr4m) lblRr4m.textContent = "SPX 4M Skew (RR)";
 
   if (matRr4m) {
     const expStr = (rr4mData && rr4mData.expiration) ? fmtMaturity(rr4mData.expiration, rr4mData.dte) : (rr4mData && rr4mData.dte ? `~${rr4mData.dte}d` : `~120d`);
@@ -8058,6 +8172,7 @@ function updateUI(data) {
       }
       if (subRr4m) subRr4m.textContent = '10%C vs 15%P (4M)';
     }
+  }
   }
 
   // Intraday Session Stats for middle chart (Term Structure or Tech Vol)
@@ -9264,6 +9379,10 @@ function setupRiskReversalPopovers() {
     if (!card || !popover) return;
 
     card.addEventListener('click', (e) => {
+      if (popoverId === 'popover-vix-futures' && currentAssetPair === 'NDX') {
+        popover.classList.add('hidden');
+        return;
+      }
       // If click originated inside the popover (except close button), don't toggle
       if (popover.contains(e.target)) {
         if (e.target === btnClose || (btnClose && btnClose.contains(e.target))) {
@@ -9395,8 +9514,8 @@ function setupRiskReversalPopovers() {
   const iconRecalibrate25 = document.getElementById('icon-recalibrate-25');
 
   const triggerRecalibration25 = async (mode) => {
-    const isNdx = (currentAssetPair === 'NDX');
-    const asset = isNdx ? 'NDX' : 'SPX';
+    if (currentAssetPair === 'NDX') return;
+    const asset = 'SPX';
 
     if (btnRecalibrate25) btnRecalibrate25.disabled = true;
     if (btnReset25) btnReset25.disabled = true;
@@ -9414,12 +9533,7 @@ function setupRiskReversalPopovers() {
       if (resp.ok) {
         const result = await resp.json();
         if (result && result.risk_reversal && lastLiveUpdatePayload) {
-          if (isNdx) {
-            if (!lastLiveUpdatePayload.ndx) lastLiveUpdatePayload.ndx = {};
-            lastLiveUpdatePayload.ndx.risk_reversal = result.risk_reversal;
-          } else {
-            lastLiveUpdatePayload.risk_reversal = result.risk_reversal;
-          }
+          lastLiveUpdatePayload.risk_reversal = result.risk_reversal;
           updateUI(lastLiveUpdatePayload);
         }
       } else {
