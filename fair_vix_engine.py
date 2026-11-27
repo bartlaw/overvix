@@ -415,9 +415,10 @@ def compute_fair_vix_asset_model(
         "dd_pct": [round(float(v), 2) for v in dd_scatter],
     }
 
-    # Build smooth 50-point curve grid spanning below min spot to slightly above 60D peak
+    # Build smooth 50-point curve grid spanning below min spot up to the 60D peak
+    # (stopping at peak_60d avoids a flat clamped dd=0% tail past the rightmost dot)
     s_min = float(np.min(spot_arr)) * 0.97
-    s_max = peak_60d * 1.01
+    s_max = peak_60d
     grid_spot = np.linspace(s_min, s_max, 50)
     grid_dd = np.maximum(0.0, (peak_60d - grid_spot) / peak_60d * 100.0) if peak_60d > 0 else np.zeros_like(grid_spot)
     grid_quad = quad["c0"] + quad["c1"] * grid_dd + quad["c2"] * (grid_dd ** 2)

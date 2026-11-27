@@ -441,7 +441,7 @@ let currentCorrTf = '1D';
 let currentOvervixChartMode = 'linear'; // 'linear' | 'fair'
 let currentFvTf = '1D';
 let currentFvDisplayMode = 'levels'; // 'levels' | 'beta'
-let showFvComponents = false;
+let showFvComponents = true;
 let showFvOvervixFlow = false;
 let isMouseHoveringFvChart = false;
 let pendingLiveFvRender = false;
@@ -5959,6 +5959,9 @@ function setupFairVixMonitorControls() {
     });
   }
   if (btnComp) {
+    btnComp.className = showFvComponents
+      ? "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-purple-500 text-white shadow-sm transition whitespace-nowrap"
+      : idleMode;
     btnComp.addEventListener('click', () => {
       showFvComponents = !showFvComponents;
       btnComp.className = showFvComponents
