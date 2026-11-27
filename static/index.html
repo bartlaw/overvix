@@ -258,7 +258,7 @@
           <span id="lbl-kpi-vol" class="text-[11px] font-semibold tracking-wider text-cyan-400 uppercase">VIX (30-Day)</span>
           <div class="flex items-center space-x-1">
             <span id="tag-kpi-vol" class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-800/50">Spot</span>
-            <span id="btn-fair-vix-info" class="text-[11px] text-slate-400 hover:text-amber-400 transition cursor-pointer" title="View Combined Fair VIX Model (HAR-RV &amp; 252D EWM Quad)">ⓘ</span>
+            <span id="btn-fair-vix-info" class="text-[11px] text-slate-400 hover:text-amber-400 transition cursor-pointer" title="View Combined Fair VIX Model (PDV-4 &amp; 252D EWM Quad)">ⓘ</span>
           </div>
         </div>
         <div class="mt-2">
@@ -276,7 +276,7 @@
                 <span>🎯</span>
                 <span>Composite Fair VIX Model</span>
               </div>
-              <div class="text-[10px] text-slate-400 font-medium">HAR-RV (Mean-Rev Realized Vol) &amp; 252D EWM Quad (60D DD)</div>
+              <div class="text-[10px] text-slate-400 font-medium">PDV-4 (Path-Dependent Vol) &amp; 252D EWM Quad (60D DD)</div>
             </div>
             <div class="flex items-center space-x-1.5">
               <span id="pop-fv-badge" class="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700">---</span>
@@ -322,16 +322,22 @@
               </thead>
               <tbody class="divide-y divide-slate-800/60 bg-slate-900/80">
                 <tr>
-                  <td class="py-1.5 px-2 text-emerald-400 font-bold">HAR-RV</td>
-                  <td id="pop-fv-m2-detail" class="py-1.5 px-1.5 text-slate-300">EWMA 5/21/Dn10: -- | Impl VRP: --</td>
-                  <td id="pop-fv-m2-wt" class="py-1.5 px-1.5 text-right text-slate-400">50%</td>
-                  <td id="pop-fv-m2-val" class="py-1.5 px-2 text-right text-emerald-300 font-bold">--.--</td>
+                  <td class="py-1.5 px-2 text-emerald-400 font-bold">PDV-4</td>
+                  <td id="pop-fv-pdv-detail" class="py-1.5 px-1.5 text-slate-300">R1(3.5/35d) &amp; √R2(5/45d) | R²: --</td>
+                  <td id="pop-fv-pdv-wt" class="py-1.5 px-1.5 text-right text-slate-400">50%</td>
+                  <td id="pop-fv-pdv-val" class="py-1.5 px-2 text-right text-emerald-300 font-bold">--.--</td>
                 </tr>
                 <tr>
                   <td class="py-1.5 px-2 text-purple-400 font-bold">EWM Quad</td>
                   <td id="pop-fv-m4-detail" class="py-1.5 px-1.5 text-slate-300">DD: --% | R²: -- | c2: --</td>
                   <td id="pop-fv-m4-wt" class="py-1.5 px-1.5 text-right text-slate-400">50%</td>
                   <td id="pop-fv-m4-val" class="py-1.5 px-2 text-right text-purple-300 font-bold">--.--</td>
+                </tr>
+                <tr>
+                  <td class="py-1.5 px-2 text-lime-400 font-bold">HAR-RV</td>
+                  <td id="pop-fv-m2-detail" class="py-1.5 px-1.5 text-slate-300">EWMA 5/21/Dn10: -- | Impl VRP: --</td>
+                  <td class="py-1.5 px-1.5 text-right text-slate-500">Signal</td>
+                  <td id="pop-fv-m2-val" class="py-1.5 px-2 text-right text-lime-300 font-bold">--.--</td>
                 </tr>
               </tbody>
             </table>
@@ -770,7 +776,7 @@
           <!-- Card 1 Header Controls: Model Tab & Click Mode -->
           <div class="flex flex-wrap items-center gap-1.5 flex-shrink-0">
             <!-- Linear Δ vs Fair VIX Scatter Switch -->
-            <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-[10px] font-medium whitespace-nowrap" title="Switch between Daily Δ Spot-Vol Regression and Absolute Fair VIX (252D EWM Quad + HAR-RV)">
+            <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-[10px] font-medium whitespace-nowrap" title="Switch between Daily Δ Spot-Vol Regression and Absolute Fair VIX (252D EWM Quad + PDV-4 + HAR-RV)">
               <button id="btn-ov-mode-linear" class="px-2 py-1 rounded-md text-[10px] font-semibold bg-cyan-500 text-black shadow-sm transition whitespace-nowrap">Δ Linear</button>
               <button id="btn-ov-mode-fair" class="px-2 py-1 rounded-md text-[10px] font-semibold text-slate-400 hover:text-amber-300 transition whitespace-nowrap">Fair VIX</button>
             </div>
@@ -944,7 +950,7 @@
             <span id="fv-regime-pill" class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">Fair Gap (--.-- pts)</span>
             <span id="fv-sticky-pill" class="hidden text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-rose-950/90 text-rose-300 border border-rose-600/80">Sticky Vol Confluence</span>
           </div>
-          <p id="fv-subtitle" class="text-xs text-slate-400">Upper: Live VIX vs Composite Fair VIX (HAR-RV &amp; 252D EWM Quad) &bull; Lower: Composite Structural Residual vs Intraday Overvix Residual</p>
+          <p id="fv-subtitle" class="text-xs text-slate-400">Upper: Live VIX vs Fair VIX (PDV-4 &amp; 252D EWM Quad) &bull; Lower: Structural Residual vs Intraday Overvix Residual</p>
         </div>
 
         <!-- Right: Horizon Slider & Display Mode Controls -->
@@ -979,15 +985,23 @@
             </div>
           </div>
 
+          <!-- Headline Fair VIX Basis Selector: Composite / PDV / Quad -->
+          <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium flex-shrink-0" title="Select headline Fair VIX model for upper benchmark and lower structural residual">
+            <button id="btn-fv-basis-composite" class="px-2 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition whitespace-nowrap" title="Blend PDV-4 and 252D EWM Quad">Composite</button>
+            <button id="btn-fv-basis-pdv" class="px-2 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap" title="Use Pure PDV-4 (zero rolling-window cliff)">PDV</button>
+            <button id="btn-fv-basis-quad" class="px-2 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap" title="Use Pure 252D EWM Quad (60D Drawdown)">Quad</button>
+          </div>
+
           <!-- Upper Panel Mode Switch: VIX Levels vs Beta vs SPX -->
           <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium flex-shrink-0">
-            <button id="btn-fv-mode-levels" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition whitespace-nowrap" title="Plot Live VIX alongside dashed amber Composite Fair VIX level">VIX Levels</button>
+            <button id="btn-fv-mode-levels" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition whitespace-nowrap" title="Plot Live VIX alongside dashed amber Fair VIX level">VIX Levels</button>
             <button id="btn-fv-mode-beta" class="px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap" title="Invert and beta-scale Live VIX &amp; Fair VIX alongside SPX % change">Beta vs SPX</button>
           </div>
 
-          <!-- Toggle Individual HAR-RV & EWM Quad Lines + Overvix Residual (Flow) -->
+          <!-- Toggle Individual PDV & EWM Quad Lines + Standalone HAR-RV Signal + Overvix Residual (Flow) -->
           <div class="flex items-center space-x-0.5 bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs font-medium flex-shrink-0">
-            <button id="btn-fv-components" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-purple-500 text-white shadow-sm transition whitespace-nowrap" title="Show/hide individual HAR-RV and 252D EWM Quad curves">HAR-RV / Quad</button>
+            <button id="btn-fv-components" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-purple-500 text-white shadow-sm transition whitespace-nowrap" title="Show/hide individual PDV-4 and 252D EWM Quad curves">PDV / Quad</button>
+            <button id="btn-fv-har" class="px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap" title="Show/hide standalone HAR-RV trading signal (never blended into Composite)">HAR-RV</button>
             <button id="btn-fv-overvix" class="px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap" title="Show/hide Overvix Residual (Flow) line in lower pane">Overvix</button>
           </div>
         </div>
@@ -997,10 +1011,11 @@
       <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-950/70 border border-slate-800/80 rounded-lg px-3 py-1.5 mb-2 text-[11px] font-mono">
         <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
           <span>Live: <strong id="fv-hud-live" class="text-cyan-300">--.--</strong></span>
-          <span>Comp Fair: <strong id="fv-hud-fair" class="text-amber-300">--.--</strong></span>
-          <span>HAR-RV: <strong id="fv-hud-m2" class="text-emerald-400">--.--</strong></span>
+          <span><span id="fv-hud-fair-lbl">Comp Fair</span>: <strong id="fv-hud-fair" class="text-amber-300">--.--</strong></span>
+          <span>PDV: <strong id="fv-hud-pdv" class="text-emerald-400">--.--</strong></span>
           <span>EWM Quad: <strong id="fv-hud-m4" class="text-purple-300">--.--</strong></span>
-          <span>Comp Res: <strong id="fv-hud-comp-res" class="text-white">--.-- pts</strong></span>
+          <span>HAR-RV: <strong id="fv-hud-m2" class="text-lime-400">--.--</strong></span>
+          <span><span id="fv-hud-res-lbl">Res</span>: <strong id="fv-hud-comp-res" class="text-white">--.-- pts</strong></span>
           <span>Overvix Res: <strong id="fv-hud-ov-res" class="text-slate-200">--.-- pts</strong></span>
         </div>
         <span id="fv-summary-comment" class="text-[11px] text-slate-300 font-sans font-normal"></span>
@@ -1044,12 +1059,12 @@
           <input type="number" id="input-interval" step="0.5" min="0.5" max="10.0" value="1.0" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-cyan-500">
         </div>
 
-        <!-- Fair VIX Valuation Settings (HAR-RV & EWM Quad) -->
+        <!-- Fair VIX Valuation Settings (PDV-4 & EWM Quad) -->
         <div class="pt-3 border-t border-slate-800 space-y-2.5">
-          <label class="block text-xs font-semibold text-amber-400 uppercase">Fair VIX Valuation (HAR-RV &amp; EWM Quad)</label>
+          <label class="block text-xs font-semibold text-amber-400 uppercase">Fair VIX Valuation (PDV-4 &amp; EWM Quad)</label>
           <div class="grid grid-cols-2 gap-2">
             <div>
-              <label for="select-vrp-mode" class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">RV Anchor Mode</label>
+              <label for="select-vrp-mode" class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">HAR-RV Signal Mode</label>
               <select id="select-vrp-mode" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer">
                 <option value="auto">Auto (HAR-RV Mean-Rev)</option>
                 <option value="fixed">Fixed (+pts over RV)</option>
@@ -1061,10 +1076,12 @@
             </div>
           </div>
           <div>
-            <label for="select-fv-blend" class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">HAR-RV / EWM Quad Blend</label>
+            <label for="select-fv-blend" class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Fair VIX Basis &amp; Blend</label>
             <select id="select-fv-blend" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer">
-              <option value="equal">50% HAR-RV / 50% EWM Quad</option>
-              <option value="r2_weighted" selected>R²-Adaptive Blend (30–70% Quad)</option>
+              <option value="r2_weighted" selected>R²-Adaptive Blend (PDV + EWM Quad)</option>
+              <option value="equal">50% PDV / 50% EWM Quad</option>
+              <option value="pdv_only">Pure PDV (100% Path-Dependent)</option>
+              <option value="quad_only">Pure EWM Quad (100% 60D Drawdown)</option>
             </select>
           </div>
         </div>
@@ -1372,8 +1389,8 @@
     </div>
   </div>
 
-  <!-- DASHBOARD SCRIPT (v10.47 - Fair VIX Curve Click-to-Anchor) -->
-  <script src="/static/dashboard.js?v=10.47"></script>
+  <!-- DASHBOARD SCRIPT (v10.48 - PDV-4 Integration + Standalone HAR-RV Signal) -->
+  <script src="/static/dashboard.js?v=10.48"></script>
 
   <!-- PWA Service Worker & Install Handler -->
   <script>

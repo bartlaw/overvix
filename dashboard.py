@@ -373,7 +373,7 @@ class DashboardState:
                 val = float(cfg['vrp_fixed_pts'])
                 if 0.0 <= val <= 15.0:
                     self.vrp_fixed_pts = val
-            if cfg.get('fair_vix_blend') in ('equal', 'r2_weighted'):
+            if cfg.get('fair_vix_blend') in ('equal', 'r2_weighted', 'pdv_only', 'quad_only'):
                 self.fair_vix_blend = cfg['fair_vix_blend']
         except Exception as e:
             print(f"[Config Warning] Failed loading {USER_CONFIG_PATH}: {e}")
@@ -4569,7 +4569,7 @@ async def post_config(req: ConfigRequest):
         if val != state.vrp_fixed_pts:
             state.vrp_fixed_pts = val
             fv_changed = True
-    if req.fair_vix_blend in ("equal", "r2_weighted") and req.fair_vix_blend != state.fair_vix_blend:
+    if req.fair_vix_blend in ("equal", "r2_weighted", "pdv_only", "quad_only") and req.fair_vix_blend != state.fair_vix_blend:
         state.fair_vix_blend = req.fair_vix_blend
         fv_changed = True
 

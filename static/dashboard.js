@@ -441,7 +441,10 @@ let currentCorrTf = '1D';
 let currentOvervixChartMode = 'linear'; // 'linear' | 'fair'
 let currentFvTf = '1D';
 let currentFvDisplayMode = 'levels'; // 'levels' | 'beta'
+let currentFvBasis = 'composite'; // 'composite' | 'pdv' | 'quad'
+let lastCompositeBlendMode = 'r2_weighted'; // 'r2_weighted' | 'equal'
 let showFvComponents = true;
+let showFvHarSignal = false;
 let showFvOvervixFlow = false;
 let isMouseHoveringFvChart = false;
 let pendingLiveFvRender = false;
@@ -449,6 +452,13 @@ let currentVrpMode = 'auto';
 let currentVrpFixedPts = 4.0;
 let currentFvBlend = 'r2_weighted';
 let lastFairVixData = null;
+let userBasisOverrideAt = 0;
+
+// Guyon & Lekeufack (2023) multi-timescale PDV decay factors matching fair_vix_engine.py
+const PDV_A_R1F = 1.0 - Math.exp(-1.0 / 3.5);
+const PDV_A_R1S = 1.0 - Math.exp(-1.0 / 35.0);
+const PDV_A_R2F = 1.0 - Math.exp(-1.0 / 5.0);
+const PDV_A_R2S = 1.0 - Math.exp(-1.0 / 45.0);
 
 // Recovery Anchor State for Dynamic Correlation & Divergence Monitor
 let corrAnchor = {
@@ -745,6 +755,8 @@ btnSaveSettings.addEventListener('click', async () => {
       currentVrpMode = vrpMode;
       currentVrpFixedPts = isNaN(vrpFixed) ? 4.0 : vrpFixed;
       currentFvBlend = fvBlend;
+      syncFvBasisFromBlend(currentFvBlend);
+      updateFvBasisButtonsUI();
       currentThreshold = (currentAssetPair === 'NDX') ? currentNdxThreshold : currentSpxThreshold;
       const dispEl = document.getElementById('disp-thresh-pts');
       if (dispEl) dispEl.textContent = currentThreshold.toFixed(1);
@@ -5504,6 +5516,120 @@ function getActiveFairVixModelBoot() {
   return (isNdx ? (activeBoot.ndx && activeBoot.ndx.fair_vix) : activeBoot.fair_vix) || {};
 }
 
+function syncFvBasisFromBlend(blendMode) {
+  if (blendMode === 'pdv_only') {
+    currentFvBasis = 'pdv';
+  } else if (blendMode === 'quad_only') {
+    currentFvBasis = 'quad';
+  } else {
+    currentFvBasis = 'composite';
+    if (blendMode === 'equal' || blendMode === 'r2_weighted') {
+      lastCompositeBlendMode = blendMode;
+    }
+  }
+}
+
+function getBasisLabelInfo(basis = currentFvBasis) {
+  if (basis === 'pdv') return { shortName: 'PDV Fair', titleName: 'PDV-4 Fair', chartLabel: 'PDV Fair' };
+  if (basis === 'quad') return { shortName: 'Quad Fair', titleName: 'EWM Quad Fair', chartLabel: 'EWM Quad Fair' };
+  return { shortName: 'Comp Fair', titleName: 'Composite Fair', chartLabel: 'Composite Fair' };
+}
+
+function evalPdvFromParams(p, spotVal) {
+  if (!p) return null;
+  if (typeof p.prev_spot === 'number' && p.prev_spot > 0 && typeof p.pdv_b0 === 'number' && typeof spotVal === 'number' && spotVal > 0) {
+    const lr = Math.log(Math.max(spotVal, 1e-6) / p.prev_spot);
+    const r1f = ((1.0 - PDV_A_R1F) * (p.pdv_r1f || 0.0) + PDV_A_R1F * lr) * 25200.0;
+    const r1s = ((1.0 - PDV_A_R1S) * (p.pdv_r1s || 0.0) + PDV_A_R1S * lr) * 25200.0;
+    const s2f = Math.sqrt(Math.max(0.0, ((1.0 - PDV_A_R2F) * (p.pdv_v2f || 0.0) + PDV_A_R2F * (lr * lr)) * 252.0)) * 100.0;
+    const s2s = Math.sqrt(Math.max(0.0, ((1.0 - PDV_A_R2S) * (p.pdv_v2s || 0.0) + PDV_A_R2S * (lr * lr)) * 252.0)) * 100.0;
+    const raw = p.pdv_b0 + (p.pdv_b1f || 0.0) * r1f + (p.pdv_b1s || 0.0) * r1s + (p.pdv_b2f || 0.0) * s2f + (p.pdv_b2s || 0.0) * s2s;
+    return Math.max(6.0, raw);
+  }
+  return (typeof p.fair_pdv === 'number') ? p.fair_pdv : ((typeof p.fair_m2 === 'number') ? p.fair_m2 : null);
+}
+
+function resolveFairWeightsForBasis(p, basis = currentFvBasis) {
+  if (basis === 'pdv') return { wPdv: 1.0, wQuad: 0.0 };
+  if (basis === 'quad') return { wPdv: 0.0, wQuad: 1.0 };
+  let wPdv = (p && typeof p.w_pdv === 'number') ? p.w_pdv : ((p && typeof p.w_m2 === 'number') ? p.w_m2 : 0.45);
+  let wQuad = (p && typeof p.w_quad === 'number') ? p.w_quad : ((p && typeof p.w_m4 === 'number') ? p.w_m4 : 0.55);
+  // If switching back to Composite client-side before backend refresh finishes after pdv_only/quad_only
+  if (wPdv <= 0.001 || wQuad <= 0.001) {
+    if (lastCompositeBlendMode === 'equal') {
+      wPdv = 0.5;
+      wQuad = 0.5;
+    } else {
+      const qR2 = (p && typeof p.quad_r2 === 'number') ? Math.max(0, p.quad_r2) : 0.5;
+      const pR2 = (p && typeof p.pdv_r2 === 'number') ? Math.max(0, p.pdv_r2) : 0.5;
+      const tot = qR2 + pR2;
+      wQuad = tot > 1e-6 ? Math.max(0.30, Math.min(0.70, qR2 / tot)) : 0.55;
+      wPdv = 1.0 - wQuad;
+    }
+  }
+  return { wPdv, wQuad };
+}
+
+function resolveFairByBasis(fPdv, fQuad, paramObj, basis = currentFvBasis) {
+  if (basis === 'pdv') return fPdv;
+  if (basis === 'quad') return fQuad;
+  if (typeof fPdv !== 'number') return fQuad;
+  if (typeof fQuad !== 'number') return fPdv;
+  const { wPdv, wQuad } = resolveFairWeightsForBasis(paramObj, 'composite');
+  return wPdv * fPdv + wQuad * fQuad;
+}
+
+function getBasisFairFromPayload(fvLive) {
+  if (!fvLive) return null;
+  const fPdv = (typeof fvLive.fair_pdv === 'number') ? fvLive.fair_pdv : fvLive.fair_m2_rv_vrp;
+  const fQuad = fvLive.fair_m4_quad;
+  const val = resolveFairByBasis(fPdv, fQuad, fvLive, currentFvBasis);
+  return (typeof val === 'number') ? val : fvLive.combined;
+}
+
+function updateFvBasisButtonsUI() {
+  const btnComp = document.getElementById('btn-fv-basis-composite');
+  const btnPdv = document.getElementById('btn-fv-basis-pdv');
+  const btnQuad = document.getElementById('btn-fv-basis-quad');
+  const idleCls = "px-2 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition whitespace-nowrap";
+  if (btnComp) btnComp.className = (currentFvBasis === 'composite') ? "px-2 py-1.5 rounded-md text-xs font-semibold bg-amber-500 text-black shadow-sm transition whitespace-nowrap" : idleCls;
+  if (btnPdv) btnPdv.className = (currentFvBasis === 'pdv') ? "px-2 py-1.5 rounded-md text-xs font-semibold bg-emerald-500 text-black shadow-sm transition whitespace-nowrap" : idleCls;
+  if (btnQuad) btnQuad.className = (currentFvBasis === 'quad') ? "px-2 py-1.5 rounded-md text-xs font-semibold bg-purple-500 text-white shadow-sm transition whitespace-nowrap" : idleCls;
+}
+
+function setFairVixBasis(basis, syncBackend = true) {
+  if (!['composite', 'pdv', 'quad'].includes(basis)) return;
+  currentFvBasis = basis;
+  currentFvBlend = (basis === 'pdv') ? 'pdv_only' : ((basis === 'quad') ? 'quad_only' : lastCompositeBlendMode);
+  updateFvBasisButtonsUI();
+
+  const selFvBlend = document.getElementById('select-fv-blend');
+  if (selFvBlend) selFvBlend.value = currentFvBlend;
+
+  const activeData = (currentViewMode === 'historical' && cachedHistoricalData)
+    ? cachedHistoricalData
+    : (lastLiveUpdatePayload || cachedBootstrap);
+  if (activeData) {
+    updateFairVixUI(activeData);
+  }
+  if (currentOvervixChartMode === 'fair') {
+    const bootSrc = (currentViewMode === 'historical' && cachedHistoricalData) ? cachedHistoricalData : cachedBootstrap;
+    if (bootSrc) renderFairVixScatterChart(bootSrc);
+  }
+  renderFairVixMonitorChart(currentFvTf);
+
+  if (syncBackend && currentViewMode === 'live') {
+    userBasisOverrideAt = Date.now();
+    fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fair_vix_blend: currentFvBlend })
+    })
+      .then(res => res.ok ? bootstrapData() : null)
+      .catch(err => console.warn('[FairVix] Failed syncing basis config:', err));
+  }
+}
+
 function renderFairVixMiniChart(fvLive, fvBoot) {
   const chartEl = document.getElementById('pop-fair-vix-chart');
   if (!chartEl || !fvBoot) return;
@@ -5516,6 +5642,8 @@ function renderFairVixMiniChart(fvLive, fvBoot) {
   const volLbl = isNdx ? 'VXN' : 'VIX';
   const liveSpot = fvLive.live_spot;
   const liveVol = fvLive.live_vol;
+  const headlineFair = getBasisFairFromPayload(fvLive);
+  const basisInfo = getBasisLabelInfo(currentFvBasis);
 
   const traces = [
     {
@@ -5540,27 +5668,25 @@ function renderFairVixMiniChart(fvLive, fvBoot) {
     });
   }
 
-  if (typeof fvLive.fair_m2_rv_vrp === 'number') {
-    const xMin = Math.min(...sc.spot, liveSpot || sc.spot[0]);
-    const xMax = Math.max(...sc.spot, liveSpot || sc.spot[0]);
+  if (Array.isArray(cv.pdv_spot) && Array.isArray(cv.vix_pdv) && cv.pdv_spot.length > 0) {
     traces.push({
-      x: [xMin, xMax],
-      y: [fvLive.fair_m2_rv_vrp, fvLive.fair_m2_rv_vrp],
+      x: cv.pdv_spot,
+      y: cv.vix_pdv,
       mode: 'lines',
-      name: 'HAR-RV',
-      line: { color: '#10B981', width: 1.5, dash: 'dash' },
-      hovertemplate: `HAR-RV: %{y:.2f}<extra></extra>`
+      name: 'PDV-4',
+      line: { color: '#10B981', width: 1.8, dash: 'dash', shape: 'spline' },
+      hovertemplate: 'PDV-4 Fair: %{y:.2f}<extra></extra>'
     });
   }
 
-  if (typeof liveSpot === 'number' && typeof fvLive.combined === 'number') {
+  if (typeof liveSpot === 'number' && typeof headlineFair === 'number') {
     traces.push({
       x: [liveSpot],
-      y: [fvLive.combined],
+      y: [headlineFair],
       mode: 'markers',
-      name: 'Composite Fair',
+      name: basisInfo.titleName,
       marker: { color: '#F59E0B', size: 9, symbol: 'diamond', line: { color: '#0F172A', width: 1.5 } },
-      hovertemplate: `<b>Composite Fair</b>: ${fvLive.combined.toFixed(2)}<extra></extra>`
+      hovertemplate: `<b>${basisInfo.titleName}</b>: ${headlineFair.toFixed(2)}<extra></extra>`
     });
   }
 
@@ -5600,18 +5726,32 @@ function updateFairVixUI(data) {
   const fvBoot = getActiveFairVixModelBoot();
   lastFairVixData = fv;
 
+  const fairVal = getBasisFairFromPayload(fv);
+  const fPdv = fv ? ((typeof fv.fair_pdv === 'number') ? fv.fair_pdv : fv.fair_m2_rv_vrp) : null;
+  const fQuad = fv ? fv.fair_m4_quad : null;
+  const fHar = fv ? ((typeof fv.fair_har === 'number') ? fv.fair_har : fv.fair_m2_rv_vrp) : null;
+
   const kpiLineEl = document.getElementById('kpi-vix-fair-line');
-  if (!fv || typeof fv.combined !== 'number') {
+  if (!fv || typeof fairVal !== 'number' || typeof fv.live_vol !== 'number') {
     if (kpiLineEl) kpiLineEl.textContent = 'Fair: --.-- (--.-)';
     return;
   }
 
   const isNdx = (currentAssetPair === 'NDX');
   const volLbl = isNdx ? 'VXN' : 'VIX';
-  const gSign = fv.gap_pts >= 0 ? '+' : '';
-  const gColorCls = fv.regime === 'RICH' ? 'text-rose-400' : (fv.regime === 'CHEAP' ? 'text-emerald-400' : 'text-amber-300/90');
+  const thr = isNdx ? currentNdxThreshold : currentSpxThreshold;
+  const gapPts = fv.live_vol - fairVal;
+  const gapPct = fairVal > 0 ? (gapPts / fairVal * 100.0) : 0.0;
+  const regime = (gapPts >= thr) ? 'RICH' : ((gapPts <= -thr) ? 'CHEAP' : 'FAIR');
+  const { wPdv, wQuad } = resolveFairWeightsForBasis(fv, currentFvBasis);
+  const bandLo = (typeof fPdv === 'number' && typeof fQuad === 'number') ? Math.min(fPdv, fQuad) : fairVal;
+  const bandHi = (typeof fPdv === 'number' && typeof fQuad === 'number') ? Math.max(fPdv, fQuad) : fairVal;
+  const basisInfo = getBasisLabelInfo(currentFvBasis);
+
+  const gSign = gapPts >= 0 ? '+' : '';
+  const gColorCls = regime === 'RICH' ? 'text-rose-400' : (regime === 'CHEAP' ? 'text-emerald-400' : 'text-amber-300/90');
   if (kpiLineEl) {
-    kpiLineEl.textContent = `Fair: ${fv.combined.toFixed(2)} (${gSign}${fv.gap_pts.toFixed(1)})`;
+    kpiLineEl.textContent = `Fair: ${fairVal.toFixed(2)} (${gSign}${gapPts.toFixed(1)})`;
     kpiLineEl.className = `text-[10px] font-mono mt-0.5 truncate ${gColorCls}`;
   }
 
@@ -5625,50 +5765,59 @@ function updateFairVixUI(data) {
   const popImp = document.getElementById('pop-fv-imp-move');
   const popReal = document.getElementById('pop-fv-real-move');
   const popRvTag = document.getElementById('pop-fv-rv-tag');
+  const popPdvDet = document.getElementById('pop-fv-pdv-detail');
+  const popPdvWt = document.getElementById('pop-fv-pdv-wt');
+  const popPdvVal = document.getElementById('pop-fv-pdv-val');
   const popM2Det = document.getElementById('pop-fv-m2-detail');
-  const popM2Wt = document.getElementById('pop-fv-m2-wt');
   const popM2Val = document.getElementById('pop-fv-m2-val');
   const popM4Det = document.getElementById('pop-fv-m4-detail');
   const popM4Wt = document.getElementById('pop-fv-m4-wt');
   const popM4Val = document.getElementById('pop-fv-m4-val');
   const popDesc = document.getElementById('pop-fv-desc');
 
-  if (popTitle) popTitle.innerHTML = `<span>🎯</span><span>Composite Fair ${volLbl} Model</span>`;
+  if (popTitle) popTitle.innerHTML = `<span>🎯</span><span>${basisInfo.titleName} ${volLbl} Model</span>`;
   if (popBadge) {
-    popBadge.textContent = fv.regime || 'FAIR';
-    if (fv.regime === 'RICH') {
+    popBadge.textContent = regime;
+    if (regime === 'RICH') {
       popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-rose-950/90 text-rose-300 border border-rose-700';
-    } else if (fv.regime === 'CHEAP') {
+    } else if (regime === 'CHEAP') {
       popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-emerald-950/90 text-emerald-300 border border-emerald-700';
     } else {
       popBadge.className = 'text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-amber-950/80 text-amber-300 border border-amber-700';
     }
   }
-  if (popCombined) popCombined.textContent = fv.combined.toFixed(2);
-  if (popBand) popBand.textContent = `Band: ${fv.band_low.toFixed(1)}–${fv.band_high.toFixed(1)}`;
+  if (popCombined) popCombined.textContent = fairVal.toFixed(2);
+  if (popBand) popBand.textContent = `Band: ${bandLo.toFixed(1)}–${bandHi.toFixed(1)}`;
   if (popGap) {
-    popGap.textContent = `${gSign}${fv.gap_pts.toFixed(2)} pts`;
-    popGap.className = `text-xs font-bold font-mono ${fv.regime === 'RICH' ? 'text-rose-400' : (fv.regime === 'CHEAP' ? 'text-emerald-400' : 'text-white')}`;
+    popGap.textContent = `${gSign}${gapPts.toFixed(2)} pts`;
+    popGap.className = `text-xs font-bold font-mono ${regime === 'RICH' ? 'text-rose-400' : (regime === 'CHEAP' ? 'text-emerald-400' : 'text-white')}`;
   }
-  if (popGapPct) popGapPct.textContent = `(${gSign}${fv.gap_pct.toFixed(1)}%)`;
+  if (popGapPct) popGapPct.textContent = `(${gSign}${gapPct.toFixed(1)}%)`;
   if (popImp) popImp.textContent = `±${fv.implied_daily_move_pct.toFixed(2)}%`;
   if (popReal) popReal.textContent = `Real 10D: ±${fv.realized_daily_move_pct.toFixed(2)}%`;
   if (popRvTag) popRvTag.textContent = `${fv.rv_method || 'RV'} | Exp RV: ${fv.expected_rv.toFixed(1)}%`;
+
+  if (popPdvDet) popPdvDet.textContent = `R1(3.5/35d) & √R2(5/45d) | R²: ${(fv.pdv_r2 || 0).toFixed(3)}`;
+  if (popPdvWt) popPdvWt.textContent = `${Math.round(wPdv * 100)}%`;
+  if (popPdvVal) popPdvVal.textContent = (typeof fPdv === 'number') ? fPdv.toFixed(2) : '--.--';
+
+  if (popM4Det) popM4Det.textContent = `DD: -${fv.drawdown_pct.toFixed(2)}% (Peak ${fv.peak_60d.toLocaleString('en-US', { maximumFractionDigits: 0 })}) | R²: ${fv.quad_r2.toFixed(3)} | c2: ${fv.quad_c2.toFixed(3)}`;
+  if (popM4Wt) popM4Wt.textContent = `${Math.round(wQuad * 100)}%`;
+  if (popM4Val) popM4Val.textContent = (typeof fQuad === 'number') ? fQuad.toFixed(2) : '--.--';
+
   if (popM2Det) {
     if (fv.vrp_mode !== 'fixed' && typeof fv.ew_dn10 === 'number') {
-      popM2Det.textContent = `EWMA 5/21/Dn10: ${fv.ew_5d.toFixed(1)}/${fv.ew_21d.toFixed(1)}/${fv.ew_dn10.toFixed(1)} | R²: ${(fv.har_r2 || 0).toFixed(2)} | Impl VRP: ${fv.vrp_base >= 0 ? '+' : ''}${fv.vrp_base.toFixed(1)}`;
+      popM2Det.textContent = `EWMA 5/21/Dn10: ${fv.ew_5d.toFixed(1)}/${fv.ew_21d.toFixed(1)}/${fv.ew_dn10.toFixed(1)} | R²: ${(fv.har_r2 || 0).toFixed(2)} | VRP: ${fv.vrp_base >= 0 ? '+' : ''}${fv.vrp_base.toFixed(1)}`;
     } else {
       popM2Det.textContent = `RV 5/10/21: ${fv.rv_5d.toFixed(1)}/${fv.rv_10d.toFixed(1)}/${fv.rv_21d.toFixed(1)} | VRP: +${fv.vrp_base.toFixed(1)} (Live ${fv.vrp_live >= 0 ? '+' : ''}${fv.vrp_live.toFixed(1)})`;
     }
   }
-  if (popM2Wt) popM2Wt.textContent = `${Math.round((fv.w_m2 || 0.5) * 100)}%`;
-  if (popM2Val) popM2Val.textContent = fv.fair_m2_rv_vrp.toFixed(2);
-  if (popM4Det) popM4Det.textContent = `DD: -${fv.drawdown_pct.toFixed(2)}% (Peak ${fv.peak_60d.toLocaleString('en-US', { maximumFractionDigits: 0 })}) | R²: ${fv.quad_r2.toFixed(3)} | c2: ${fv.quad_c2.toFixed(3)}`;
-  if (popM4Wt) popM4Wt.textContent = `${Math.round((fv.w_m4 || 0.5) * 100)}%`;
-  if (popM4Val) popM4Val.textContent = fv.fair_m4_quad.toFixed(2);
+  if (popM2Val) popM2Val.textContent = (typeof fHar === 'number') ? fHar.toFixed(2) : '--.--';
+
   if (popDesc) {
-    const dir = fv.gap_pts > 0.5 ? 'above' : (fv.gap_pts < -0.5 ? 'below' : 'near');
-    popDesc.textContent = `${volLbl} (${fv.live_vol.toFixed(2)}) trades ${Math.abs(fv.gap_pts).toFixed(2)} pts ${dir} composite fair (${fv.combined.toFixed(2)}). Price-location (252D EWM Quad) implies ${fv.fair_m4_quad.toFixed(2)} vs realized-vol anchor (HAR-RV) at ${fv.fair_m2_rv_vrp.toFixed(2)}.`;
+    const dir = gapPts > 0.5 ? 'above' : (gapPts < -0.5 ? 'below' : 'near');
+    const harNote = (typeof fHar === 'number') ? ` Standalone HAR-RV signal: ${fHar.toFixed(2)} (unblended).` : '';
+    popDesc.textContent = `${volLbl} (${fv.live_vol.toFixed(2)}) trades ${Math.abs(gapPts).toFixed(2)} pts ${dir} ${basisInfo.titleName} (${fairVal.toFixed(2)}). PDV-4 implies ${typeof fPdv === 'number' ? fPdv.toFixed(2) : '--'} vs 252D EWM Quad at ${typeof fQuad === 'number' ? fQuad.toFixed(2) : '--'}.${harNote}`;
   }
 
   const popoverFv = document.getElementById('popover-fair-vix');
@@ -5681,6 +5830,7 @@ function renderFairVixScatterChart(bootstrap) {
   const isNdx = (currentAssetPair === 'NDX');
   const assetLbl = isNdx ? 'NDX' : 'SPX';
   const volLbl = isNdx ? 'VXN' : 'VIX';
+  const thr = isNdx ? currentNdxThreshold : currentSpxThreshold;
   const gthMode = (!isNdx && !bootstrap.is_historical && isGthEnabled);
   const fvBoot = (isNdx ? (bootstrap.ndx && bootstrap.ndx.fair_vix) : bootstrap.fair_vix) || {};
   const activePayload = lastLiveUpdatePayload || bootstrap;
@@ -5688,14 +5838,18 @@ function renderFairVixScatterChart(bootstrap) {
   const sc = fvBoot.scatter_60d || {};
   const cv = fvBoot.curve || {};
 
+  const headlineFair = getBasisFairFromPayload(fvLive);
+  const fPdv = (typeof fvLive.fair_pdv === 'number') ? fvLive.fair_pdv : fvBoot.fair_pdv;
+  const fHar = (typeof fvLive.fair_har === 'number') ? fvLive.fair_har : fvLive.fair_m2_rv_vrp;
+  const basisInfo = getBasisLabelInfo(currentFvBasis);
+
   const spTitle = document.getElementById('spotvol-title');
-  if (spTitle) spTitle.textContent = `${assetLbl} Fair ${volLbl} Curve (EWM Quad + HAR-RV)`;
+  if (spTitle) spTitle.textContent = `${assetLbl} Fair ${volLbl} Curve (EWM Quad + PDV-4)`;
   const spSub = document.getElementById('spotvol-sub');
-  if (spSub && typeof fvLive.combined === 'number') {
-    const rvSubTxt = (fvLive.vrp_mode === 'fixed')
-      ? `${fvLive.rv_method || 'RV'} + ${fvLive.vrp_base || 4} VRP`
-      : `Mean-Rev EWMA R²=${(fvLive.har_r2 || 0).toFixed(2)}`;
-    spSub.textContent = `252D EWM Quad (60D DD, R²=${(fvLive.quad_r2 || 0).toFixed(2)}) + HAR-RV (${rvSubTxt}) → Fair ${fvLive.combined.toFixed(2)}`;
+  if (spSub && typeof headlineFair === 'number') {
+    const pdvR2Txt = typeof fvLive.pdv_r2 === 'number' ? fvLive.pdv_r2.toFixed(2) : (fvBoot.pdv_r2 ? fvBoot.pdv_r2.toFixed(2) : '--');
+    const harTxt = typeof fHar === 'number' ? ` · HAR-RV Signal ${fHar.toFixed(2)}` : '';
+    spSub.textContent = `252D EWM Quad (60D DD, R²=${(fvLive.quad_r2 || 0).toFixed(2)}) + PDV-4 (R²=${pdvR2Txt}) → ${basisInfo.shortName} ${headlineFair.toFixed(2)}${harTxt}`;
   }
 
   const targetData = (isNdx && bootstrap.ndx && bootstrap.ndx.overvix) ? bootstrap.ndx : bootstrap;
@@ -5717,12 +5871,17 @@ function renderFairVixScatterChart(bootstrap) {
   const minSpot = allSpots.length ? Math.min(...allSpots) : 6000;
   const maxSpot = allSpots.length ? Math.max(...allSpots) : 7500;
 
+  const gapPts = (typeof liveVol === 'number' && typeof headlineFair === 'number') ? (liveVol - headlineFair) : fvLive.gap_pts;
+  const liveRegime = (typeof gapPts === 'number') ? (gapPts >= thr ? 'RICH' : (gapPts <= -thr ? 'CHEAP' : 'FAIR')) : (fvLive.regime || 'FAIR');
+
   const darkHoverlabel = {
     bgcolor: 'rgba(15, 23, 42, 0.95)',
     bordercolor: '#F59E0B',
     font: { family: 'monospace', size: 11, color: '#F8FAFC' },
     align: 'left'
   };
+
+  const hasPdvCurve = Array.isArray(cv.pdv_spot) && Array.isArray(cv.vix_pdv) && cv.pdv_spot.length > 0;
 
   const traces = [
     // 0: 60D Historical Scatter (Spot vs Vol)
@@ -5765,15 +5924,17 @@ function renderFairVixScatterChart(bootstrap) {
       hoverlabel: darkHoverlabel,
       hovertemplate: `EWM Quad Fair @ ${assetLbl} %{x:,.2f} (-%{customdata:.2f}% DD): <b>%{y:.2f}</b><extra></extra>`
     },
-    // 3: HAR-RV Realized Vol Mean-Reverting Anchor Line
+    // 3: Live PDV-4 Today Spot-Vol Curve (bounded 1-day excursion around prior close)
     {
-      x: [minSpot, maxSpot],
-      y: [fvLive.fair_m2_rv_vrp || null, fvLive.fair_m2_rv_vrp || null],
+      x: hasPdvCurve ? cv.pdv_spot : [],
+      y: hasPdvCurve ? cv.vix_pdv : [],
+      customdata: (cv.pdv_ret_pct || []).map(v => (v >= 0 ? '+' : '') + Number(v).toFixed(2)),
       mode: 'lines',
-      name: `HAR-RV (${typeof fvLive.fair_m2_rv_vrp === 'number' ? fvLive.fair_m2_rv_vrp.toFixed(2) : '--'})`,
-      line: { color: '#10B981', width: 1.8, dash: 'dash' },
-      hovertemplate: `<b>HAR-RV Fair (${fvLive.vrp_mode === 'fixed' ? 'RV + Fixed VRP' : 'Mean-Rev EWMA'})</b>: %{y:.2f}<extra></extra>`,
-      visible: typeof fvLive.fair_m2_rv_vrp === 'number'
+      name: `PDV-4 Curve (${typeof fPdv === 'number' ? fPdv.toFixed(2) : '--'})`,
+      line: { color: '#10B981', width: 2.2, dash: 'dash', shape: 'spline' },
+      hoverlabel: darkHoverlabel,
+      hovertemplate: `<b>PDV-4 Fair</b> @ ${assetLbl} %{x:,.2f} (%{customdata}% today): <b>%{y:.2f}</b><extra></extra>`,
+      visible: hasPdvCurve
     },
     // 4: Today's Intraday Trail (Spot vs Vol)
     {
@@ -5796,31 +5957,42 @@ function renderFairVixScatterChart(bootstrap) {
       name: `Live ${volLbl} (${liveVol ? liveVol.toFixed(2) : '--'})`,
       marker: { color: '#00E5FF', size: 13, line: { color: '#FFFFFF', width: 2 } },
       hoverlabel: darkHoverlabel,
-      hovertemplate: `<b>Live ${volLbl}</b>: %{y:.2f} @ ${assetLbl} %{x:,.2f}<br>Composite Fair: <b>${typeof fvLive.combined === 'number' ? fvLive.combined.toFixed(2) : '--'}</b><br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`,
+      hovertemplate: `<b>Live ${volLbl}</b>: %{y:.2f} @ ${assetLbl} %{x:,.2f}<br>${basisInfo.titleName}: <b>${typeof headlineFair === 'number' ? headlineFair.toFixed(2) : '--'}</b><br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`,
       visible: Boolean(liveSpot && liveVol)
     },
-    // 6: Composite Fair Target Marker at Live Spot
+    // 6: Headline Fair Target Marker at Live Spot
     {
-      x: (liveSpot && typeof fvLive.combined === 'number') ? [liveSpot] : [],
-      y: (liveSpot && typeof fvLive.combined === 'number') ? [fvLive.combined] : [],
+      x: (liveSpot && typeof headlineFair === 'number') ? [liveSpot] : [],
+      y: (liveSpot && typeof headlineFair === 'number') ? [headlineFair] : [],
       mode: 'markers',
-      name: `Composite Fair (${typeof fvLive.combined === 'number' ? fvLive.combined.toFixed(2) : '--'})`,
+      name: `${basisInfo.shortName} (${typeof headlineFair === 'number' ? headlineFair.toFixed(2) : '--'})`,
       marker: { color: '#F59E0B', size: 12, symbol: 'diamond', line: { color: '#0F172A', width: 1.8 } },
       hoverlabel: darkHoverlabel,
-      hovertemplate: `<b>Composite Fair ${volLbl}</b>: %{y:.2f}<br>Gap: <b>${typeof fvLive.gap_pts === 'number' ? (fvLive.gap_pts >= 0 ? '+' : '') + fvLive.gap_pts.toFixed(2) : '--'} pts (${fvLive.regime || 'FAIR'})</b><br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`,
-      visible: Boolean(liveSpot && typeof fvLive.combined === 'number')
+      hovertemplate: `<b>${basisInfo.titleName} ${volLbl}</b>: %{y:.2f}<br>Gap: <b>${typeof gapPts === 'number' ? (gapPts >= 0 ? '+' : '') + gapPts.toFixed(2) : '--'} pts (${liveRegime})</b><br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`,
+      visible: Boolean(liveSpot && typeof headlineFair === 'number')
+    },
+    // 7: Standalone HAR-RV Mean-Reverting Realized Vol Trading Signal (never blended)
+    {
+      x: [minSpot, maxSpot],
+      y: [typeof fHar === 'number' ? fHar : null, typeof fHar === 'number' ? fHar : null],
+      mode: 'lines',
+      name: `HAR-RV Signal (${typeof fHar === 'number' ? fHar.toFixed(2) : '--'})`,
+      line: { color: '#84CC16', width: 1.6, dash: 'dashdot' },
+      hoverlabel: darkHoverlabel,
+      hovertemplate: `<b>HAR-RV Signal (Unblended · ${fvLive.vrp_mode === 'fixed' ? 'RV + Fixed VRP' : 'Mean-Rev EWMA'})</b>: %{y:.2f}<extra></extra>`,
+      visible: typeof fHar === 'number'
     }
   ];
 
   const shapes = [];
-  if (liveSpot && liveVol && typeof fvLive.combined === 'number') {
+  if (liveSpot && liveVol && typeof headlineFair === 'number') {
     shapes.push({
       type: 'line',
       x0: liveSpot,
       x1: liveSpot,
-      y0: fvLive.combined,
+      y0: headlineFair,
       y1: liveVol,
-      line: { color: fvLive.gap_pts >= 0 ? '#FB7185' : '#34D399', width: 2, dash: 'dot' }
+      line: { color: (typeof gapPts === 'number' && gapPts >= 0) ? '#FB7185' : '#34D399', width: 2, dash: 'dot' }
     });
   }
 
@@ -5930,8 +6102,17 @@ function setupFairVixMonitorControls() {
   const btnLevels = document.getElementById('btn-fv-mode-levels');
   const btnBeta = document.getElementById('btn-fv-mode-beta');
   const btnComp = document.getElementById('btn-fv-components');
+  const btnHar = document.getElementById('btn-fv-har');
   const btnOvervix = document.getElementById('btn-fv-overvix');
+  const btnBasisComp = document.getElementById('btn-fv-basis-composite');
+  const btnBasisPdv = document.getElementById('btn-fv-basis-pdv');
+  const btnBasisQuad = document.getElementById('btn-fv-basis-quad');
   const chartEl = document.getElementById('fair-vix-chart');
+
+  if (btnBasisComp) btnBasisComp.addEventListener('click', () => setFairVixBasis('composite', true));
+  if (btnBasisPdv) btnBasisPdv.addEventListener('click', () => setFairVixBasis('pdv', true));
+  if (btnBasisQuad) btnBasisQuad.addEventListener('click', () => setFairVixBasis('quad', true));
+  updateFvBasisButtonsUI();
 
   if (sliderFv) {
     sliderFv.addEventListener('input', (e) => {
@@ -5986,6 +6167,18 @@ function setupFairVixMonitorControls() {
       renderFairVixMonitorChart(currentFvTf);
     });
   }
+  if (btnHar) {
+    btnHar.className = showFvHarSignal
+      ? "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-lime-500 text-black shadow-sm transition whitespace-nowrap"
+      : idleMode;
+    btnHar.addEventListener('click', () => {
+      showFvHarSignal = !showFvHarSignal;
+      btnHar.className = showFvHarSignal
+        ? "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-lime-500 text-black shadow-sm transition whitespace-nowrap"
+        : idleMode;
+      renderFairVixMonitorChart(currentFvTf);
+    });
+  }
   if (btnOvervix) {
     btnOvervix.addEventListener('click', () => {
       showFvOvervixFlow = !showFvOvervixFlow;
@@ -6021,11 +6214,10 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
   const ovLabel = isNdx ? 'Over-VXN' : 'Overvix';
   const thresh = isNdx ? currentNdxThreshold : currentSpxThreshold;
 
+  const basisInfo = getBasisLabelInfo(currentFvBasis);
   const titleEl = document.getElementById('fv-monitor-title');
   if (titleEl) {
-    titleEl.textContent = isNdx
-      ? "Composite Fair VXN & Structural Residual Monitor"
-      : "Composite Fair VIX & Structural Residual Monitor";
+    titleEl.textContent = `${basisInfo.titleName} ${volLabel} & Structural Residual Monitor`;
   }
 
   const c = getCorrDataset(isNdx, targetTf);
@@ -6055,9 +6247,25 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     c0: fvLive.quad_c0 !== undefined ? fvLive.quad_c0 : (fvBoot.c0 || 15.0),
     c1: fvLive.quad_c1 !== undefined ? fvLive.quad_c1 : (fvBoot.c1 || 1.0),
     c2: fvLive.quad_c2 !== undefined ? fvLive.quad_c2 : (fvBoot.c2 || 0.0),
-    fair_m2: fvLive.fair_m2_rv_vrp !== undefined ? fvLive.fair_m2_rv_vrp : (fvBoot.fair_m2 || 20.0),
-    w_m2: fvLive.w_m2 !== undefined ? fvLive.w_m2 : (fvBoot.w_m2 || 0.5),
-    w_m4: fvLive.w_m4 !== undefined ? fvLive.w_m4 : (fvBoot.w_m4 || 0.5),
+    quad_r2: fvLive.quad_r2 !== undefined ? fvLive.quad_r2 : (fvBoot.quad_r2 || 0.5),
+    prev_spot: fvLive.prev_spot || fvBoot.prev_spot || 0,
+    pdv_r1f: fvLive.pdv_r1f !== undefined ? fvLive.pdv_r1f : (fvBoot.pdv_r1f || 0),
+    pdv_r1s: fvLive.pdv_r1s !== undefined ? fvLive.pdv_r1s : (fvBoot.pdv_r1s || 0),
+    pdv_v2f: fvLive.pdv_v2f !== undefined ? fvLive.pdv_v2f : (fvBoot.pdv_v2f || 0),
+    pdv_v2s: fvLive.pdv_v2s !== undefined ? fvLive.pdv_v2s : (fvBoot.pdv_v2s || 0),
+    pdv_b0: fvLive.pdv_b0 !== undefined ? fvLive.pdv_b0 : fvBoot.pdv_b0,
+    pdv_b1f: fvLive.pdv_b1f !== undefined ? fvLive.pdv_b1f : (fvBoot.pdv_b1f || 0),
+    pdv_b1s: fvLive.pdv_b1s !== undefined ? fvLive.pdv_b1s : (fvBoot.pdv_b1s || 0),
+    pdv_b2f: fvLive.pdv_b2f !== undefined ? fvLive.pdv_b2f : (fvBoot.pdv_b2f || 0),
+    pdv_b2s: fvLive.pdv_b2s !== undefined ? fvLive.pdv_b2s : (fvBoot.pdv_b2s || 0),
+    pdv_r2: fvLive.pdv_r2 !== undefined ? fvLive.pdv_r2 : (fvBoot.pdv_r2 || 0.5),
+    fair_pdv: fvLive.fair_pdv !== undefined ? fvLive.fair_pdv : (fvBoot.fair_pdv || 20.0),
+    fair_har: fvLive.fair_har !== undefined ? fvLive.fair_har : (fvBoot.fair_har || fvBoot.fair_m2 || 20.0),
+    fair_m2: fvLive.fair_har !== undefined ? fvLive.fair_har : (fvLive.fair_m2_rv_vrp !== undefined ? fvLive.fair_m2_rv_vrp : (fvBoot.fair_m2 || 20.0)),
+    w_pdv: fvLive.w_pdv !== undefined ? fvLive.w_pdv : (fvBoot.w_pdv !== undefined ? fvBoot.w_pdv : 0.45),
+    w_quad: fvLive.w_quad !== undefined ? fvLive.w_quad : (fvBoot.w_quad !== undefined ? fvBoot.w_quad : 0.55),
+    w_m2: fvLive.w_pdv !== undefined ? fvLive.w_pdv : (fvBoot.w_m2 || 0.45),
+    w_m4: fvLive.w_quad !== undefined ? fvLive.w_quad : (fvBoot.w_m4 || 0.55),
   };
 
   const getParamsForDate = (dStr) => {
@@ -6081,8 +6289,9 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
 
   const liveVolArr = [];
   const compFairArr = [];
-  const m2Arr = [];
+  const pdvArr = [];
   const m4Arr = [];
+  const harArr = [];
   const compResArr = [];
   const ovResArr = [];
   const spotPctDailyArr = [];
@@ -6128,21 +6337,24 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     }
 
     const p = getParamsForDate(dStr);
-    let fM2 = null;
+    let fPdv = null;
     let fM4 = null;
+    let fHar = null;
     let cFair = null;
     let cRes = null;
 
     if (p) {
-      fM2 = p.fair_m2;
-      fM4 = p.fair_m2;
-      cFair = p.fair_m2;
-      cRes = 0;
+      fHar = (typeof p.fair_har === 'number') ? p.fair_har : ((typeof p.fair_m2 === 'number') ? p.fair_m2 : null);
+      fPdv = evalPdvFromParams(p, sVal);
+      fM4 = fPdv;
       if (sVal !== null && vVal !== null && p.peak_60d > 0) {
         const dd = Math.max(0.0, (p.peak_60d - sVal) / p.peak_60d * 100.0);
         fM4 = p.c0 + p.c1 * dd + p.c2 * (dd * dd);
-        cFair = p.w_m2 * fM2 + p.w_m4 * fM4;
-        cRes = vVal - cFair;
+        cFair = resolveFairByBasis(fPdv, fM4, p, currentFvBasis);
+        cRes = (typeof cFair === 'number') ? (vVal - cFair) : 0;
+      } else {
+        cFair = resolveFairByBasis(fPdv, fM4, p, currentFvBasis);
+        cRes = 0;
       }
     }
 
@@ -6166,8 +6378,9 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
 
     liveVolArr.push(vVal);
     compFairArr.push(cFair !== null ? Number(cFair.toFixed(2)) : null);
-    m2Arr.push(fM2 !== null ? Number(fM2.toFixed(2)) : null);
+    pdvArr.push(fPdv !== null ? Number(fPdv.toFixed(2)) : null);
     m4Arr.push(fM4 !== null ? Number(fM4.toFixed(2)) : null);
+    harArr.push(fHar !== null ? Number(fHar.toFixed(2)) : null);
     compResArr.push(cRes !== null ? Number(cRes.toFixed(2)) : null);
     ovResArr.push(Number(ovRes.toFixed(2)));
     spotPctDailyArr.push(typeof baseSpotPct[i] === 'number' ? baseSpotPct[i] : sPct);
@@ -6179,16 +6392,18 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     if (cRes !== null && cRes > 0 && ovRes > 0 && sPct > 0 && vVal !== null) {
       stickyX.push(tStr);
       stickyY.push(Number(cRes.toFixed(2)));
-      stickyLineByIdx[i] = `<br><span style="color:#FF5370;font-weight:bold">🔥 Sticky Vol Confluence</span> (${assetLabel}: +${sPct.toFixed(2)}% | Comp Res: +${cRes.toFixed(2)} pts | ${ovLabel}: +${ovRes.toFixed(2)} pts)`;
+      stickyLineByIdx[i] = `<br><span style="color:#FF5370;font-weight:bold">🔥 Sticky Vol Confluence</span> (${assetLabel}: +${sPct.toFixed(2)}% | Fair Res: +${cRes.toFixed(2)} pts | ${ovLabel}: +${ovRes.toFixed(2)} pts)`;
     }
   }
 
-  // Update HUD metrics from latest point / live Fair VIX
+  // Update HUD metrics from latest point / live Fair VIX (respecting active Basis)
   const latestV = (typeof fvLive.live_vol === 'number') ? fvLive.live_vol : liveVolArr[n - 1];
-  const latestFair = (typeof fvLive.combined === 'number') ? fvLive.combined : compFairArr[n - 1];
-  const latestM2 = (typeof fvLive.fair_m2_rv_vrp === 'number') ? fvLive.fair_m2_rv_vrp : m2Arr[n - 1];
+  const latestPdv = (typeof fvLive.fair_pdv === 'number') ? fvLive.fair_pdv : pdvArr[n - 1];
   const latestM4 = (typeof fvLive.fair_m4_quad === 'number') ? fvLive.fair_m4_quad : m4Arr[n - 1];
-  const latestCRes = (typeof fvLive.gap_pts === 'number') ? fvLive.gap_pts : compResArr[n - 1];
+  const latestHar = (typeof fvLive.fair_har === 'number') ? fvLive.fair_har : ((typeof fvLive.fair_m2_rv_vrp === 'number') ? fvLive.fair_m2_rv_vrp : harArr[n - 1]);
+  const liveBasisFair = getBasisFairFromPayload(fvLive);
+  const latestFair = (typeof liveBasisFair === 'number') ? liveBasisFair : compFairArr[n - 1];
+  const latestCRes = (typeof latestV === 'number' && typeof latestFair === 'number') ? (latestV - latestFair) : compResArr[n - 1];
   const latestOvRes = ovResArr[n - 1];
 
   const setTxt = (id, txt, cls) => {
@@ -6198,10 +6413,13 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       if (cls) el.className = cls;
     }
   };
+  setTxt('fv-hud-fair-lbl', basisInfo.shortName);
+  setTxt('fv-hud-res-lbl', currentFvBasis === 'pdv' ? 'PDV Res' : (currentFvBasis === 'quad' ? 'Quad Res' : 'Comp Res'));
   if (typeof latestV === 'number') setTxt('fv-hud-live', latestV.toFixed(2));
   if (typeof latestFair === 'number') setTxt('fv-hud-fair', latestFair.toFixed(2));
-  if (typeof latestM2 === 'number') setTxt('fv-hud-m2', latestM2.toFixed(2));
+  if (typeof latestPdv === 'number') setTxt('fv-hud-pdv', latestPdv.toFixed(2));
   if (typeof latestM4 === 'number') setTxt('fv-hud-m4', latestM4.toFixed(2));
+  if (typeof latestHar === 'number') setTxt('fv-hud-m2', latestHar.toFixed(2));
   if (typeof latestCRes === 'number') {
     const s = latestCRes >= 0 ? '+' : '';
     setTxt('fv-hud-comp-res', `${s}${latestCRes.toFixed(2)} pts`, latestCRes >= thresh ? 'text-rose-400 font-bold' : (latestCRes <= -thresh ? 'text-emerald-400 font-bold' : 'text-amber-300 font-bold'));
@@ -6213,7 +6431,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
 
   const regimePill = document.getElementById('fv-regime-pill');
   if (regimePill && typeof latestCRes === 'number') {
-    const gRegime = fvLive.regime || (latestCRes >= thresh ? 'RICH' : (latestCRes <= -thresh ? 'CHEAP' : 'FAIR'));
+    const gRegime = (latestCRes >= thresh ? 'RICH' : (latestCRes <= -thresh ? 'CHEAP' : 'FAIR'));
     const s = latestCRes >= 0 ? '+' : '';
     regimePill.textContent = `${gRegime} (${s}${latestCRes.toFixed(2)} pts)`;
     if (gRegime === 'RICH') {
@@ -6235,16 +6453,16 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
   }
   if (sumEl && typeof latestCRes === 'number') {
     if (dualPos && lastSpotPct > 0) {
-      sumEl.textContent = `High-conviction sticky vol: Spot rallying while both Composite (+${latestCRes.toFixed(2)}) & ${ovLabel} (+${latestOvRes.toFixed(2)}) residuals stay positive.`;
+      sumEl.textContent = `High-conviction sticky vol: Spot rallying while both ${basisInfo.shortName} (+${latestCRes.toFixed(2)}) & ${ovLabel} (+${latestOvRes.toFixed(2)}) residuals stay positive.`;
       sumEl.className = 'text-[11px] text-rose-300 font-sans font-semibold';
     } else if (dualPos) {
-      sumEl.textContent = `Dual positive stress: ${volLabel} rich vs both multi-week fair (+${latestCRes.toFixed(2)} pts) & intraday flow (+${latestOvRes.toFixed(2)} pts).`;
+      sumEl.textContent = `Dual positive stress: ${volLabel} rich vs both ${basisInfo.titleName} (+${latestCRes.toFixed(2)} pts) & intraday flow (+${latestOvRes.toFixed(2)} pts).`;
       sumEl.className = 'text-[11px] text-amber-300 font-sans font-medium';
     } else if (latestCRes <= -thresh) {
-      sumEl.textContent = `${volLabel} trading ${Math.abs(latestCRes).toFixed(2)} pts below Composite Fair (${latestFair.toFixed(2)}) — realized/structural vol underpriced.`;
+      sumEl.textContent = `${volLabel} trading ${Math.abs(latestCRes).toFixed(2)} pts below ${basisInfo.titleName} (${latestFair.toFixed(2)}) — structural/path vol underpriced.`;
       sumEl.className = 'text-[11px] text-emerald-300 font-sans font-medium';
     } else {
-      sumEl.textContent = `${volLabel} near Composite Fair (${latestFair ? latestFair.toFixed(2) : '--'}) | HAR-RV=${latestM2 ? latestM2.toFixed(1) : '--'}, EWM Quad=${latestM4 ? latestM4.toFixed(1) : '--'}.`;
+      sumEl.textContent = `${volLabel} near ${basisInfo.titleName} (${latestFair ? latestFair.toFixed(2) : '--'}) | PDV=${latestPdv ? latestPdv.toFixed(1) : '--'}, EWM Quad=${latestM4 ? latestM4.toFixed(1) : '--'} | HAR-RV=${latestHar ? latestHar.toFixed(1) : '--'}.`;
       sumEl.className = 'text-[11px] text-slate-300 font-sans font-normal';
     }
   }
@@ -6259,7 +6477,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
   const customUpper = times.map((t, i) => [
     liveVolArr[i] !== null ? liveVolArr[i].toFixed(2) : '-',
     compFairArr[i] !== null ? compFairArr[i].toFixed(2) : '-',
-    m2Arr[i] !== null ? m2Arr[i].toFixed(2) : '-',
+    pdvArr[i] !== null ? pdvArr[i].toFixed(2) : '-',
     m4Arr[i] !== null ? m4Arr[i].toFixed(2) : '-',
     compResArr[i] !== null ? ((compResArr[i] >= 0 ? '+' : '') + compResArr[i].toFixed(2)) : '-',
     ovResArr[i] !== null ? ((ovResArr[i] >= 0 ? '+' : '') + ovResArr[i].toFixed(2)) : '-',
@@ -6270,7 +6488,8 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     (typeof volPtDailyArr[i] === 'number' && !isNaN(volPtDailyArr[i]))
       ? ((volPtDailyArr[i] >= 0 ? '+' : '') + volPtDailyArr[i].toFixed(2))
       : '-',
-    stickyLineByIdx[i] || ""
+    stickyLineByIdx[i] || "",
+    harArr[i] !== null ? harArr[i].toFixed(2) : '-'
   ]);
 
   if (currentFvDisplayMode === 'beta') {
@@ -6304,7 +6523,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
         {
           x: tSeg,
           y: fairPtDailyArr.slice(seg.start, seg.end),
-          name: `Composite Fair ${volLabel} (Inv ▼)`,
+          name: `${basisInfo.chartLabel} ${volLabel} (Inv ▼)`,
           legendgroup: 'fv_fpt',
           showlegend: (sIdx === 0),
           mode: 'lines',
@@ -6325,7 +6544,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       xaxis: 'x',
       yaxis: 'y2',
       showlegend: false,
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>${assetLabel}: <b>%{customdata[7]}</b> · ${volLabel}: <b>%{customdata[0]}</b> (%{customdata[8]} pts)<br>Comp Fair: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)%{customdata[9]}<extra></extra>`
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>${assetLabel}: <b>%{customdata[7]}</b> · ${volLabel}: <b>%{customdata[0]}</b> (%{customdata[8]} pts)<br>${basisInfo.shortName}: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)%{customdata[9]}<extra></extra>`
     });
   } else {
     fvSegs.forEach((seg, sIdx) => {
@@ -6346,7 +6565,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
         {
           x: tSeg,
           y: compFairArr.slice(seg.start, seg.end),
-          name: `Composite Fair ${volLabel}`,
+          name: `${basisInfo.chartLabel} ${volLabel}`,
           legendgroup: 'fv_fair',
           showlegend: (sIdx === 0),
           mode: 'lines',
@@ -6362,12 +6581,12 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
         traces.push(
           {
             x: tSeg,
-            y: m2Arr.slice(seg.start, seg.end),
-            name: 'HAR-RV',
-            legendgroup: 'fv_har',
+            y: pdvArr.slice(seg.start, seg.end),
+            name: 'PDV-4',
+            legendgroup: 'fv_pdv',
             showlegend: (sIdx === 0),
             mode: 'lines',
-            line: { color: '#10B981', width: 1.4, dash: 'dot' },
+            line: { color: '#10B981', width: 1.5, dash: 'dot' },
             xaxis: 'x',
             yaxis: 'y',
             hoverinfo: 'skip'
@@ -6379,12 +6598,26 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
             legendgroup: 'fv_quad',
             showlegend: (sIdx === 0),
             mode: 'lines',
-            line: { color: '#A855F7', width: 1.4, dash: 'dot' },
+            line: { color: '#A855F7', width: 1.5, dash: 'dot' },
             xaxis: 'x',
             yaxis: 'y',
             hoverinfo: 'skip'
           }
         );
+      }
+      if (showFvHarSignal) {
+        traces.push({
+          x: tSeg,
+          y: harArr.slice(seg.start, seg.end),
+          name: 'HAR-RV (Signal)',
+          legendgroup: 'fv_har',
+          showlegend: (sIdx === 0),
+          mode: 'lines',
+          line: { color: '#84CC16', width: 1.5, dash: 'dashdot' },
+          xaxis: 'x',
+          yaxis: 'y',
+          hoverinfo: 'skip'
+        });
       }
     });
     traces.push({
@@ -6397,17 +6630,20 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       xaxis: 'x',
       yaxis: 'y',
       showlegend: false,
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>Live ${volLabel}: <b>%{customdata[0]}</b> · Comp Fair: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)<br>HAR-RV: <b>%{customdata[2]}</b> · EWM Quad: <b>%{customdata[3]}</b>%{customdata[9]}<extra></extra>`
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>Live ${volLabel}: <b>%{customdata[0]}</b> · ${basisInfo.shortName}: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)<br>PDV-4: <b>%{customdata[2]}</b> · EWM Quad: <b>%{customdata[3]}</b> · HAR-RV: <b>%{customdata[10]}</b>%{customdata[9]}<extra></extra>`
     });
   }
 
-  // Lower Panel Traces (yaxis3): Composite Residual + Intraday Overvix Residual + Reference Lines
+  // Lower Panel Traces (yaxis3): Structural Residual + Intraday Overvix Residual + Reference Lines
+  const residName = (currentFvBasis === 'pdv')
+    ? `PDV Resid (${volLabel} − PDV)`
+    : (currentFvBasis === 'quad' ? `Quad Resid (${volLabel} − Quad)` : `Composite Resid (${volLabel} − Fair)`);
   fvSegs.forEach((seg, sIdx) => {
     const tSeg = times.slice(seg.start, seg.end);
     traces.push({
       x: tSeg,
       y: compResArr.slice(seg.start, seg.end),
-      name: `Composite Resid (${volLabel} − Fair)`,
+      name: residName,
       legendgroup: 'fv_compres',
       showlegend: (sIdx === 0),
       mode: 'lines',
@@ -6437,13 +6673,13 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     x: times,
     y: compResArr,
     customdata: customUpper,
-    name: `Composite Resid (${volLabel} − Fair)`,
+    name: residName,
     mode: 'lines',
     line: { color: 'transparent', width: 0 },
     xaxis: 'x',
     yaxis: 'y3',
     showlegend: false,
-    hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>Comp Residual: <b>%{customdata[4]} pts</b> · ${ovLabel}: <b>%{customdata[5]} pts</b><br>Live ${volLabel}: <b>%{customdata[0]}</b> · Fair: <b>%{customdata[1]}</b>%{customdata[9]}<extra></extra>`
+    hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>${basisInfo.shortName} Residual: <b>%{customdata[4]} pts</b> · ${ovLabel}: <b>%{customdata[5]} pts</b><br>Live ${volLabel}: <b>%{customdata[0]}</b> · Fair: <b>%{customdata[1]}</b>%{customdata[9]}<extra></extra>`
   });
 
   traces.push({
@@ -7881,11 +8117,14 @@ function updateUI(data) {
         x: [[fvLive.live_spot]],
         y: [[fvLive.live_vol]]
       }, [5]);
-      if (ovChartEl.data[6] && typeof fvLive.combined === 'number') {
-        Plotly.restyle('overvix-chart', {
-          x: [[fvLive.live_spot]],
-          y: [[fvLive.combined]]
-        }, [6]);
+      if (ovChartEl.data[6]) {
+        const basisFair = getBasisFairFromPayload(fvLive);
+        if (typeof basisFair === 'number') {
+          Plotly.restyle('overvix-chart', {
+            x: [[fvLive.live_spot]],
+            y: [[basisFair]]
+          }, [6]);
+        }
       }
     }
   } else if (!hasLiveSessionStarted) {
@@ -8400,7 +8639,11 @@ async function bootstrapData() {
     if (data.fair_vix && data.fair_vix.config) {
       currentVrpMode = data.fair_vix.config.vrp_mode || 'auto';
       currentVrpFixedPts = (typeof data.fair_vix.config.vrp_fixed_pts === 'number') ? data.fair_vix.config.vrp_fixed_pts : 4.0;
-      currentFvBlend = data.fair_vix.config.blend_mode || 'r2_weighted';
+      if ((Date.now() - userBasisOverrideAt) > 4000) {
+        currentFvBlend = data.fair_vix.config.blend_mode || 'r2_weighted';
+        syncFvBasisFromBlend(currentFvBlend);
+        updateFvBasisButtonsUI();
+      }
     }
 
     // Cache multi-timeframe datasets across all 9 horizons (1D, 5D, 10D, 1M, 3M, 6M, YTD, 1Y, MAX)

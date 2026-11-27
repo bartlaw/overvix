@@ -1,14 +1,15 @@
 """
 fair_vix_engine.py
 Quantitative Fair VIX Estimation Engine combining:
-  - Method 2: Realized Volatility (Yang-Zhang OHLC / Close-to-Close 5D, 10D, 21D) + Asymmetric EWMA HAR-RV
+  - Method 2 (Upgraded): Multi-Timescale Linear PDV-4 (Guyon & Lekeufack 2023) — fast/slow EWMA R1 & sqrt(R2)
   - Method 4: 252-Day Exponentially Weighted (30D HL) Constrained Quadratic Drawdown Regression on Rolling 60D Drawdowns
+  - Standalone Signal (Unblended): Asymmetric EWMA HAR-RV + Realized Volatility (Yang-Zhang / C2C 5D, 10D, 21D)
 
 Shared by both live streaming (dashboard.py) and historical replay (session_history.py).
 """
 
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 from scipy.optimize import lsq_linear
@@ -19,6 +20,19 @@ VRP_MIN_PTS = 2.5
 VRP_MAX_PTS = 6.5
 QUAD_FIT_WINDOW_DAYS = 252
 QUAD_EWM_HALF_LIFE_DAYS = 30.0
+
+# Multi-timescale Path-Dependent Volatility (Guyon & Lekeufack 2023) constants
+PDV_TAU_R1_FAST = 3.5
+PDV_TAU_R1_SLOW = 35.0
+PDV_TAU_R2_FAST = 5.0
+PDV_TAU_R2_SLOW = 45.0
+PDV_ALPHA_R1F = 1.0 - math.exp(-1.0 / PDV_TAU_R1_FAST)
+PDV_ALPHA_R1S = 1.0 - math.exp(-1.0 / PDV_TAU_R1_SLOW)
+PDV_ALPHA_R2F = 1.0 - math.exp(-1.0 / PDV_TAU_R2_FAST)
+PDV_ALPHA_R2S = 1.0 - math.exp(-1.0 / PDV_TAU_R2_SLOW)
+PDV_EWM_HALF_LIFE_DAYS = 30.0
+PDV_RIDGE = 5.0
+VALID_BLEND_MODES = ("r2_weighted", "equal", "pdv_only", "quad_only")
 
 
 def safe_to_ohlc_df(bars: Any, prefix: str) -> pd.DataFrame:
@@ -189,11 +203,191 @@ def fit_quadratic_drawdown(
     }
 
 
-def _resolve_blend_weights(r2_quad: float, blend_mode: str) -> Tuple[float, float]:
-    if blend_mode == "r2_weighted":
-        w_m4 = max(0.30, min(0.70, float(r2_quad)))
-        return round(1.0 - w_m4, 4), round(w_m4, 4)
-    return 0.50, 0.50
+def _resolve_blend_weights(r2_quad: float, blend_mode: str, r2_pdv: float = 0.0) -> Tuple[float, float]:
+    """
+    Resolve (w_pdv, w_quad) weights for the Composite Fair VIX.
+    HAR-RV is kept strictly unblended as a standalone trading signal.
+    """
+    if blend_mode == "pdv_only":
+        return 1.0, 0.0
+    if blend_mode == "quad_only":
+        return 0.0, 1.0
+    if blend_mode == "equal":
+        return 0.50, 0.50
+    total_r2 = max(0.0, float(r2_quad)) + max(0.0, float(r2_pdv))
+    if total_r2 > 1e-6:
+        w_quad = max(0.30, min(0.70, float(r2_quad) / total_r2))
+    else:
+        w_quad = 0.55
+    return round(1.0 - w_quad, 4), round(w_quad, 4)
+
+
+def _ewma_decay(arr: np.ndarray, alpha: float) -> np.ndarray:
+    """Causal exponential filter: val_t = (1 - alpha) * val_{t-1} + alpha * arr_t."""
+    out = np.zeros(len(arr), dtype=float)
+    val = 0.0
+    one_m_a = 1.0 - alpha
+    for i in range(len(arr)):
+        val = one_m_a * val + alpha * float(arr[i])
+        out[i] = val
+    return out
+
+
+def calc_pdv_states(close_series: Union[pd.Series, np.ndarray]) -> Dict[str, np.ndarray]:
+    """
+    Compute causal Guyon & Lekeufack (2023) multi-timescale PDV states from daily closes:
+      - Raw daily EWMA states: r1f_raw, r1s_raw (signed log-returns) and v2f_raw, v2s_raw (squared log-returns)
+      - Annualized % features: r1f, r1s, s2f (sqrt of 252 * v2f), s2s (sqrt of 252 * v2s)
+    """
+    s = np.asarray(close_series, dtype=float)
+    n = len(s)
+    r = np.zeros(n, dtype=float)
+    if n > 1:
+        valid = (s[:-1] > 0) & (s[1:] > 0) & np.isfinite(s[:-1]) & np.isfinite(s[1:])
+        safe_prev = np.where(valid, s[:-1], 1.0)
+        safe_curr = np.where(valid, s[1:], 1.0)
+        r[1:] = np.where(valid, np.log(safe_curr / safe_prev), 0.0)
+
+    r1f_raw = _ewma_decay(r, PDV_ALPHA_R1F)
+    r1s_raw = _ewma_decay(r, PDV_ALPHA_R1S)
+    r_sq = r * r
+    v2f_raw = _ewma_decay(r_sq, PDV_ALPHA_R2F)
+    v2s_raw = _ewma_decay(r_sq, PDV_ALPHA_R2S)
+
+    return {
+        "r1f_raw": r1f_raw,
+        "r1s_raw": r1s_raw,
+        "v2f_raw": v2f_raw,
+        "v2s_raw": v2s_raw,
+        "r1f": r1f_raw * 25200.0,
+        "r1s": r1s_raw * 25200.0,
+        "s2f": np.sqrt(np.maximum(0.0, v2f_raw * 252.0)) * 100.0,
+        "s2s": np.sqrt(np.maximum(0.0, v2s_raw * 252.0)) * 100.0,
+    }
+
+
+def fit_pdv_model(
+    r1f_vals: np.ndarray,
+    r1s_vals: np.ndarray,
+    s2f_vals: np.ndarray,
+    s2s_vals: np.ndarray,
+    vol_vals: np.ndarray,
+    half_life: float = PDV_EWM_HALF_LIFE_DAYS,
+    ridge: float = PDV_RIDGE,
+) -> Dict[str, Any]:
+    """
+    Fit EWM-weighted constrained ridge Linear PDV-4 regression:
+      VIX_t = b0 + b1f * R1_fast + b1s * R1_slow + b2f * sqrt(R2_fast) + b2s * sqrt(R2_slow)
+    with b1 <= 0 (leverage effect) and b2 >= 0 (realized activity).
+    """
+    r1f_a = np.asarray(r1f_vals, dtype=float)
+    r1s_a = np.asarray(r1s_vals, dtype=float)
+    s2f_a = np.asarray(s2f_vals, dtype=float)
+    s2s_a = np.asarray(s2s_vals, dtype=float)
+    y_a = np.asarray(vol_vals, dtype=float)
+
+    mask = np.isfinite(r1f_a) & np.isfinite(r1s_a) & np.isfinite(s2f_a) & np.isfinite(s2s_a) & np.isfinite(y_a)
+    m = int(np.sum(mask))
+    if m < 30:
+        mean_v = float(np.mean(y_a[mask])) if m > 0 else 20.0
+        return {
+            "b0": mean_v,
+            "b1f": 0.0,
+            "b1s": 0.0,
+            "b2f": 0.0,
+            "b2s": 0.0,
+            "r2": 0.0,
+            "is_fallback": True,
+        }
+
+    X_raw = np.column_stack([r1f_a[mask], r1s_a[mask], s2f_a[mask], s2s_a[mask]])
+    y_v = y_a[mask]
+
+    if half_life is not None and float(half_life) > 0.0:
+        age = np.arange(m - 1, -1, -1, dtype=float)
+        w = 0.5 ** (age / float(half_life))
+        w_norm = w * (m / max(float(np.sum(w)), 1e-9))
+    else:
+        w_norm = np.ones(m, dtype=float)
+    sw = np.sqrt(w_norm)
+
+    mu = np.mean(X_raw, axis=0)
+    sd = np.maximum(np.std(X_raw, axis=0), 1e-6)
+    Xs = np.column_stack([np.ones(m), (X_raw - mu) / sd])
+
+    reg = np.zeros((4, 5), dtype=float)
+    reg_s = math.sqrt(max(0.0, float(ridge)))
+    for j in range(4):
+        reg[j, j + 1] = reg_s
+    X_aug = np.vstack([Xs * sw[:, None], reg])
+    y_aug = np.concatenate([y_v * sw, np.zeros(4)])
+
+    try:
+        res = lsq_linear(
+            X_aug,
+            y_aug,
+            bounds=([5.0, -np.inf, -np.inf, 0.0, 0.0], [45.0, 0.0, 0.0, np.inf, np.inf]),
+        )
+        w_std = res.x
+        pred = Xs @ w_std
+        b_slopes = w_std[1:] / sd
+        b0 = float(w_std[0] - np.dot(b_slopes, mu))
+        b1f, b1s, b2f, b2s = [float(v) for v in b_slopes]
+    except Exception:
+        mean_v = float(np.sum(w_norm * y_v) / m)
+        return {
+            "b0": mean_v,
+            "b1f": 0.0,
+            "b1s": 0.0,
+            "b2f": 0.0,
+            "b2s": 0.0,
+            "r2": 0.0,
+            "is_fallback": True,
+        }
+
+    w_mean = float(np.sum(w_norm * y_v) / m)
+    ss_res = float(np.sum(w_norm * (y_v - pred) ** 2))
+    ss_tot = float(np.sum(w_norm * (y_v - w_mean) ** 2))
+    r2 = max(0.0, min(1.0, 1.0 - ss_res / ss_tot)) if ss_tot > 1e-9 else 0.0
+    return {
+        "b0": b0,
+        "b1f": b1f,
+        "b1s": b1s,
+        "b2f": b2f,
+        "b2s": b2s,
+        "r2": r2,
+        "is_fallback": False,
+    }
+
+
+def evaluate_pdv_at_spot(
+    spot_val: Union[float, np.ndarray],
+    prev_spot: float,
+    r1f_prev: float,
+    r1s_prev: float,
+    v2f_prev: float,
+    v2s_prev: float,
+    b0: float,
+    b1f: float,
+    b1s: float,
+    b2f: float,
+    b2s: float,
+) -> Union[float, np.ndarray]:
+    """Analytically evaluate PDV-4 at any intraday spot `spot_val` using prior-close EWMA state."""
+    p_s = float(prev_spot) if prev_spot and prev_spot > 0 else 1.0
+    s_arr = np.asarray(spot_val, dtype=float)
+    lr = np.log(np.maximum(s_arr, 1e-6) / p_s)
+    r1f_now = ((1.0 - PDV_ALPHA_R1F) * float(r1f_prev) + PDV_ALPHA_R1F * lr) * 25200.0
+    r1s_now = ((1.0 - PDV_ALPHA_R1S) * float(r1s_prev) + PDV_ALPHA_R1S * lr) * 25200.0
+    s2f_now = np.sqrt(np.maximum(0.0, ((1.0 - PDV_ALPHA_R2F) * float(v2f_prev) + PDV_ALPHA_R2F * (lr * lr)) * 252.0)) * 100.0
+    s2s_now = np.sqrt(np.maximum(0.0, ((1.0 - PDV_ALPHA_R2S) * float(v2s_prev) + PDV_ALPHA_R2S * (lr * lr)) * 252.0)) * 100.0
+    val = np.maximum(
+        6.0,
+        float(b0) + float(b1f) * r1f_now + float(b1s) * r1s_now + float(b2f) * s2f_now + float(b2s) * s2s_now,
+    )
+    if np.ndim(spot_val) == 0:
+        return float(val)
+    return val
 
 
 def calc_ewma_har_features(close_series: pd.Series) -> Tuple[pd.Series, pd.Series, pd.Series]:
@@ -376,10 +570,49 @@ def compute_fair_vix_asset_model(
             vrp_base_now = DEFAULT_VRP_PTS
             fair_m2_now = exp_rv_now + vrp_base_now
 
-    # Causal rolling 60D-peak drawdowns across df_fit, fitted over 252D with 30D EWM decay
+    # Compute causal PDV-4 states strictly on df_fit
     dates_all = list(df_fit.index)
     spots_all = df_fit["spot"].values.astype(float)
     vols_all = df_fit["vol"].values.astype(float)
+    pdv_states = calc_pdv_states(spots_all)
+    r1f_raw_all = pdv_states["r1f_raw"]
+    r1s_raw_all = pdv_states["r1s_raw"]
+    v2f_raw_all = pdv_states["v2f_raw"]
+    v2s_raw_all = pdv_states["v2s_raw"]
+    r1f_all = pdv_states["r1f"]
+    r1s_all = pdv_states["r1s"]
+    s2f_all = pdv_states["s2f"]
+    s2s_all = pdv_states["s2s"]
+
+    n_pdv = min(252, len(df_fit))
+    pdv_now = fit_pdv_model(
+        r1f_all[-n_pdv:],
+        r1s_all[-n_pdv:],
+        s2f_all[-n_pdv:],
+        s2s_all[-n_pdv:],
+        vols_all[-n_pdv:],
+    )
+    prev_spot_now = float(spots_all[-1])
+    pdv_r1f_now = float(r1f_raw_all[-1])
+    pdv_r1s_now = float(r1s_raw_all[-1])
+    pdv_v2f_now = float(v2f_raw_all[-1])
+    pdv_v2s_now = float(v2s_raw_all[-1])
+    fair_pdv_now = float(
+        evaluate_pdv_at_spot(
+            prev_spot_now,
+            prev_spot_now,
+            pdv_r1f_now,
+            pdv_r1s_now,
+            pdv_v2f_now,
+            pdv_v2s_now,
+            pdv_now["b0"],
+            pdv_now["b1f"],
+            pdv_now["b1s"],
+            pdv_now["b2f"],
+            pdv_now["b2s"],
+        )
+    )
+
     dx_all = np.full(len(spots_all), np.nan, dtype=float)
     dy_all = np.full(len(vols_all), np.nan, dtype=float)
     if len(spots_all) > 1:
@@ -399,7 +632,9 @@ def compute_fair_vix_asset_model(
         half_life=QUAD_EWM_HALF_LIFE_DAYS,
         peak_window=window_days,
     )
-    w_m2_now, w_m4_now = _resolve_blend_weights(quad["r2"], blend_mode)
+    # Composite blends PDV-4 + EWM Quad only (HAR-RV stays unblended as a standalone signal)
+    w_pdv_now, w_quad_now = _resolve_blend_weights(quad["r2"], blend_mode, pdv_now["r2"])
+    w_m2_now, w_m4_now = w_pdv_now, w_quad_now
 
     # Scatter dots remain the recent window_days (60D) sessions anchored against current 60D peak
     w_df = df_fit.iloc[-window_days:] if len(df_fit) >= window_days else df_fit
@@ -415,7 +650,7 @@ def compute_fair_vix_asset_model(
         "dd_pct": [round(float(v), 2) for v in dd_scatter],
     }
 
-    # Build smooth 50-point curve grid spanning below min spot up to the 60D peak
+    # Build smooth 50-point Quad curve spanning below min spot up to the 60D peak
     # (stopping at peak_60d avoids a flat clamped dd=0% tail past the rightmost dot)
     s_min = float(np.min(spot_arr)) * 0.97
     s_max = peak_60d
@@ -424,12 +659,39 @@ def compute_fair_vix_asset_model(
     grid_quad = quad["c0"] + quad["c1"] * grid_dd + quad["c2"] * (grid_dd ** 2)
     band_pad = max(1.0, quad["std_err"])
 
+    # Build smooth 40-point Live PDV curve bounded to a realistic 1-day excursion around prior close
+    imp_daily = float(vols_all[-1]) / math.sqrt(252.0) / 100.0
+    min_pct = 0.055 if "ndx" in spot_col.lower() else 0.045
+    half_pct = max(min_pct, min(0.08, 3.0 * imp_daily))
+    p_lo = max(s_min, prev_spot_now * (1.0 - half_pct))
+    p_hi = min(s_max, prev_spot_now * (1.0 + half_pct))
+    if p_hi - p_lo < prev_spot_now * 0.01:
+        p_lo = max(s_min * 0.98, p_hi * 0.96)
+    pdv_grid_spot = np.linspace(p_lo, p_hi, 40)
+    pdv_grid_vix = evaluate_pdv_at_spot(
+        pdv_grid_spot,
+        prev_spot_now,
+        pdv_r1f_now,
+        pdv_r1s_now,
+        pdv_v2f_now,
+        pdv_v2s_now,
+        pdv_now["b0"],
+        pdv_now["b1f"],
+        pdv_now["b1s"],
+        pdv_now["b2f"],
+        pdv_now["b2s"],
+    )
+    pdv_ret_pct = (pdv_grid_spot / max(prev_spot_now, 1e-6) - 1.0) * 100.0
+
     curve = {
         "spot": [round(float(v), 2) for v in grid_spot],
         "dd_pct": [round(float(v), 2) for v in grid_dd],
         "vix_quad": [round(float(v), 2) for v in grid_quad],
         "upper_1sd": [round(float(v + band_pad), 2) for v in grid_quad],
         "lower_1sd": [round(float(max(5.0, v - band_pad)), 2) for v in grid_quad],
+        "pdv_spot": [round(float(v), 2) for v in pdv_grid_spot],
+        "vix_pdv": [round(float(v), 2) for v in pdv_grid_vix],
+        "pdv_ret_pct": [round(float(v), 2) for v in pdv_ret_pct],
     }
 
     # Precompute point-in-time daily parameters (entering day d_i, strictly using dates < d_i)
@@ -447,13 +709,22 @@ def compute_fair_vix_asset_model(
             half_life=QUAD_EWM_HALF_LIFE_DAYS,
             peak_window=window_days,
         )
-        wm2_i, wm4_i = _resolve_blend_weights(q_i["r2"], blend_mode)
+        p_start = max(0, i - 252)
+        pdv_i = fit_pdv_model(
+            r1f_all[p_start:i],
+            r1s_all[p_start:i],
+            s2f_all[p_start:i],
+            s2s_all[p_start:i],
+            vols_all[p_start:i],
+        )
+        w_pdv_i, w_quad_i = _resolve_blend_weights(q_i["r2"], blend_mode, pdv_i["r2"])
+        wm2_i, wm4_i = w_pdv_i, w_quad_i
 
         e_rv_i = float(exp_rv_all.loc[prior_d]) if pd.notna(exp_rv_all.loc[prior_d]) else exp_rv_now
         rv21_prior = float(rv21_fit_arr[i - 1]) if np.isfinite(rv21_fit_arr[i - 1]) else e_rv_i
         if vrp_mode == "fixed":
             vrp_i = float(vrp_fixed_pts)
-            fair_m2_i = e_rv_i + vrp_i
+            fair_har_i = e_rv_i + vrp_i
         else:
             h_start = max(0, i - 252)
             har_i = fit_har_rv(
@@ -466,14 +737,30 @@ def compute_fair_vix_asset_model(
                 ew5_p = float(ew5_fit_arr[i - 1]) if np.isfinite(ew5_fit_arr[i - 1]) else e_rv_i
                 ew21_p = float(ew21_fit_arr[i - 1]) if np.isfinite(ew21_fit_arr[i - 1]) else e_rv_i
                 ew_dn10_p = float(ew_dn10_fit_arr[i - 1]) if np.isfinite(ew_dn10_fit_arr[i - 1]) else e_rv_i
-                fair_m2_i = max(
+                fair_har_i = max(
                     8.0,
                     har_i["a"] + har_i["b_ew5"] * ew5_p + har_i["b_ew21"] * ew21_p + har_i["b_dn10"] * ew_dn10_p,
                 )
-                vrp_i = fair_m2_i - rv21_prior
+                vrp_i = fair_har_i - rv21_prior
             else:
                 vrp_i = DEFAULT_VRP_PTS
-                fair_m2_i = e_rv_i + vrp_i
+                fair_har_i = e_rv_i + vrp_i
+
+        fair_pdv_prior_i = float(
+            evaluate_pdv_at_spot(
+                spots_all[i - 1],
+                spots_all[i - 1],
+                r1f_raw_all[i - 1],
+                r1s_raw_all[i - 1],
+                v2f_raw_all[i - 1],
+                v2s_raw_all[i - 1],
+                pdv_i["b0"],
+                pdv_i["b1f"],
+                pdv_i["b1s"],
+                pdv_i["b2f"],
+                pdv_i["b2s"],
+            )
+        )
 
         beta_slope = None
         beta_intercept = None
@@ -498,21 +785,35 @@ def compute_fair_vix_asset_model(
             "c1": round(q_i["c1"], 4),
             "c2": round(q_i["c2"], 5),
             "quad_r2": round(q_i["r2"], 4),
+            "prev_spot": round(float(spots_all[i - 1]), 2),
+            "pdv_r1f": round(float(r1f_raw_all[i - 1]), 7),
+            "pdv_r1s": round(float(r1s_raw_all[i - 1]), 7),
+            "pdv_v2f": round(float(v2f_raw_all[i - 1]), 9),
+            "pdv_v2s": round(float(v2s_raw_all[i - 1]), 9),
+            "pdv_b0": round(pdv_i["b0"], 4),
+            "pdv_b1f": round(pdv_i["b1f"], 6),
+            "pdv_b1s": round(pdv_i["b1s"], 6),
+            "pdv_b2f": round(pdv_i["b2f"], 5),
+            "pdv_b2s": round(pdv_i["b2s"], 5),
+            "pdv_r2": round(pdv_i["r2"], 4),
+            "fair_pdv": round(fair_pdv_prior_i, 2),
+            "fair_har": round(fair_har_i, 2),
+            "fair_m2": round(fair_har_i, 2),
+            "w_pdv": round(w_pdv_i, 4),
+            "w_quad": round(w_quad_i, 4),
+            "w_m2": round(wm2_i, 4),
+            "w_m4": round(wm4_i, 4),
             "rv_5d": round(float(rv5_all.loc[prior_d]) if pd.notna(rv5_all.loc[prior_d]) else e_rv_i, 2),
             "rv_10d": round(float(rv10_all.loc[prior_d]) if pd.notna(rv10_all.loc[prior_d]) else e_rv_i, 2),
             "rv_21d": round(rv21_prior, 2),
             "expected_rv": round(e_rv_i, 2),
             "vrp_base": round(vrp_i, 2),
-            "fair_m2": round(fair_m2_i, 2),
-            "w_m2": round(wm2_i, 4),
-            "w_m4": round(wm4_i, 4),
         }
         if beta_slope is not None and beta_intercept is not None:
             entry["beta_slope"] = round(beta_slope, 4)
             entry["beta_intercept"] = round(beta_intercept, 4)
         daily_params[d_str] = entry
 
-    # Include next-session (today live) params under key "__live__" as well as today_et if known
     return {
         "spot_col": spot_col,
         "vol_col": vol_col,
@@ -535,13 +836,28 @@ def compute_fair_vix_asset_model(
         "har_b_dn10": round(float(har_now["b_dn10"]), 4),
         "vrp_base": round(vrp_base_now, 2),
         "vrp_mode": vrp_mode,
+        "fair_har": round(fair_m2_now, 2),
         "fair_m2": round(fair_m2_now, 2),
+        "prev_spot": round(prev_spot_now, 2),
+        "pdv_r1f": round(pdv_r1f_now, 7),
+        "pdv_r1s": round(pdv_r1s_now, 7),
+        "pdv_v2f": round(pdv_v2f_now, 9),
+        "pdv_v2s": round(pdv_v2s_now, 9),
+        "pdv_b0": round(pdv_now["b0"], 4),
+        "pdv_b1f": round(pdv_now["b1f"], 6),
+        "pdv_b1s": round(pdv_now["b1s"], 6),
+        "pdv_b2f": round(pdv_now["b2f"], 5),
+        "pdv_b2s": round(pdv_now["b2s"], 5),
+        "pdv_r2": round(float(pdv_now["r2"]), 4),
+        "fair_pdv": round(fair_pdv_now, 2),
         "peak_60d": round(quad["peak"], 2),
         "c0": round(quad["c0"], 4),
         "c1": round(quad["c1"], 4),
         "c2": round(quad["c2"], 5),
         "quad_r2": round(quad["r2"], 4),
         "quad_std": round(quad["std_err"], 2),
+        "w_pdv": round(w_pdv_now, 4),
+        "w_quad": round(w_quad_now, 4),
         "w_m2": round(w_m2_now, 4),
         "w_m4": round(w_m4_now, 4),
         "blend_mode": blend_mode,
@@ -559,7 +875,7 @@ def evaluate_live_fair_vix(
     overvix_resid: float = 0.0,
     threshold_pts: float = 2.0,
 ) -> Dict[str, Any]:
-    """Evaluate real-time Composite Fair VIX, Valuation Gap, Rule-of-16 diagnostics, and Sticky Vol flag."""
+    """Evaluate real-time Composite Fair VIX (PDV-4 + EWM Quad), standalone HAR-RV signal, Valuation Gap, and Sticky Vol flag."""
     if not model_pack or not spot_val or spot_val <= 0 or not vol_val or vol_val <= 0:
         return {}
 
@@ -567,23 +883,43 @@ def evaluate_live_fair_vix(
     c0 = float(model_pack.get("c0", vol_val))
     c1 = float(model_pack.get("c1", 0.0))
     c2 = float(model_pack.get("c2", 0.0))
-    fair_m2 = float(model_pack.get("fair_m2", vol_val))
-    w_m2 = float(model_pack.get("w_m2", 0.5))
-    w_m4 = float(model_pack.get("w_m4", 0.5))
+    fair_har = float(model_pack.get("fair_har", model_pack.get("fair_m2", vol_val)))
+    w_pdv = float(model_pack.get("w_pdv", model_pack.get("w_m2", 0.5)))
+    w_quad = float(model_pack.get("w_quad", model_pack.get("w_m4", 0.5)))
     rv_5d = float(model_pack.get("rv_5d", 16.0))
     rv_10d = float(model_pack.get("rv_10d", 16.0))
     rv_21d = float(model_pack.get("rv_21d", 16.0))
     exp_rv = float(model_pack.get("expected_rv", rv_21d))
     vrp_base = float(model_pack.get("vrp_base", DEFAULT_VRP_PTS))
 
+    prev_spot = float(model_pack.get("prev_spot", 0.0) or 0.0)
+    if prev_spot > 0 and "pdv_b0" in model_pack:
+        fair_pdv = float(
+            evaluate_pdv_at_spot(
+                float(spot_val),
+                prev_spot,
+                float(model_pack.get("pdv_r1f", 0.0)),
+                float(model_pack.get("pdv_r1s", 0.0)),
+                float(model_pack.get("pdv_v2f", 0.0)),
+                float(model_pack.get("pdv_v2s", 0.0)),
+                float(model_pack.get("pdv_b0", vol_val)),
+                float(model_pack.get("pdv_b1f", 0.0)),
+                float(model_pack.get("pdv_b1s", 0.0)),
+                float(model_pack.get("pdv_b2f", 0.0)),
+                float(model_pack.get("pdv_b2s", 0.0)),
+            )
+        )
+    else:
+        fair_pdv = float(model_pack.get("fair_pdv", fair_har))
+
     dd_now = max(0.0, (peak - float(spot_val)) / peak * 100.0) if peak > 0 else 0.0
     fair_m4 = c0 + c1 * dd_now + c2 * (dd_now ** 2)
-    composite = w_m2 * fair_m2 + w_m4 * fair_m4
+    composite = w_pdv * fair_pdv + w_quad * fair_m4
 
     gap_pts = float(vol_val) - composite
     gap_pct = (gap_pts / composite * 100.0) if composite > 0 else 0.0
-    band_low = min(fair_m2, fair_m4)
-    band_high = max(fair_m2, fair_m4)
+    band_low = min(fair_pdv, fair_m4)
+    band_high = max(fair_pdv, fair_m4)
 
     if gap_pts >= threshold_pts:
         regime = "RICH"
@@ -602,7 +938,9 @@ def evaluate_live_fair_vix(
 
     return {
         "combined": round(composite, 2),
-        "fair_m2_rv_vrp": round(fair_m2, 2),
+        "fair_pdv": round(fair_pdv, 2),
+        "fair_har": round(fair_har, 2),
+        "fair_m2_rv_vrp": round(fair_har, 2),
         "fair_m4_quad": round(fair_m4, 2),
         "band_low": round(band_low, 2),
         "band_high": round(band_high, 2),
@@ -621,6 +959,17 @@ def evaluate_live_fair_vix(
         "vrp_live": round(vrp_live, 2),
         "vrp_mode": model_pack.get("vrp_mode", "auto"),
         "rv_method": model_pack.get("rv_method", "Close-to-Close"),
+        "prev_spot": round(prev_spot, 2),
+        "pdv_r1f": model_pack.get("pdv_r1f", 0.0),
+        "pdv_r1s": model_pack.get("pdv_r1s", 0.0),
+        "pdv_v2f": model_pack.get("pdv_v2f", 0.0),
+        "pdv_v2s": model_pack.get("pdv_v2s", 0.0),
+        "pdv_b0": model_pack.get("pdv_b0", vol_val),
+        "pdv_b1f": model_pack.get("pdv_b1f", 0.0),
+        "pdv_b1s": model_pack.get("pdv_b1s", 0.0),
+        "pdv_b2f": model_pack.get("pdv_b2f", 0.0),
+        "pdv_b2s": model_pack.get("pdv_b2s", 0.0),
+        "pdv_r2": round(float(model_pack.get("pdv_r2", 0.0)), 4),
         "peak_60d": round(peak, 2),
         "drawdown_pct": round(dd_now, 2),
         "quad_c0": round(c0, 2),
@@ -628,8 +977,10 @@ def evaluate_live_fair_vix(
         "quad_c2": round(c2, 4),
         "quad_r2": round(float(model_pack.get("quad_r2", 0.0)), 4),
         "quad_std": round(float(model_pack.get("quad_std", 1.5)), 2),
-        "w_m2": round(w_m2, 2),
-        "w_m4": round(w_m4, 2),
+        "w_pdv": round(w_pdv, 2),
+        "w_quad": round(w_quad, 2),
+        "w_m2": round(w_pdv, 2),
+        "w_m4": round(w_quad, 2),
         "blend_mode": model_pack.get("blend_mode", "r2_weighted"),
         "implied_daily_move_pct": round(imp_daily_move_pct, 2),
         "realized_daily_move_pct": round(real_daily_move_pct, 2),
