@@ -1218,6 +1218,17 @@ function getHistoricalDotHoverTemplate(assetLabel, volLabel) {
          `<span style="color:${color};font-size:10px">${hint}</span><extra></extra>`;
 }
 
+function getFairVixHistoricalDotHoverTemplate(assetLbl, volLbl) {
+  const hint = (spotVolClickAction === 'load')
+    ? '👉 Click to Load 1m Day Archive'
+    : '👉 Click to Anchor at Prev Day Close';
+  const color = (spotVolClickAction === 'load') ? '#FBBF24' : '#00E5FF';
+  return `<b>%{text}</b><br>` +
+         `${assetLbl}: <b>%{x:,.2f}</b> (-%{customdata:.2f}% DD)<br>` +
+         `${volLbl}: <b>%{y:.2f}</b><br>` +
+         `<span style="color:${color};font-size:10px">${hint}</span><extra></extra>`;
+}
+
 function setupSpotVolClickSwitch() {
   if (btnSpotVolClickAnchor) {
     btnSpotVolClickAnchor.addEventListener('click', () => switchSpotVolClickAction('anchor'));
@@ -1243,7 +1254,10 @@ function switchSpotVolClickAction(action) {
     const isNdx = (currentAssetPair === 'NDX');
     const assetLabel = isNdx ? 'NDX' : 'SPX';
     const volLabel = isNdx ? 'VXN' : 'VIX';
-    Plotly.restyle('overvix-chart', { hovertemplate: getHistoricalDotHoverTemplate(assetLabel, volLabel) }, [0]);
+    const tmpl = (currentOvervixChartMode === 'fair')
+      ? getFairVixHistoricalDotHoverTemplate(assetLabel, volLabel)
+      : getHistoricalDotHoverTemplate(assetLabel, volLabel);
+    Plotly.restyle('overvix-chart', { hovertemplate: tmpl }, [0]);
   }
 }
 
@@ -1971,9 +1985,11 @@ function attachOvervixChartClickListener() {
     const curveNum = pt.curveNumber;
     lastOvervixClickTimestamp = Date.now();
 
-    // 1. Session Close Beacon (Trace 5) OR final point of Intraday Path (Trace 4 tip)
-    const trailLen = (cachedTrail && cachedTrail.x) ? cachedTrail.x.length : 0;
-    const isBeacon = (curveNum === 5) || (curveNum === 4 && pt.pointIndex !== undefined && pt.pointIndex >= trailLen - 1);
+    // 1. Session Close Beacon (Trace 5) OR Composite Fair diamond in Fair mode (Trace 6) OR final point of Intraday Path (Trace 4 tip)
+    const trailLen = (chartEl.data && chartEl.data[4] && Array.isArray(chartEl.data[4].x))
+      ? chartEl.data[4].x.length
+      : ((cachedTrail && cachedTrail.x) ? cachedTrail.x.length : 0);
+    const isBeacon = (curveNum === 5) || (curveNum === 6 && currentOvervixChartMode === 'fair') || (curveNum === 4 && pt.pointIndex !== undefined && pt.pointIndex >= trailLen - 1);
 
     if (isBeacon) {
       setCorrAnchor('prior_close');
@@ -5724,7 +5740,7 @@ function renderFairVixScatterChart(bootstrap) {
         line: { color: isNdx ? '#9333EA' : '#B39F50', width: 0.75 }
       },
       hoverlabel: darkHoverlabel,
-      hovertemplate: `<b>%{text}</b><br>${assetLbl}: <b>%{x:,.2f}</b> (-%{customdata:.2f}% DD)<br>${volLbl}: <b>%{y:.2f}</b><extra></extra>`,
+      hovertemplate: getFairVixHistoricalDotHoverTemplate(assetLbl, volLbl),
       visible: true
     },
     // 1: 60D Quadratic ±1σ Band
@@ -5769,7 +5785,7 @@ function renderFairVixScatterChart(bootstrap) {
       line: { color: '#00E5FF', width: 1.8 },
       marker: { color: '#00E5FF', size: 3.5, opacity: 0.8 },
       hoverlabel: darkHoverlabel,
-      hovertemplate: `<b>%{text}</b><br>${assetLbl}: <b>%{x:,.2f}</b><br>${volLbl}: <b>%{y:.2f}</b><extra></extra>`,
+      hovertemplate: `<b>%{text}</b><br>${assetLbl}: <b>%{x:,.2f}</b><br>${volLbl}: <b>%{y:.2f}</b><br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Residual Monitor</span><extra></extra>`,
       visible: true
     },
     // 5: Live / Session Vol Beacon
@@ -5780,7 +5796,7 @@ function renderFairVixScatterChart(bootstrap) {
       name: `Live ${volLbl} (${liveVol ? liveVol.toFixed(2) : '--'})`,
       marker: { color: '#00E5FF', size: 13, line: { color: '#FFFFFF', width: 2 } },
       hoverlabel: darkHoverlabel,
-      hovertemplate: `<b>Live ${volLbl}</b>: %{y:.2f} @ ${assetLbl} %{x:,.2f}<br>Composite Fair: <b>${typeof fvLive.combined === 'number' ? fvLive.combined.toFixed(2) : '--'}</b><extra></extra>`,
+      hovertemplate: `<b>Live ${volLbl}</b>: %{y:.2f} @ ${assetLbl} %{x:,.2f}<br>Composite Fair: <b>${typeof fvLive.combined === 'number' ? fvLive.combined.toFixed(2) : '--'}</b><br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`,
       visible: Boolean(liveSpot && liveVol)
     },
     // 6: Composite Fair Target Marker at Live Spot
@@ -5791,7 +5807,7 @@ function renderFairVixScatterChart(bootstrap) {
       name: `Composite Fair (${typeof fvLive.combined === 'number' ? fvLive.combined.toFixed(2) : '--'})`,
       marker: { color: '#F59E0B', size: 12, symbol: 'diamond', line: { color: '#0F172A', width: 1.8 } },
       hoverlabel: darkHoverlabel,
-      hovertemplate: `<b>Composite Fair ${volLbl}</b>: %{y:.2f}<br>Gap: <b>${typeof fvLive.gap_pts === 'number' ? (fvLive.gap_pts >= 0 ? '+' : '') + fvLive.gap_pts.toFixed(2) : '--'} pts (${fvLive.regime || 'FAIR'})</b><extra></extra>`,
+      hovertemplate: `<b>Composite Fair ${volLbl}</b>: %{y:.2f}<br>Gap: <b>${typeof fvLive.gap_pts === 'number' ? (fvLive.gap_pts >= 0 ? '+' : '') + fvLive.gap_pts.toFixed(2) : '--'} pts (${fvLive.regime || 'FAIR'})</b><br><span style="color:#00E5FF;font-size:10px">👉 Click to Anchor Latest</span><extra></extra>`,
       visible: Boolean(liveSpot && typeof fvLive.combined === 'number')
     }
   ];
@@ -5837,7 +5853,7 @@ function renderFairVixScatterChart(bootstrap) {
     showlegend: true
   };
 
-  Plotly.newPlot('overvix-chart', traces, layout, { responsive: true, displayModeBar: false });
+  Plotly.newPlot('overvix-chart', traces, layout, { responsive: true, displayModeBar: false }).then(attachOvervixChartClickListener);
 }
 
 function setupOvervixModeTabs() {
@@ -6074,7 +6090,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
   const fairPtDailyArr = [];
   const stickyX = [];
   const stickyY = [];
-  const stickyCustom = [];
+  const stickyLineByIdx = {};
 
   const n = times.length;
   let curDay = '';
@@ -6163,7 +6179,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     if (cRes !== null && cRes > 0 && ovRes > 0 && sPct > 0 && vVal !== null) {
       stickyX.push(tStr);
       stickyY.push(Number(cRes.toFixed(2)));
-      stickyCustom.push([sPct.toFixed(2), cRes.toFixed(2), ovRes.toFixed(2)]);
+      stickyLineByIdx[i] = `<br><span style="color:#FF5370;font-weight:bold">🔥 Sticky Vol Confluence</span> (${assetLabel}: +${sPct.toFixed(2)}% | Comp Res: +${cRes.toFixed(2)} pts | ${ovLabel}: +${ovRes.toFixed(2)} pts)`;
     }
   }
 
@@ -6253,7 +6269,8 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       : '-',
     (typeof volPtDailyArr[i] === 'number' && !isNaN(volPtDailyArr[i]))
       ? ((volPtDailyArr[i] >= 0 ? '+' : '') + volPtDailyArr[i].toFixed(2))
-      : '-'
+      : '-',
+    stickyLineByIdx[i] || ""
   ]);
 
   if (currentFvDisplayMode === 'beta') {
@@ -6308,7 +6325,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       xaxis: 'x',
       yaxis: 'y2',
       showlegend: false,
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>${assetLabel}: <b>%{customdata[7]}</b> · ${volLabel}: <b>%{customdata[0]}</b> (%{customdata[8]} pts)<br>Comp Fair: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)<extra></extra>`
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>${assetLabel}: <b>%{customdata[7]}</b> · ${volLabel}: <b>%{customdata[0]}</b> (%{customdata[8]} pts)<br>Comp Fair: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)%{customdata[9]}<extra></extra>`
     });
   } else {
     fvSegs.forEach((seg, sIdx) => {
@@ -6380,7 +6397,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
       xaxis: 'x',
       yaxis: 'y',
       showlegend: false,
-      hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>Live ${volLabel}: <b>%{customdata[0]}</b> · Comp Fair: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)<br>HAR-RV: <b>%{customdata[2]}</b> · EWM Quad: <b>%{customdata[3]}</b><extra></extra>`
+      hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>Live ${volLabel}: <b>%{customdata[0]}</b> · Comp Fair: <b>%{customdata[1]}</b> (Gap: <b>%{customdata[4]} pts</b>)<br>HAR-RV: <b>%{customdata[2]}</b> · EWM Quad: <b>%{customdata[3]}</b>%{customdata[9]}<extra></extra>`
     });
   }
 
@@ -6426,7 +6443,7 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     xaxis: 'x',
     yaxis: 'y3',
     showlegend: false,
-    hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>Comp Residual: <b>%{customdata[4]} pts</b> · ${ovLabel}: <b>%{customdata[5]} pts</b><br>Live ${volLabel}: <b>%{customdata[0]}</b> · Fair: <b>%{customdata[1]}</b><extra></extra>`
+    hovertemplate: `<b>%{x|${timeHoverFmt}}</b>%{customdata[6]}<br>Comp Residual: <b>%{customdata[4]} pts</b> · ${ovLabel}: <b>%{customdata[5]} pts</b><br>Live ${volLabel}: <b>%{customdata[0]}</b> · Fair: <b>%{customdata[1]}</b>%{customdata[9]}<extra></extra>`
   });
 
   traces.push({
@@ -6444,13 +6461,12 @@ function renderFairVixMonitorChart(tf = currentFvTf) {
     traces.push({
       x: stickyX,
       y: stickyY,
-      customdata: stickyCustom,
       name: 'Sticky Vol (Rally + Dual +)',
       mode: 'markers',
       marker: { color: '#FF5370', size: 5.5, opacity: 0.9 },
       xaxis: 'x',
       yaxis: 'y3',
-      hovertemplate: `<b>🔥 Sticky Vol Confluence</b><br>${assetLabel} %: +%{customdata[0]}% | Comp Res: +%{customdata[1]} pts | ${ovLabel}: +%{customdata[2]} pts<extra></extra>`
+      hoverinfo: 'skip'
     });
   }
 
